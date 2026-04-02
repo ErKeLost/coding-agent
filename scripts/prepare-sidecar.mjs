@@ -71,14 +71,4 @@ for (const pkg of nativePackages) {
   console.log(`  ✓ ${pkg}`);
 }
 
-// 5. Copy .env so standalone server.js can load API keys at runtime.
-// Next.js standalone server reads .env files from its working directory.
-const envFile = path.join(root, ".env");
-if (existsSync(envFile)) {
-  await cp(envFile, path.join(target, ".env"));
-  console.log("  ✓ .env");
-} else {
-  console.warn("  ⚠ .env not found – API keys may be missing at runtime");
-}
-
 console.log("✓ Next.js server ready at src-tauri/next-server/");

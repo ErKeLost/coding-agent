@@ -654,7 +654,8 @@ async fn search_workspace_content(
   .map_err(|err| format!("failed to search workspace content: {err}"))?
 }
 
-/// Read runtime config from ~/.coding-agent/config.json and return relevant env vars.
+/// Read runtime config from ~/.coding-agent/config.json and ~/.coding-agent/.env
+/// and return relevant env vars. The key is NEVER bundled in the app.
 #[cfg(not(debug_assertions))]
 fn read_runtime_config() -> std::collections::HashMap<String, String> {
   let mut map = std::collections::HashMap::new();
@@ -662,18 +663,36 @@ fn read_runtime_config() -> std::collections::HashMap<String, String> {
     Ok(h) => PathBuf::from(h),
     Err(_) => return map,
   };
-  let config_path = home.join(".coding-agent").join("config.json");
-  let Ok(content) = std::fs::read_to_string(&config_path) else {
-    return map;
-  };
-  let Ok(json) = serde_json::from_str::<serde_json::Value>(&content) else {
-    return map;
-  };
-  if let Some(key) = json.get("openrouterApiKey").and_then(|v| v.as_str()) {
-    if !key.is_empty() {
-      map.insert("OPENROUTER_API_KEY".to_string(), key.to_string());
+  let config_dir = home.join(".coding-agent");
+
+  // 1. Read ~/.coding-agent/config.json  {"openrouterApiKey": "sk-or-..."}
+  let config_path = config_dir.join("config.json");
+  if let Ok(content) = std::fs::read_to_string(&config_path) {
+    if let Ok(json) = serde_json::from_str::<serde_json::Value>(&content) {
+      if let Some(key) = json.get("openrouterApiKey").and_then(|v| v.as_str()) {
+        if !key.is_empty() {
+          map.insert("OPENROUTER_API_KEY".to_string(), key.to_string());
+        }
+      }
     }
   }
+
+  // 2. Read ~/.coding-agent/.env  (KEY=value lines, overrides config.json)
+  let dot_env_path = config_dir.join(".env");
+  if let Ok(content) = std::fs::read_to_string(&dot_env_path) {
+    for line in content.lines() {
+      let line = line.trim();
+      if line.is_empty() || line.starts_with('#') { continue; }
+      if let Some((k, v)) = line.split_once('=') {
+        let k = k.trim().to_string();
+        let v = v.trim().trim_matches('"').trim_matches('\'').to_string();
+        if !k.is_empty() && !v.is_empty() {
+          map.insert(k, v);
+        }
+      }
+    }
+  }
+
   map
 }
 
