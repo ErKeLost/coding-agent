@@ -70,5 +70,20 @@ for (const pkg of nativePackages) {
   await cp(src, dest, { recursive: true, force: true });
   console.log(`  ✓ ${pkg}`);
 }
+// 5. Write .env into standalone from environment variables (injected by CI secrets).
+// This lets the bundled app run without users needing to configure anything.
+const envVars = ["OPENROUTER_API_KEY"];
+const envLines = envVars
+  .filter((k) => process.env[k])
+  .map((k) => `${k}=${process.env[k]}`);
+
+if (envLines.length > 0) {
+  const { writeFile } = await import("node:fs/promises");
+  await writeFile(path.join(target, ".env"), envLines.join("\n") + "\n");
+  console.log(`  ✓ .env (${envLines.length} var(s) from environment)`);
+} else {
+  console.warn("  ⚠ No env vars found – API keys will be missing at runtime");
+  console.warn("    Set OPENROUTER_API_KEY before running this script");
+}
 
 console.log("✓ Next.js server ready at src-tauri/next-server/");
