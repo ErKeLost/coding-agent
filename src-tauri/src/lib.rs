@@ -745,6 +745,7 @@ fn wait_for_server(addr: &str, timeout_secs: u64) -> bool {
 pub fn run() {
   tauri::Builder::default()
     .plugin(tauri_plugin_opener::init())
+    .plugin(tauri_plugin_process::init())
     .manage(WorkspaceState(Mutex::new(None)))
     .invoke_handler(tauri::generate_handler![
       load_workspace,
@@ -791,6 +792,22 @@ pub fn run() {
         let server_dir = resource_dir.join("next-server");
         let server_js = server_dir.join("server.js");
 
+        // Show a splash screen immediately while the server starts up so the
+        // user always sees something rather than a blank OS window.
+        let splash_window = WebviewWindowBuilder::new(
+          app,
+          "splashscreen",
+          WebviewUrl::App("splashscreen.html".into()),
+        )
+        .title("Coding Agent")
+        .inner_size(400.0, 280.0)
+        .center(true)
+        .decorations(false)
+        .resizable(false)
+        .always_on_top(true)
+        .build()
+        .ok();
+
         // Spawn Next.js standalone server as a detached background process.
         // We intentionally do not keep the Child handle so it stays alive for
         // the duration of the app process (the OS will reap it on exit).
@@ -824,6 +841,48 @@ pub fn run() {
           server_cmd.env(k, v);
         }
 
+        // Build a CA bundle that includes corporate proxy certificates from the
+        // system keychain so Node.js can verify HTTPS on managed machines
+        // (fixes "unable to get local issuer certificate" on corporate networks).
+        #[cfg(target_os = "macos")]
+        {
+          let ca_file = std::env::temp_dir().join("coding-agent-ca.pem");
+          let mut pem = String::new();
+          // Start with Apple's built-in root bundle
+          if let Ok(s) = std::fs::read_to_string("/etc/ssl/cert.pem") {
+            pem.push_str(&s);
+          }
+          // Append any extra certs installed in the System keychain (e.g. corporate CAs)
+          if let Ok(out) = Command::new("security")
+            .args(["find-certificate", "-a", "-p", "/Library/Keychains/System.keychain"])
+            .output()
+          {
+            if out.status.success() {
+              pem.push_str(&String::from_utf8_lossy(&out.stdout));
+            }
+          }
+          if !pem.is_empty() {
+            if std::fs::write(&ca_file, &pem).is_ok() {
+              server_cmd.env("NODE_EXTRA_CA_CERTS", &ca_file);
+            }
+          }
+        }
+
+        #[cfg(target_os = "linux")]
+        {
+          let linux_ca_paths = [
+            "/etc/ssl/certs/ca-certificates.crt",
+            "/etc/pki/ca-trust/extracted/pem/tls-ca-bundle.pem",
+            "/etc/ssl/cert.pem",
+          ];
+          for ca_path in &linux_ca_paths {
+            if Path::new(ca_path).exists() {
+              server_cmd.env("NODE_EXTRA_CA_CERTS", ca_path);
+              break;
+            }
+          }
+        }
+
         server_cmd
           .spawn()
           .map_err(|e| format!("Failed to spawn Next.js server: {e}"))?;
@@ -842,6 +901,11 @@ pub fn run() {
         .min_inner_size(1080.0, 720.0)
         .resizable(true)
         .build()?;
+
+        // Dismiss the splash screen now that the main window is visible.
+        if let Some(sw) = splash_window {
+          let _ = sw.close();
+        }
       }
 
       Ok(())

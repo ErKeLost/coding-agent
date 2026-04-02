@@ -59,6 +59,7 @@
     "@streamdown/math": "^1.0.1",
     "@streamdown/mermaid": "^1.0.1",
     "@supabase/supabase-js": "^2.98.0",
+    "@tauri-apps/plugin-process": "^2.0.0",
     "@tauri-apps/plugin-updater": "^2.10.0",
     "@xyflow/react": "^12.10.0",
     "ai": "^6.0.49",
