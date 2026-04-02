@@ -654,6 +654,29 @@ async fn search_workspace_content(
   .map_err(|err| format!("failed to search workspace content: {err}"))?
 }
 
+/// Read runtime config from ~/.coding-agent/config.json and return relevant env vars.
+#[cfg(not(debug_assertions))]
+fn read_runtime_config() -> std::collections::HashMap<String, String> {
+  let mut map = std::collections::HashMap::new();
+  let home = match std::env::var("HOME") {
+    Ok(h) => PathBuf::from(h),
+    Err(_) => return map,
+  };
+  let config_path = home.join(".coding-agent").join("config.json");
+  let Ok(content) = std::fs::read_to_string(&config_path) else {
+    return map;
+  };
+  let Ok(json) = serde_json::from_str::<serde_json::Value>(&content) else {
+    return map;
+  };
+  if let Some(key) = json.get("openrouterApiKey").and_then(|v| v.as_str()) {
+    if !key.is_empty() {
+      map.insert("OPENROUTER_API_KEY".to_string(), key.to_string());
+    }
+  }
+  map
+}
+
 /// Find the Node.js (or Bun) runtime binary, checking common macOS/Linux paths.
 #[cfg(not(debug_assertions))]
 fn find_node_binary() -> Option<PathBuf> {
@@ -765,14 +788,24 @@ pub fn run() {
         let log_file2 = log_file.try_clone()
           .map_err(|e| format!("Failed to clone log file handle: {e}"))?;
 
-        std::process::Command::new(&node_bin)
+        // Read runtime config (API keys etc.) from ~/.coding-agent/config.json
+        let runtime_config = read_runtime_config();
+
+        let mut server_cmd = std::process::Command::new(&node_bin);
+        server_cmd
           .arg(&server_js)
           .env("PORT", port.to_string())
           .env("HOSTNAME", "127.0.0.1")
           .env("NODE_ENV", "production")
           .current_dir(&server_dir)
           .stdout(log_file)
-          .stderr(log_file2)
+          .stderr(log_file2);
+
+        for (k, v) in &runtime_config {
+          server_cmd.env(k, v);
+        }
+
+        server_cmd
           .spawn()
           .map_err(|e| format!("Failed to spawn Next.js server: {e}"))?;
 
