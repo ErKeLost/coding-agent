@@ -752,12 +752,27 @@ pub fn run() {
         // Spawn Next.js standalone server as a detached background process.
         // We intentionally do not keep the Child handle so it stays alive for
         // the duration of the app process (the OS will reap it on exit).
+        // Write server logs to ~/Library/Logs/Coding Agent/server.log
+        let log_dir = app.path().home_dir()?
+          .join("Library/Logs/Coding Agent");
+        std::fs::create_dir_all(&log_dir)
+          .map_err(|e| format!("Failed to create log dir: {e}"))?;
+        let log_file = std::fs::OpenOptions::new()
+          .create(true)
+          .append(true)
+          .open(log_dir.join("server.log"))
+          .map_err(|e| format!("Failed to open log file: {e}"))?;
+        let log_file2 = log_file.try_clone()
+          .map_err(|e| format!("Failed to clone log file handle: {e}"))?;
+
         std::process::Command::new(&node_bin)
           .arg(&server_js)
           .env("PORT", port.to_string())
           .env("HOSTNAME", "127.0.0.1")
           .env("NODE_ENV", "production")
           .current_dir(&server_dir)
+          .stdout(log_file)
+          .stderr(log_file2)
           .spawn()
           .map_err(|e| format!("Failed to spawn Next.js server: {e}"))?;
 

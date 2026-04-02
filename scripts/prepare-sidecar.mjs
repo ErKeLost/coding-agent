@@ -48,4 +48,27 @@ if (existsSync(publicDir)) {
   await cp(publicDir, path.join(target, "public"), { recursive: true });
 }
 
+// 4. Explicitly copy native addon packages that Next.js standalone often misses.
+// These packages contain platform-specific .node binaries that are loaded via
+// process.dlopen() and are NOT detected by Next.js static import tracing.
+const nativePackages = [
+  "@anush008/tokenizers",
+  "@anush008/tokenizers-darwin-universal",
+  "@anush008/tokenizers-linux-x64-gnu",
+  "@anush008/tokenizers-linux-arm64-gnu",
+  "onnxruntime-node",
+  "fastembed",
+  "@mastra/fastembed",
+  "@libsql/client",
+];
+
+console.log("Copying native packages…");
+for (const pkg of nativePackages) {
+  const src = path.join(root, "node_modules", pkg);
+  if (!existsSync(src)) continue;
+  const dest = path.join(target, "node_modules", pkg);
+  await cp(src, dest, { recursive: true, force: true });
+  console.log(`  ✓ ${pkg}`);
+}
+
 console.log("✓ Next.js server ready at src-tauri/next-server/");
