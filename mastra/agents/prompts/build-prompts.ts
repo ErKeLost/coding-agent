@@ -57,9 +57,5 @@ export function selectBuildInstructions(model: string | undefined): string {
       ? BUILD_PROMPT_ANTHROPIC
       : BUILD_PROMPT_CODEX;
 
-  if (!normalized.includes('gemini') && !normalized.includes('claude') && !normalized.includes('anthropic')) {
-    return `${BUILD_PROMPT_BASE}\n\n${BUILD_PROMPT_ENV}`;
-  }
-
   return `${BUILD_PROMPT_BASE}\n\n${modelPrompt}\n\n${BUILD_PROMPT_ENV}`;
 }
