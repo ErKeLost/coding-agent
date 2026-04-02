@@ -1,6 +1,7 @@
 import { createTool } from '@mastra/core/tools';
 import z from 'zod';
 import { getWorkspaceForRequest } from '../workspace/local-workspace';
+import { checkCommand } from './command-guard';
 
 const timeoutSchema = z.preprocess(value => {
   if (typeof value === 'string') {
@@ -53,6 +54,23 @@ export const runWorkspaceCommandTool = createTool({
     const normalizedTimeout = input.timeout ?? undefined;
     const normalizedCwd = input.cwd ?? undefined;
 
+    // ── Command guard (Codex-style execpolicy) ───────────────────────────
+    const guard = checkCommand(input.command);
+    if (guard.decision === 'forbidden') {
+      throw new Error(
+        `[COMMAND BLOCKED] ${guard.reason} (matched rule: "${guard.matchedRule}")\n` +
+        `Command was: ${input.command}\n` +
+        `This command is forbidden by the Rovix execution policy. Do not retry it.`
+      );
+    }
+    // "warn" — allow execution but prepend a warning to stdout so the agent
+    // can surface it to the user without the user needing to check logs.
+    const warnPrefix =
+      guard.decision === 'warn'
+        ? `[ROVIX WARNING] ${guard.reason}\n`
+        : '';
+    // ─────────────────────────────────────────────────────────────────────
+
     if (input.background) {
       if (!sandbox.processes) {
         throw new Error('Background processes are not available in this workspace.');
@@ -70,7 +88,7 @@ export const runWorkspaceCommandTool = createTool({
         command: input.command,
         executionTime: Date.now() - startedAt,
         pid: handle.pid,
-        stdout: handle.stdout,
+        stdout: warnPrefix + (handle.stdout ?? ''),
         stderr: handle.stderr,
       };
     }
@@ -93,7 +111,7 @@ export const runWorkspaceCommandTool = createTool({
           ? ('completed' as const)
           : ('failed' as const),
       exitCode: result.exitCode,
-      stdout: result.stdout,
+      stdout: warnPrefix + (result.stdout ?? ''),
       stderr: result.stderr,
       command: result.command ?? input.command,
       executionTime: result.executionTimeMs ?? Date.now() - startedAt,
