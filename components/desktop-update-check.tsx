@@ -2,7 +2,7 @@
 
 import { useEffect, useRef } from "react";
 import { RefreshCwIcon } from "lucide-react";
-import { gooeyToast, updateGooeyToast } from "goey-toast";
+import { gooeyToast } from "goey-toast";
 import { isTauriDesktop } from "@/lib/desktop-workspace";
 
 const UPDATER_ENABLED = process.env.NEXT_PUBLIC_TAURI_UPDATER_ENABLED === "1";
@@ -43,12 +43,12 @@ export function DesktopUpdateCheck() {
                     } else if (event.event === "Progress") {
                       downloaded += event.data.chunkLength;
                       const pct = total > 0 ? Math.round((downloaded / total) * 100) : 0;
-                      updateGooeyToast(toastId, {
+                      gooeyToast.update(toastId, {
                         title: `正在下载更新… ${pct}%`,
                         type: "info",
                       });
                     } else if (event.event === "Finished") {
-                      updateGooeyToast(toastId, {
+                      gooeyToast.update(toastId, {
                         title: "正在安装，即将重启…",
                         type: "info",
                       });
