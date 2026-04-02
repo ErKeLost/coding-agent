@@ -5,11 +5,6 @@ import { redactStreamChunk } from "@mastra/server/server-adapter";
 import { mastra } from "@/mastra";
 import { getModelTuning } from "@/lib/model-tuning";
 import {
-  bindWorkspaceRootToThread,
-  setActiveWorkspaceRoot,
-} from "@/mastra/workspace/local-workspace";
-import {
-  getThreadSession,
   upsertThreadSession,
 } from "@/lib/server/thread-session-store";
 import {
@@ -20,9 +15,8 @@ import {
   type WorkflowTraceStep,
 } from "@/lib/workflow-graph";
 import {
-  extractCurrentInputText,
-  inferContinuationContext,
-} from "@/lib/continuation";
+  buildAgentRequestContext,
+} from "@/lib/server/agent-request-context";
 
 export const runtime = "nodejs";
 const BUILD_AGENT_ID = "build-agent";
@@ -55,12 +49,6 @@ const pickPreferredToolName = (...candidates: Array<string | undefined>) => {
     (candidate) => !isGenericToolName(candidate)
   );
   return specificCandidate ?? normalizedCandidates[0];
-};
-
-const summarizeWorkspaceRoot = (value: string) => {
-  const normalized = value.trim().replace(/\/+$/, "");
-  const segments = normalized.split("/").filter(Boolean);
-  return segments.at(-1) ?? normalized;
 };
 
 type StreamEvent =
@@ -131,7 +119,6 @@ type StreamEvent =
   | {
       type: "stream.event";
       eventName: "session.updated";
-      sandboxId?: string;
       previewUrl?: string;
     }
   | {
@@ -190,46 +177,8 @@ export async function POST(
   if (!messageInput) {
     return NextResponse.json({ error: "message is required" }, { status: 400 });
   }
-
-  const requestContext = new RequestContext();
-  if (payload.requestContext && typeof payload.requestContext === "object") {
-    for (const [key, value] of Object.entries(payload.requestContext)) {
-      requestContext.set(key, value);
-    }
-  }
-  if (payload.model) {
-    requestContext.set("model", payload.model);
-  }
-  if (payload.threadId) {
-    requestContext.set("threadId", payload.threadId);
-    requestContext.set("resourceId", "web");
-  }
-  if (payload.threadId && !requestContext.get("workspaceRoot")) {
-    const existingThread = await getThreadSession(payload.threadId);
-    const persistedWorkspaceRoot =
-      typeof existingThread?.state.workspaceRoot === "string" &&
-      existingThread.state.workspaceRoot.trim()
-        ? existingThread.state.workspaceRoot.trim()
-        : undefined;
-    if (persistedWorkspaceRoot) {
-      requestContext.set("workspaceRoot", persistedWorkspaceRoot);
-    }
-  }
-  const effectiveWorkspaceRoot =
-    typeof requestContext.get("workspaceRoot") === "string"
-      ? requestContext.get("workspaceRoot")
-      : null;
-  if (payload.threadId && effectiveWorkspaceRoot) {
-    await upsertThreadSession({
-      threadId: payload.threadId,
-      subtitle: summarizeWorkspaceRoot(effectiveWorkspaceRoot),
-      state: {
-        workspaceRoot: effectiveWorkspaceRoot,
-      },
-    });
-    bindWorkspaceRootToThread(payload.threadId, effectiveWorkspaceRoot);
-    setActiveWorkspaceRoot(effectiveWorkspaceRoot);
-  }
+  const { requestContext, effectiveWorkspaceRoot } =
+    await buildAgentRequestContext(payload);
   console.info("[workspace-debug] stream-route", {
     threadId: payload.threadId ?? null,
     requestWorkspaceRoot:
@@ -249,23 +198,6 @@ export async function POST(
     return NextResponse.json({ error: `Agent not found: ${agentId}` }, { status: 404 });
   }
   type AgentStreamInput = Parameters<typeof agent.stream>[0];
-  const currentMessageText = extractCurrentInputText(messageInput);
-  const continuationContext = inferContinuationContext(
-    payload.threadId ? await getThreadSession(payload.threadId) : null,
-    currentMessageText
-  );
-  if (continuationContext.isContinuation) {
-    requestContext.set("continuationMode", "resume");
-    if (continuationContext.lastUserGoal) {
-      requestContext.set("continuationLastUserGoal", continuationContext.lastUserGoal);
-    }
-    if (continuationContext.pendingPlanTitle) {
-      requestContext.set("continuationPlanTitle", continuationContext.pendingPlanTitle);
-    }
-    if (continuationContext.pendingPlanStep) {
-      requestContext.set("continuationPlanStep", continuationContext.pendingPlanStep);
-    }
-  }
   type ActiveAgentContext = {
     agentId: string;
     agentName: string;
@@ -283,18 +215,13 @@ export async function POST(
   const extractSessionUpdate = (value: unknown): StreamEvent | null => {
     if (!value || typeof value !== "object") return null;
     const source = value as {
-      result?: { sandboxId?: unknown; previewUrl?: unknown; deploymentUrl?: unknown; url?: unknown };
-      toolResult?: { result?: { sandboxId?: unknown; previewUrl?: unknown; deploymentUrl?: unknown; url?: unknown } };
-      sandboxId?: unknown;
+      result?: { previewUrl?: unknown; deploymentUrl?: unknown; url?: unknown };
+      toolResult?: { result?: { previewUrl?: unknown; deploymentUrl?: unknown; url?: unknown } };
       previewUrl?: unknown;
       deploymentUrl?: unknown;
       url?: unknown;
     };
     const result = source.toolResult?.result ?? source.result ?? source;
-    const sandboxId =
-      typeof result.sandboxId === "string" && result.sandboxId.trim()
-        ? result.sandboxId.trim()
-        : undefined;
     const previewUrl =
       typeof result.previewUrl === "string"
         ? result.previewUrl
@@ -303,11 +230,10 @@ export async function POST(
           : typeof result.url === "string"
             ? result.url
             : undefined;
-    if (!sandboxId && !previewUrl) return null;
+    if (!previewUrl) return null;
     return {
       type: "stream.event",
       eventName: "session.updated",
-      sandboxId,
       previewUrl,
     };
   };
@@ -823,7 +749,6 @@ export async function POST(
   const emittedToolCompletions = new Set<string>();
   let lastSessionStateKey: string | undefined;
   let lastUsageKey: string | undefined;
-  let latestSandboxId: string | undefined;
   let latestPreviewUrl: string | undefined;
   const executionSteps = new Map<string, WorkflowTraceStep>();
   const executionOrder: string[] = [];
@@ -1046,10 +971,9 @@ export async function POST(
       });
     }
     if (event.eventName === "session.updated") {
-      const sessionStateKey = `${event.sandboxId ?? ""}|${event.previewUrl ?? ""}`;
+      const sessionStateKey = `${event.previewUrl ?? ""}`;
       if (sessionStateKey === lastSessionStateKey) return;
       lastSessionStateKey = sessionStateKey;
-      latestSandboxId = event.sandboxId ?? latestSandboxId;
       latestPreviewUrl = event.previewUrl ?? latestPreviewUrl;
     }
     if (event.eventName === "tool.call.progress" && event.toolCallId) {
@@ -1153,7 +1077,9 @@ export async function POST(
     };
     const keys = [
       "model",
-      "sandboxId",
+      "threadId",
+      "resourceId",
+      "workspaceRoot",
       "continuationMode",
       "continuationLastUserGoal",
       "continuationPlanTitle",
@@ -1186,12 +1112,6 @@ export async function POST(
 
           const chunk = redactStreamChunk(value);
           const streamEvents = mapChunkToStreamEvents(chunk);
-          const rawChunk =
-            streamEvents.length > 0
-              ? { ...chunk, streamCanonicalized: true }
-              : chunk;
-
-          enqueueJson(controller, rawChunk);
           for (const event of streamEvents) {
             applyStreamEvent(controller, event);
           }
@@ -1229,7 +1149,6 @@ export async function POST(
               threadId: payload.threadId,
               subtitle: payload.model,
               state: {
-                sandboxId: latestSandboxId,
                 previewUrl: latestPreviewUrl,
                 graph: latestGraph ?? finalGraph,
               },

@@ -6,6 +6,7 @@ import {
   useMemo,
   useRef,
   useState,
+  useSyncExternalStore,
 } from "react";
 import { getUsage } from "tokenlens";
 import type { LanguageModelUsage } from "ai";
@@ -35,45 +36,26 @@ import {
   Attachments,
 } from "@/components/ai-elements/attachments";
 import {
-  ModelSelector,
-  ModelSelectorContent,
-  ModelSelectorEmpty,
-  ModelSelectorGroup,
-  ModelSelectorInput,
-  ModelSelectorItem,
-  ModelSelectorList,
-  ModelSelectorLogo,
-  ModelSelectorLogoGroup,
-  ModelSelectorName,
-  ModelSelectorTrigger,
-} from "@/components/ai-elements/model-selector";
-import {
   PromptInput,
   PromptInputActionAddAttachments,
   PromptInputActionMenu,
   PromptInputActionMenuContent,
   PromptInputActionMenuTrigger,
   PromptInputBody,
-  PromptInputButton,
   PromptInputFooter,
-  type PromptInputMessage,
   PromptInputProvider,
   PromptInputSubmit,
-  PromptInputTextarea,
   PromptInputTools,
   usePromptInputAttachments,
 } from "@/components/ai-elements/prompt-input";
 import { Image } from "@/components/ai-elements/image";
 import { Plan } from "@/components/tool-ui/plan";
 import { AppSidebar } from "@/components/app-sidebar";
-import { CommandCenterDialog } from "@/components/rovix/command-center-dialog";
-import { ShikiFilePreview } from "@/components/rovix/shiki-file-preview";
-import { DiffFilePreview } from "@/components/rovix/diff-file-preview";
 import { FileMentionTextarea } from "@/components/rovix/file-mention-textarea";
 import { WorkspaceSearchDialog } from "@/components/rovix/workspace-search-dialog";
+import { ThemeSettingsPanel } from "@/components/rovix/theme-settings-panel";
 
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
 import {
   Card,
   CardContent,
@@ -92,103 +74,39 @@ import {
   SidebarProvider,
   SidebarTrigger,
 } from "@/components/ui/sidebar";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { cn } from "@/lib/utils";
 import {
-  commitWorkspaceChanges,
-  getStoredWorkspaceRoot,
-  getWorkspaceBranches,
-  isTauriDesktop,
-  loadDesktopWorkspace,
-  pickWorkspaceDirectory,
-  pushWorkspaceBranch,
-  readDesktopWorkspaceFile,
-  setStoredWorkspaceRoot,
-  switchWorkspaceBranch,
-  type DesktopWorkspaceFile,
   type DesktopWorkspaceNode,
-  type DesktopWorkspacePayload,
-  type WorkspaceBranchPayload,
+  setStoredWorkspaceRoot,
 } from "@/lib/desktop-workspace";
 import {
   AppWindowIcon,
-  BellIcon,
-  BotIcon,
   CameraIcon,
-  CornerDownLeftIcon,
   ChevronDownIcon,
   ChevronRightIcon,
-  CircleUserRoundIcon,
-  Code2Icon,
-  ExternalLinkIcon,
-  FileSearchIcon,
   FileCode2Icon,
-  FlaskConicalIcon,
   FolderIcon,
   GitBranchIcon,
   KeyboardIcon,
   LoaderCircleIcon,
-  MessageSquareTextIcon,
   MonitorIcon,
   MousePointer2Icon,
-  PanelLeftIcon,
-  PlusIcon,
-  RefreshCwIcon,
   SearchIcon,
-  Settings2Icon,
   SparklesIcon,
-  SquareTerminalIcon,
-  StopCircleIcon,
-  WandSparklesIcon,
-  ZapIcon,
-  PaperclipIcon,
   UploadIcon,
 } from "lucide-react";
 import { gooeyToast } from "goey-toast";
 
 import {
   type ChatItem,
-  type StreamPayload,
   type ToolStep,
-  createStreamEventBus,
 } from "@/lib/stream-event-bus";
-import type { LocalProcessRecord } from "@/lib/local-process";
-import type { ThreadRecord } from "@/lib/thread-session";
 import {
-  summarizeThreadTitle,
+  summarizeThreadTitle as summarizeThreadTitleFromGraph,
 } from "@/lib/workflow-graph";
-
-const SANDBOX_STORAGE_KEY_PREFIX = "chat-thread-sandbox:";
-const RECENT_THREADS_STORAGE_KEY = "chat-recent-threads";
-const PENDING_NEW_THREAD_STORAGE_KEY = "chat-pending-new-thread";
-
-const getSandboxStorageKey = (threadId: string) =>
-  `${SANDBOX_STORAGE_KEY_PREFIX}${threadId}`;
-
-const mergeRecentThreads = (
-  nextRecord: ThreadRecord,
-  current: ThreadRecord[]
-) => {
-  return [nextRecord, ...current.filter((entry) => entry.id !== nextRecord.id)].slice(0, 16);
-};
-
-const clearThreadLocalState = (
-  threadId: string | null,
-  setSandboxId: (value: string | null) => void
-) => {
-  if (typeof window === "undefined" || !threadId) {
-    setSandboxId(null);
-    return;
-  }
-
-  try {
-    window.localStorage.removeItem(getSandboxStorageKey(threadId));
-  } catch {
-    // Ignore storage cleanup errors.
-  }
-
-  setSandboxId(null);
-};
+import { useDesktopWorkspace } from "@/hooks/use-desktop-workspace";
+import { useThreadSession } from "@/hooks/use-thread-session";
+import { useAgentStream } from "@/hooks/use-agent-stream";
 
 const formatRelativeUpdatedAt = (updatedAt: number) => {
   if (!updatedAt) return "workspace";
@@ -199,11 +117,6 @@ const formatRelativeUpdatedAt = (updatedAt: number) => {
   if (diffHours < 24) return `${diffHours}h ago`;
   const diffDays = Math.floor(diffHours / 24);
   return `${diffDays}d ago`;
-};
-
-const formatProcessUpdatedAt = (updatedAt: string) => {
-  const parsed = Date.parse(updatedAt);
-  return Number.isFinite(parsed) ? formatRelativeUpdatedAt(parsed) : "just now";
 };
 
 const summarizeQueuedSubmission = (submission: QueuedSubmission) => {
@@ -220,22 +133,14 @@ const summarizeWorkspaceRoot = (value: string | null | undefined) => {
   return segments.at(-1) ?? normalized;
 };
 
+const summarizeThreadTitle = (value?: string | null) =>
+  summarizeThreadTitleFromGraph(value ?? "");
+
 const ThreadHistoryLoadingState = () => (
   <div className="flex min-h-[240px] flex-1 items-center justify-center px-6 py-8">
     <LoaderCircleIcon className="size-5 animate-spin text-muted-foreground/70" />
   </div>
 );
-
-const EmptyConversationState = () => (
-  <ConversationEmptyState>
-    <div className="flex h-full w-full items-center justify-center">
-      <div className="app-soft-card flex size-16 items-center justify-center rounded-[20px] shadow-none">
-        <SquareTerminalIcon className="size-6 text-cyan-500 dark:text-cyan-300" />
-      </div>
-    </div>
-  </ConversationEmptyState>
-);
-
 
 const isPlanRecord = (
   value: unknown
@@ -432,120 +337,9 @@ const models = [
 
 ];
 
-const workspaceTabs = ["Main.py", "quantum_core.py", "test_harness.ts"];
-
-const explorerSections = [
-  {
-    label: "Search",
-    items: ["Find in workspace", "Symbol index"],
-  },
-  {
-    label: "Chat",
-    items: ["Active thread", "Queued prompts"],
-  },
-  {
-    label: "Insights",
-    items: ["Runtime health", "Usage"],
-  },
-];
-
-const editorCodeLines = [
-  "import numpy as np",
-  "from qengine.compiler import QuantumCircuit",
-  "",
-  "class Main:",
-  "    def __init__(self, backend: str = \"hybrid\") -> None:",
-  "        self.backend = backend",
-  "        self.circuit = QuantumCircuit(qubits=12)",
-  "",
-  "    def run_simulation(self, depth: int = 4) -> dict[str, float]:",
-  "        entangled_state = self.circuit.prepare_entanglement(depth=depth)",
-  "        optimized = self.circuit.optimize(entangled_state)",
-  "        probabilities = np.abs(optimized.amplitudes) ** 2",
-  "        return {",
-  "            \"backend\": self.backend,",
-  "            \"fidelity\": float(np.max(probabilities)),",
-  "            \"entropy\": float(np.mean(probabilities) * depth),",
-  "        }",
-  "",
-  "if __name__ == \"__main__\":",
-  "    runtime = Main()",
-  "    print(runtime.run_simulation(depth=6))",
-];
-
-const aiPromptSuggestions = ["Refactor", "Document"];
-
-const centralNavItems = [
-  { label: "Search", icon: SearchIcon, active: true },
-  { label: "Chat", icon: MessageSquareTextIcon, active: false },
-  { label: "Insights", icon: SparklesIcon, active: false },
-  { label: "Settings", icon: Settings2Icon, active: false },
-];
-
-const commandActions = [
-  {
-    title: "Generate Unit Test",
-    description: "Create Jest/Enzyme tests for Editor.tsx",
-    icon: FlaskConicalIcon,
-  },
-  {
-    title: "Refactor Code",
-    description: "Simplify hooks and improve readability",
-    icon: WandSparklesIcon,
-  },
-  {
-    title: "Explain current file",
-    description: "Get a summary of architecture and logic",
-    icon: FileSearchIcon,
-  },
-];
-
-const getCommentPrefix = (language: string) => {
-  switch (language) {
-    case "python":
-    case "yaml":
-    case "toml":
-      return "#";
-    case "html":
-      return "<!--";
-    default:
-      return "//";
-  }
-};
-
-const buildRefactorPreview = (content: string, language: string) => {
-  const lines = content.split("\n");
-  const commentPrefix = getCommentPrefix(language);
-  const banner =
-    commentPrefix === "<!--"
-      ? "<!-- Rovix preview: extracted command palette action -->"
-      : `${commentPrefix} Rovix preview: extracted command palette action`;
-
-  const next = [...lines];
-  next.unshift(banner, "");
-
-  const firstLongLine = next.findIndex((line) => line.trim().length > 24);
-  if (firstLongLine >= 0) {
-    next[firstLongLine] = `${next[firstLongLine]} // reviewed`;
-  }
-
-  const insertionIndex = Math.min(next.length, 8);
-  next.splice(
-    insertionIndex,
-    0,
-    "",
-    commentPrefix === "<!--"
-      ? "<!-- ready for unit-test + explain flow -->"
-      : `${commentPrefix} ready for unit-test + explain flow`
-  );
-
-  return next.join("\n");
-};
-
 const createId = () => `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 const createThreadId = () =>
   `thread-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-const BUILD_AGENT_ID = "build-agent";
 const DEFAULT_AGENT_ID = "build-agent";
 const AGENTS = [
   { id: "network-agent", name: "Network Agent" },
@@ -1525,7 +1319,7 @@ const FileTreeNodeItem = ({
           {node.name}
         </button>
         {expanded &&
-          node.children.map((child) => (
+          node.children.map((child: DesktopWorkspaceNode) => (
             <FileTreeNodeItem
               key={child.path}
               node={child}
@@ -1555,31 +1349,6 @@ const FileTreeNodeItem = ({
     </button>
   );
 };
-
-const FileTreeNodes = ({
-  nodes,
-  onSelectFile,
-  selectedPath,
-  depth,
-}: {
-  nodes: DesktopWorkspaceNode[];
-  onSelectFile: (path: string) => void;
-  selectedPath: string | null;
-  depth: number;
-}) => (
-  <div className="space-y-0.5">
-    {nodes.map((node) => (
-      <FileTreeNodeItem
-        key={node.path}
-        node={node}
-        onSelectFile={onSelectFile}
-        selectedPath={selectedPath}
-        depth={depth}
-      />
-    ))}
-  </div>
-);
-// ─────────────────────────────────────────────────────────────────────────────
 
 const PromptInputAttachmentsDisplay = () => {
   const attachments = usePromptInputAttachments();
@@ -1616,234 +1385,87 @@ const logWorkspaceDebug = (label: string, payload?: Record<string, unknown>) => 
 };
 
 export default function Home() {
-  const [items, setItems] = useState<ChatItem[]>([]);
-  const [hasMounted, setHasMounted] = useState(false);
-  const [desktopWorkspace, setDesktopWorkspace] =
-    useState<DesktopWorkspacePayload | null>(null);
-  const [desktopWorkspaceLoading, setDesktopWorkspaceLoading] = useState(false);
-  const [desktopWorkspaceError, setDesktopWorkspaceError] = useState<string | null>(null);
-  const [commandDialogOpen, setCommandDialogOpen] = useState(true);
-  const [workspaceSearchOpen, setWorkspaceSearchOpen] = useState(false);
-  const [previewTab, setPreviewTab] = useState("code");
-  const [activeView, setActiveView] = useState<"chat" | "editor">("chat");
-  const [editorSelectedFile, setEditorSelectedFile] = useState<DesktopWorkspaceFile | null>(null);
-  const [threadId, setThreadId] = useState<string>("");
-  const [recentThreads, setRecentThreads] = useState<ThreadRecord[]>([]);
-  const [workspaceRoot, setWorkspaceRoot] = useState<string | null>(null);
-  const [localProcesses, setLocalProcesses] = useState<LocalProcessRecord[]>([]);
-  const [serviceLogsById, setServiceLogsById] = useState<Record<string, string>>({});
-  const [expandedServiceId, setExpandedServiceId] = useState<string | null>(null);
-  const [servicesLoading, setServicesLoading] = useState(false);
-  const [serviceActionId, setServiceActionId] = useState<string | null>(null);
-  const [hydratedThreadId, setHydratedThreadId] = useState<string | null>(null);
-  const [sandboxId, setSandboxId] = useState<string | null>(null);
-  const [model, setModel] = useState("openrouter/qwen/qwen3.6-plus-preview:free");
-  const [selectedAgent, setSelectedAgent] = useState(DEFAULT_AGENT_ID);
-  const [modelSelectorOpen, setModelSelectorOpen] = useState(false);
-  const [status, setStatus] = useState<
-    "submitted" | "streaming" | "ready" | "error"
-  >("ready");
-  const [error, setError] = useState<string | null>(null);
-  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
-  const [workspaceBranches, setWorkspaceBranches] = useState<WorkspaceBranchPayload | null>(null);
-  const [workspaceBranchLoading, setWorkspaceBranchLoading] = useState(false);
-  const [previewLogs, setPreviewLogs] = useState<
-    Array<{ level: "log" | "warn" | "error"; message: string; timestamp: Date }>
-  >([]);
-  const abortRef = useRef<AbortController | null>(null);
-  const assistantIdRef = useRef<string | null>(null);
-  const [, setStreamingMessageId] = useState<string | null>(null);
+  const hasMounted = useSyncExternalStore(
+    () => () => {},
+    () => true,
+    () => false,
+  );
+  const [activeSection, setActiveSection] = useState<"chat" | "settings">("chat");
+  const [model] = useState("openrouter/qwen/qwen3.6-plus-preview:free");
+  const [selectedAgent] = useState(DEFAULT_AGENT_ID);
   const [reasoningOpenState, setReasoningOpenState] = useState<Record<string, boolean>>({});
   const [toolOpenState, setToolOpenState] = useState<Record<string, boolean>>({});
-  const itemsRef = useRef<ChatItem[]>([]);
   const previousToolStatusesRef = useRef<Record<string, "pending" | "done" | "error">>({});
   const previousThinkingStatusesRef = useRef<Record<string, "pending" | "done">>({});
-  const postToolPendingRef = useRef(false);
-  const [plan, setPlan] = useState<{
-    title: string;
-    todos: Array<{
-      id: string;
-      label: string;
-      status: "pending" | "in_progress" | "completed" | "cancelled";
-      description?: string;
-    }>;
-  } | null>(null);
-  const [queuedSubmissions, setQueuedSubmissions] = useState<QueuedSubmission[]>([]);
-  const dequeuingSubmissionRef = useRef(false);
   const params = useParams();
   const router = useRouter();
   const selectedModelData = models.find((m) => m.id === model);
   const selectedAgentData = AGENTS.find((agent) => agent.id === selectedAgent);
-  const activeThreadRecord = recentThreads.find((entry) => entry.id === threadId);
+  const [threadSessionError, setThreadSessionError] = useState<string | null>(null);
+  const {
+    items,
+    setItems,
+    plan,
+    setPlan,
+    setPreviewUrl,
+    setPreviewLogs,
+    threadId,
+    recentThreads,
+    setRecentThreads,
+    workspaceRoot,
+    setWorkspaceRoot,
+    activeThreadRecord,
+    isHydratingThread,
+    mergeRecentThreads,
+    handleNewThread: createThreadSession,
+    handleSelectThread: selectThreadSession,
+    handleDeleteThread: deleteThreadSession,
+  } = useThreadSession({
+    params,
+    router,
+    setError: setThreadSessionError,
+    createThreadId,
+    serializeItemsForThread,
+    summarizeThreadTitle,
+    summarizeWorkspaceRoot,
+    logWorkspaceDebug,
+    isPlanRecord,
+  });
   const activeWorkspaceLabel = summarizeWorkspaceRoot(
     workspaceRoot ?? activeThreadRecord?.workspaceRoot ?? null
   );
-  const runningLocalProcesses = localProcesses.filter((entry) => entry.status === "running");
-  const visibleLocalProcesses = runningLocalProcesses;
-  const showLocalServicesPanel = hasMounted && visibleLocalProcesses.length > 0;
-  const [pendingNewThreadId, setPendingNewThreadId] = useState<string | null>(null);
-  const isHydratingThread =
-    Boolean(threadId) &&
-    hydratedThreadId !== threadId &&
-    pendingNewThreadId !== threadId;
-  const loadThreadList = useCallback(async () => {
-    try {
-      const response = await fetch("/api/threads?limit=24", { cache: "no-store" });
-      if (!response.ok) return;
-      const payload = (await response.json()) as { threads?: ThreadRecord[] };
-      if (Array.isArray(payload.threads)) {
-        setRecentThreads((prev) => {
-          const next = payload.threads ?? [];
-          if (JSON.stringify(prev) === JSON.stringify(next)) return prev;
-          return next;
-        });
-      }
-    } catch {
-      // Ignore thread list load failures.
-    }
-  }, []);
-
-  const loadLocalProcesses = useCallback(async (options?: { silent?: boolean }) => {
-    if (!options?.silent) {
-      setServicesLoading(true);
-    }
-    try {
-      const response = await fetch("/api/local-processes", { cache: "no-store" });
-      const payload = (await response.json()) as { processes?: LocalProcessRecord[] };
-      if (!response.ok) {
-        throw new Error("Failed to load local services");
-      }
-      setLocalProcesses(Array.isArray(payload.processes) ? payload.processes : []);
-    } catch {
-      // Ignore service refresh failures.
-    } finally {
-      if (!options?.silent) {
-        setServicesLoading(false);
-      }
-    }
-  }, []);
-
-  const loadServiceLogs = useCallback(async (processId: string) => {
-    try {
-      const response = await fetch(`/api/local-processes/${processId}/logs?lines=80`, {
-        cache: "no-store",
-      });
-      const payload = (await response.json()) as { output?: string };
-      if (!response.ok) {
-        throw new Error("Failed to load service logs");
-      }
-      setServiceLogsById((previous) => ({
-        ...previous,
-        [processId]: payload.output ?? "",
-      }));
-    } catch {
-      setServiceLogsById((previous) => ({
-        ...previous,
-        [processId]: "Unable to load logs.",
-      }));
-    }
-  }, []);
+  const {
+    status,
+    error,
+    queuedSubmissionPreview,
+    handleSubmit,
+    handleStop,
+    drainSubmissionQueue,
+  } = useAgentStream({
+    params,
+    model,
+    selectedAgent,
+    selectedModelName: selectedModelData?.name,
+    threadId,
+    workspaceRoot,
+    items,
+    setItems,
+    setRecentThreads,
+    setPreviewUrl,
+    setPreviewLogs,
+    setPlan,
+    summarizeThreadTitle,
+    summarizeWorkspaceRoot,
+    mergeRecentThreads,
+    createId,
+    parseSseEvent,
+    prepareAttachmentForModel,
+    modelSupportsImageInput,
+  });
 
   useEffect(() => {
-    itemsRef.current = items;
-  }, [items]);
-
-  useEffect(() => {
-    setHasMounted(true);
-  }, []);
-
-  useEffect(() => {
-    const onKeyDown = (event: KeyboardEvent) => {
-      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k") {
-        event.preventDefault();
-        setCommandDialogOpen(true);
-      }
-    };
-
-    window.addEventListener("keydown", onKeyDown);
-    return () => window.removeEventListener("keydown", onKeyDown);
-  }, []);
-
-  const isDesktopRuntime = hasMounted && isTauriDesktop();
-
-  const applyDesktopWorkspace = useCallback((payload: DesktopWorkspacePayload) => {
-    logWorkspaceDebug("applyDesktopWorkspace", {
-      rootPath: payload.rootPath,
-      rootName: payload.rootName,
-      activeFile: payload.activeFile?.path ?? null,
-    });
-    setDesktopWorkspace(payload);
-    setDesktopWorkspaceError(null);
-    setWorkspaceRoot(payload.rootPath);
-    setStoredWorkspaceRoot(payload.rootPath);
-  }, []);
-
-  const loadWorkspaceBranches = useCallback(async (path: string) => {
-    if (!isTauriDesktop()) {
-      setWorkspaceBranches(null);
-      return;
-    }
-
-    try {
-      const payload = await getWorkspaceBranches(path);
-      setWorkspaceBranches(payload);
-    } catch {
-      setWorkspaceBranches({
-        hasGit: false,
-        currentBranch: null,
-        branches: [],
-      });
-    }
-  }, []);
-
-  const loadDesktopWorkspaceFromPath = useCallback(
-    async (path: string) => {
-      setDesktopWorkspaceLoading(true);
-      try {
-        const payload = await loadDesktopWorkspace(path);
-        applyDesktopWorkspace(payload);
-        await loadWorkspaceBranches(payload.rootPath);
-      } catch (err) {
-        const message = err instanceof Error ? err.message : "Failed to load workspace";
-        setDesktopWorkspaceError(message);
-      } finally {
-        setDesktopWorkspaceLoading(false);
-      }
-    },
-    [applyDesktopWorkspace, loadWorkspaceBranches]
-  );
-
-  useEffect(() => {
-    if (!isDesktopRuntime || recentThreads.length === 0) return;
-    const storedRoot = getStoredWorkspaceRoot();
-    if (!storedRoot) return;
-    logWorkspaceDebug("restoreStoredWorkspaceRoot", { storedRoot, recentThreads: recentThreads.length });
-    void loadDesktopWorkspaceFromPath(storedRoot);
-  }, [isDesktopRuntime, loadDesktopWorkspaceFromPath, recentThreads.length]);
-
-  useEffect(() => {
-    void loadLocalProcesses();
-    const timer = window.setInterval(() => {
-      void loadLocalProcesses({ silent: true });
-    }, 5000);
-    return () => window.clearInterval(timer);
-  }, [loadLocalProcesses]);
-
-  useEffect(() => {
-    if (!expandedServiceId) return;
-    void loadServiceLogs(expandedServiceId);
-    const timer = window.setInterval(() => {
-      void loadServiceLogs(expandedServiceId);
-    }, 3000);
-    return () => window.clearInterval(timer);
-  }, [expandedServiceId, loadServiceLogs]);
-
-  useEffect(() => {
-    if (!expandedServiceId) return;
-    if (!visibleLocalProcesses.some((process) => process.id === expandedServiceId)) {
-      setExpandedServiceId(null);
-    }
-  }, [expandedServiceId, visibleLocalProcesses]);
+    void drainSubmissionQueue();
+  }, [drainSubmissionQueue]);
 
   const roundSummaryByFirstActivityId = useMemo(() => {
     const summary = new Map<string, string>();
@@ -1854,6 +1476,7 @@ export default function Home() {
       run: { pending: 0, done: 0, error: 0 },
       search: { pending: 0, done: 0, error: 0 },
       plan: { pending: 0, done: 0, error: 0 },
+      desktop: { pending: 0, done: 0, error: 0 },
       delegate: { pending: 0, done: 0, error: 0 },
       other: { pending: 0, done: 0, error: 0 },
     });
@@ -1870,6 +1493,7 @@ export default function Home() {
         "run",
         "search",
         "plan",
+        "desktop",
         "delegate",
         "other",
       ];
@@ -1879,6 +1503,7 @@ export default function Home() {
         run: "运行",
         search: "搜索",
         plan: "计划",
+        desktop: "桌面",
         delegate: "委托",
         other: "处理",
       };
@@ -1969,278 +1594,18 @@ export default function Home() {
     });
   }, [items]);
 
+  const activeError = error ?? threadSessionError;
+
   useEffect(() => {
-    if (!error) return;
-    const summary = summarizeUiError(error);
+    if (!activeError) return;
+    const summary = summarizeUiError(activeError);
     gooeyToast.error(`Request failed: ${summary}`, {
       borderColor: "#fca5a5",
       fillColor: "#fff5f5",
       spring: false,
       duration: 3600,
     });
-  }, [error]);
-
-  useEffect(() => {
-    void loadThreadList();
-  }, [loadThreadList]);
-
-  useEffect(() => {
-    const rawId = params?.id;
-    const routeId = Array.isArray(rawId) ? rawId[0] : rawId;
-    if (routeId && typeof routeId === "string") {
-      setThreadId(routeId);
-    }
-  }, [params]);
-
-  useEffect(() => {
-    try {
-      const rawThreads = window.localStorage.getItem(RECENT_THREADS_STORAGE_KEY);
-      if (rawThreads) {
-        const parsedThreads = JSON.parse(rawThreads) as unknown;
-        if (Array.isArray(parsedThreads)) {
-          setRecentThreads(parsedThreads as ThreadRecord[]);
-        }
-      }
-
-      const pendingThread = window.localStorage.getItem(PENDING_NEW_THREAD_STORAGE_KEY);
-      if (pendingThread) {
-        setPendingNewThreadId(pendingThread);
-      }
-    } catch {
-      // Ignore storage errors during hydration.
-    }
-  }, []);
-
-  useEffect(() => {
-    if (typeof window === "undefined") return;
-    try {
-      window.localStorage.setItem(
-        RECENT_THREADS_STORAGE_KEY,
-        JSON.stringify(recentThreads)
-      );
-    } catch {
-      // Ignore storage errors.
-    }
-  }, [recentThreads]);
-
-  useEffect(() => {
-    if (typeof window === "undefined") return;
-    try {
-      if (pendingNewThreadId) {
-        window.localStorage.setItem(PENDING_NEW_THREAD_STORAGE_KEY, pendingNewThreadId);
-      } else {
-        window.localStorage.removeItem(PENDING_NEW_THREAD_STORAGE_KEY);
-      }
-    } catch {
-      // Ignore storage errors.
-    }
-  }, [pendingNewThreadId]);
-
-  useEffect(() => {
-    if (typeof window === "undefined") return;
-    if (!threadId) {
-      setSandboxId(null);
-      return;
-    }
-    try {
-      const saved = window.localStorage.getItem(getSandboxStorageKey(threadId));
-      setSandboxId(saved || null);
-    } catch {
-      setSandboxId(null);
-    }
-  }, [threadId]);
-
-  useEffect(() => {
-    if (!threadId) {
-      logWorkspaceDebug("hydrateThread:no-thread", {});
-      setHydratedThreadId(null);
-      setWorkspaceRoot(null);
-      return;
-    }
-
-    if (pendingNewThreadId === threadId) {
-      logWorkspaceDebug("hydrateThread:pending-new-thread", {
-        threadId,
-        workspaceRoot,
-      });
-      setItems([]);
-      setPlan(null);
-      setPreviewUrl(null);
-      setPreviewLogs([]);
-      setHydratedThreadId(threadId);
-      setPendingNewThreadId(null);
-      return;
-    }
-
-    let cancelled = false;
-    setHydratedThreadId(null);
-
-    const loadThreadSession = async () => {
-      try {
-        const response = await fetch(`/api/threads/${threadId}`, { cache: "no-store" });
-        if (cancelled) return;
-        if (response.status === 404) {
-          setItems([]);
-          setPlan(null);
-          setPreviewUrl(null);
-          setPreviewLogs([]);
-          setWorkspaceRoot(null);
-          setHydratedThreadId(threadId);
-          return;
-        }
-        if (!response.ok) {
-          throw new Error("Failed to load thread session");
-        }
-        const payload = (await response.json()) as {
-          thread?: {
-            state?: {
-              workspaceRoot?: string | null;
-              sandboxId?: string | null;
-              previewUrl?: string | null;
-              items?: unknown[];
-              plan?: unknown;
-              previewLogs?: Array<{
-                level: "log" | "warn" | "error";
-                message: string;
-                timestamp: string | Date;
-              }>;
-            };
-          };
-        };
-        const state = payload.thread?.state;
-        const hydratedWorkspaceRoot =
-          typeof state?.workspaceRoot === "string" && state.workspaceRoot.trim()
-            ? state.workspaceRoot.trim()
-            : null;
-        logWorkspaceDebug("hydrateThread:loaded", {
-          threadId,
-          hydratedWorkspaceRoot,
-          title: payload.thread?.title ?? null,
-        });
-        setWorkspaceRoot(hydratedWorkspaceRoot);
-        setRecentThreads((prev) =>
-          prev.map((entry) =>
-            entry.id === threadId
-              ? {
-                  ...entry,
-                  subtitle: summarizeWorkspaceRoot(hydratedWorkspaceRoot),
-                  workspaceRoot: hydratedWorkspaceRoot,
-                }
-              : entry
-          )
-        );
-        setItems(Array.isArray(state?.items) ? (state.items as ChatItem[]) : []);
-        setPlan(isPlanRecord(state?.plan) ? state.plan : null);
-        setPreviewUrl(typeof state?.previewUrl === "string" ? state.previewUrl : null);
-        setSandboxId(
-          typeof state?.sandboxId === "string" && state.sandboxId.trim()
-            ? state.sandboxId.trim()
-            : null
-        );
-        setPreviewLogs(
-          Array.isArray(state?.previewLogs)
-            ? state.previewLogs.map((entry) => ({
-                ...entry,
-                timestamp: new Date(entry.timestamp),
-              }))
-            : []
-        );
-        setHydratedThreadId(threadId);
-      } catch {
-        if (cancelled) return;
-        setHydratedThreadId(threadId);
-      }
-    };
-
-    void loadThreadSession();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [pendingNewThreadId, threadId]);
-
-  useEffect(() => {
-    if (!threadId || hydratedThreadId !== threadId) return;
-
-    const timeout = window.setTimeout(() => {
-      const latestUserMessage = [...items]
-        .reverse()
-        .find((item) => item.type === "message" && item.role === "user");
-      const title = latestUserMessage?.content
-        ? summarizeThreadTitle(latestUserMessage.content)
-        : activeThreadRecord?.title ??
-          (threadId.startsWith("thread-") ? threadId.slice(7) : threadId);
-
-      void fetch(`/api/threads/${threadId}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          title,
-          subtitle: summarizeWorkspaceRoot(workspaceRoot),
-          state: {
-            workspaceRoot,
-            sandboxId,
-            previewUrl,
-            items: serializeItemsForThread(items),
-            plan,
-            previewLogs: previewLogs.map((entry) => ({
-              ...entry,
-              timestamp: entry.timestamp.toISOString(),
-            })),
-          },
-        }),
-      }).catch(() => {
-        // Ignore persistence failures.
-      });
-    }, 1200);
-
-    return () => {
-      window.clearTimeout(timeout);
-    };
-  }, [
-    activeThreadRecord?.title,
-    items,
-    plan,
-    previewLogs,
-    previewUrl,
-    sandboxId,
-    selectedModelData?.name,
-    workspaceRoot,
-    hydratedThreadId,
-    threadId,
-  ]);
-
-  useEffect(() => {
-    if (typeof window === "undefined" || !threadId) return;
-    try {
-      const key = getSandboxStorageKey(threadId);
-      if (sandboxId) {
-        window.localStorage.setItem(key, sandboxId);
-      } else {
-        window.localStorage.removeItem(key);
-      }
-    } catch {
-      // Ignore storage errors.
-    }
-  }, [sandboxId, threadId]);
-
-  const streamBus = createStreamEventBus({
-    setItems,
-    setError,
-    setStatus,
-    setPreviewUrl,
-    setSandboxId,
-    setStreamingMessageId,
-    assistantIdRef,
-    itemsRef,
-    postToolPendingRef,
-    createId,
-    appendPreviewLog: (log) =>
-      setPreviewLogs((prev) => [...prev.slice(-200), log]),
-    getModelId: () => model,
-    setPlan,
-    setWorkflowGraph: () => {},
-  });
+  }, [activeError]);
 
   const activePlan = useMemo(() => {
     if (!plan?.todos?.length) return null;
@@ -2256,550 +1621,88 @@ export default function Home() {
     };
   }, [plan, status, threadId]);
 
-  const processSubmission = useCallback(async (message: PromptInputMessage) => {
-    const text = message.text?.trim();
-    const attachments = message.files ?? [];
-    if (!text && attachments.length === 0) return;
-
-    const containsImageAttachment = attachments.some((file) =>
-      file.mediaType.startsWith("image/")
-    );
-    if (containsImageAttachment && !modelSupportsImageInput(model)) {
-      setError(
-        `当前模型 ${selectedModelData?.name ?? model} 不支持图片输入。请切换到支持多模态的模型后再上传图片。`
-      );
-      setStatus("ready");
-      return;
-    }
-
-    setPlan(null);
-    setPreviewUrl(null);
-    setStatus("submitted");
-    setError(null);
-
-    const threadTitleInput =
-      text || attachments.find((file) => file.filename)?.filename || "Image request";
-    const userImages: NonNullable<ChatItem["images"]> = [];
-
-    const userMessage: ChatItem = {
-      id: createId(),
-      type: "message",
-      role: "user",
-      content: text,
-      images: userImages,
-    };
-
-    const assistantId = createId();
-    assistantIdRef.current = assistantId;
-
-    const assistantMessage: ChatItem = {
-      id: assistantId,
-      type: "message",
-      role: "assistant",
-      content: "",
-      images: [],
-      modelId: model,
-    };
-
-    const optimisticThinking: ChatItem = {
-      id: `thinking:${assistantId}:optimistic`,
-      type: "thinking",
-      messageId: assistantId,
-      content: "",
-      status: "pending",
-    };
-
-    setItems((prev) => [...prev, userMessage, assistantMessage, optimisticThinking]);
-
-    if (threadId) {
-      setRecentThreads((prev) =>
-        mergeRecentThreads(
-          {
-            id: threadId,
-            title: summarizeThreadTitle(threadTitleInput),
-            subtitle: summarizeWorkspaceRoot(workspaceRoot),
-            workspaceRoot,
-            updatedAt: Date.now(),
-          },
-          prev
-        )
-      );
-    }
-
-    const controller = new AbortController();
-    abortRef.current = controller;
-    setStreamingMessageId(assistantId);
-    setStatus("submitted");
-
-    try {
-      const preparedAttachments = attachments.length
-        ? await Promise.all(attachments.map((file) => prepareAttachmentForModel(file)))
-        : [];
-      userMessage.images = preparedAttachments
-        .map((file) => file.previewImage ?? null)
-        .filter((image): image is NonNullable<typeof image> => Boolean(image));
-
-      const rawId = params?.id;
-      const routeId = Array.isArray(rawId) ? rawId[0] : rawId;
-      const effectiveThreadId =
-        threadId || (typeof routeId === "string" ? routeId : undefined);
-      logWorkspaceDebug("processSubmission:before-request", {
-        threadId,
-        routeId: typeof routeId === "string" ? routeId : null,
-        effectiveThreadId: effectiveThreadId ?? null,
-        workspaceRoot,
-        activeThreadWorkspaceRoot: activeThreadRecord?.workspaceRoot ?? null,
-      });
-      const response = await fetch(`/api/agents/${selectedAgent}/stream`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          ...(preparedAttachments.length
-            ? {
-                messages: [
-                  {
-                    role: "user",
-                    content: [
-                      ...(text ? [{ type: "text" as const, text }] : []),
-                      ...preparedAttachments.map((file) => ({
-                        type: "file" as const,
-                        mediaType: file.mediaType,
-                        filename: file.filename,
-                        data: file.dataUrl,
-                      })),
-                    ],
-                  },
-                ],
-              }
-            : { message: text }),
-          threadId: effectiveThreadId,
-          model,
-          requestContext: {
-            ...(sandboxId ? { sandboxId } : {}),
-            workspaceRoot,
-          },
-        }),
-        signal: controller.signal,
-      });
-
-      if (!response.ok || !response.body) {
-        const text = await response.text();
-        throw new Error(text || "Mastra stream failed");
-      }
-
-      setStatus("streaming");
-      const reader = response.body.getReader();
-      const decoder = new TextDecoder();
-      let buffer = "";
-
-      while (true) {
-        const { value, done } = await reader.read();
-        if (done) break;
-
-        buffer += decoder.decode(value, { stream: true });
-        const parts = buffer.split("\n\n");
-        buffer = parts.pop() ?? "";
-
-        for (const part of parts) {
-          const parsed = parseSseEvent(part);
-          if (!parsed) continue;
-          let data: StreamPayload | string = parsed.data;
-          try {
-            data = JSON.parse(parsed.data) as StreamPayload;
-          } catch {
-            // keep raw string
-          }
-          streamBus.handlePayload(data);
-        }
-      }
-
-      setStatus("ready");
-    } catch (err) {
-      const rawMessage = err instanceof Error ? err.message : "未知错误";
-      const message = rawMessage.includes("No endpoints found that support image input")
-        ? `当前模型 ${selectedModelData?.name ?? model} 不支持图片输入。请切换到支持多模态的模型后再试。`
-        : rawMessage;
-      const aborted =
-        controller.signal.aborted ||
-        (err instanceof DOMException && err.name === "AbortError") ||
-        /aborted|aborterror|signal is aborted/i.test(rawMessage);
-      if (aborted) {
-        setError(null);
-        setStatus("ready");
-      } else {
-        setError(message);
-        setStatus("error");
-      }
-    } finally {
-      const finalAssistantId = assistantIdRef.current ?? assistantId;
-      if (finalAssistantId) {
-        setItems((prev) =>
-          prev.map((item) =>
-            item.type === "thinking" && item.messageId === finalAssistantId
-              ? { ...item, status: "done" }
-              : item
-          )
-        );
-      }
-      abortRef.current = null;
-      assistantIdRef.current = null;
-      postToolPendingRef.current = false;
-      setStreamingMessageId(null);
-    }
-  }, [
-    model,
-    params,
-    sandboxId,
-    selectedModelData?.name,
-    selectedAgent,
-    streamBus,
-    threadId,
+  const {
+    isDesktopRuntime,
+    desktopWorkspace,
+    setDesktopWorkspace,
+    workspaceSearchOpen,
+    setWorkspaceSearchOpen,
+    setEditorSelectedFile,
+    workspaceBranches,
+    setWorkspaceBranches,
+    workspaceBranchLoading,
+    handleOpenWorkspaceFile,
+    handleChangeWorkspaceRoot,
+    handleSwitchWorkspaceBranch,
+    handleCommitWorkspace,
+    handlePushWorkspaceBranch,
+  } = useDesktopWorkspace({
+    hasMounted,
+    recentThreadCount: recentThreads.length,
     workspaceRoot,
-  ]);
+    currentThreadId: threadId || null,
+    onNewThread: createThreadSession,
+    setWorkspaceRoot,
+    logWorkspaceDebug,
+  });
 
-  const handleSubmit = useCallback(async (message: PromptInputMessage) => {
-    const text = message.text?.trim();
-    const attachments = message.files ?? [];
-    if (!text && attachments.length === 0) return;
-
-    if (status === "submitted" || status === "streaming") {
-      setQueuedSubmissions((previous) => [
-        ...previous,
-        {
-          id: createId(),
-          text: text ?? "",
-          files: attachments,
-        },
-      ]);
-      return;
-    }
-
-    await processSubmission(message);
-  }, [processSubmission, status]);
-
-  useEffect(() => {
-    if (status !== "ready") return;
-    if (dequeuingSubmissionRef.current) return;
-    const nextSubmission = queuedSubmissions[0];
-    if (!nextSubmission) return;
-
-    dequeuingSubmissionRef.current = true;
-    setQueuedSubmissions((previous) => previous.slice(1));
-
-    void processSubmission({
-      text: nextSubmission.text,
-      files: nextSubmission.files,
-    }).finally(() => {
-      dequeuingSubmissionRef.current = false;
-    });
-  }, [processSubmission, queuedSubmissions, status]);
-
-  const handleStop = () => {
-    const currentAssistantId = assistantIdRef.current;
-    if (currentAssistantId) {
-      setItems((prev) =>
-        prev.map((item) =>
-          item.type === "thinking" && item.messageId === currentAssistantId
-            ? { ...item, status: "done" }
-            : item
-        )
-      );
-    }
-    abortRef.current?.abort();
-    abortRef.current = null;
-    setStatus("ready");
-    postToolPendingRef.current = false;
-    setStreamingMessageId(null);
-  };
+  const resetThreadUiChrome = useCallback(() => {
+    setToolOpenState({});
+    previousToolStatusesRef.current = {};
+    setReasoningOpenState({});
+    previousThinkingStatusesRef.current = {};
+    setThreadSessionError(null);
+  }, []);
 
   const handleNewThread = useCallback((initialWorkspaceRoot?: string | null) => {
-    const normalizedWorkspaceRoot =
-      typeof initialWorkspaceRoot === "string" && initialWorkspaceRoot.trim()
-        ? initialWorkspaceRoot.trim()
-        : null;
-    const nextId = createThreadId();
-    logWorkspaceDebug("handleNewThread", {
-      nextId,
-      initialWorkspaceRoot: normalizedWorkspaceRoot,
-    });
-    const nextRecord: ThreadRecord = {
-      id: nextId,
-      title: "Untitled thread",
-      subtitle: summarizeWorkspaceRoot(normalizedWorkspaceRoot),
-      workspaceRoot: normalizedWorkspaceRoot,
-      updatedAt: Date.now(),
-    };
+    resetThreadUiChrome();
+    setActiveSection("chat");
+    createThreadSession(initialWorkspaceRoot);
+  }, [createThreadSession, resetThreadUiChrome]);
 
-    setRecentThreads((prev) => mergeRecentThreads(nextRecord, prev));
-    setPendingNewThreadId(nextId);
-    setThreadId(nextId);
-    setHydratedThreadId(nextId);
-    setSandboxId(null);
-    setWorkspaceRoot(normalizedWorkspaceRoot);
-    router.push(`/${nextId}`);
-    setItems([]);
-    setToolOpenState({});
-    previousToolStatusesRef.current = {};
-    setReasoningOpenState({});
-    previousThinkingStatusesRef.current = {};
-    setPlan(null);
-    setError(null);
-    setPreviewUrl(null);
-    setPreviewLogs([]);
-
-    void fetch(`/api/threads/${nextId}`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        title: nextRecord.title,
-        subtitle: nextRecord.subtitle,
-        state: {
-          workspaceRoot: normalizedWorkspaceRoot,
-          sandboxId: null,
-          previewUrl: null,
-          items: [],
-          plan: null,
-          previewLogs: [],
-        },
-      }),
-    }).catch(() => {
-      // Ignore optimistic thread creation failures.
-    });
-  }, [router]);
-
-  const handleSelectThread = (nextThreadId: string) => {
+  const handleSelectThread = useCallback((nextThreadId: string) => {
     if (!nextThreadId || nextThreadId === threadId) return;
-    setThreadId(nextThreadId);
-    setHydratedThreadId(null);
-    setItems([]);
-    setToolOpenState({});
-    previousToolStatusesRef.current = {};
-    setReasoningOpenState({});
-    previousThinkingStatusesRef.current = {};
-    setPlan(null);
-    setError(null);
-    setPreviewUrl(null);
-    setPreviewLogs([]);
-    router.push(`/${nextThreadId}`);
-  };
+    resetThreadUiChrome();
+    setActiveSection("chat");
+    selectThreadSession(nextThreadId);
+  }, [resetThreadUiChrome, selectThreadSession, threadId]);
 
-  const handleDeleteThread = async (targetThreadId: string) => {
+  const handleDeleteThread = useCallback(async (targetThreadId: string) => {
     if (!targetThreadId) return;
+    const deletingLastActiveThread =
+      threadId === targetThreadId &&
+      recentThreads.filter((entry) => entry.id !== targetThreadId).length === 0;
 
-    try {
-      const response = await fetch(`/api/threads/${targetThreadId}`, {
-        method: "DELETE",
-      });
-      if (!response.ok) {
-        const payload = (await response.json().catch(() => null)) as
-          | { error?: string }
-          | null;
-        throw new Error(payload?.error || "Failed to delete thread");
-      }
-    } catch (error) {
-      setError(error instanceof Error ? error.message : "Failed to delete thread");
+    resetThreadUiChrome();
+    await deleteThreadSession(targetThreadId);
+
+    if (!deletingLastActiveThread) {
       return;
     }
 
-    clearThreadLocalState(targetThreadId, setSandboxId);
-
-    const remainingThreads = recentThreads.filter((entry) => entry.id !== targetThreadId);
-    setRecentThreads(remainingThreads);
-
-    if (threadId !== targetThreadId) {
-      return;
-    }
-
-    const fallbackThreadId = remainingThreads[0]?.id;
-    if (fallbackThreadId) {
-      handleSelectThread(fallbackThreadId);
-      return;
-    }
-    setThreadId("");
-    setHydratedThreadId(null);
-    setItems([]);
-    setToolOpenState({});
-    previousToolStatusesRef.current = {};
-    setReasoningOpenState({});
-    previousThinkingStatusesRef.current = {};
-    setPlan(null);
-    setError(null);
-    setPreviewUrl(null);
-    setPreviewLogs([]);
-    setWorkspaceRoot(null);
     setDesktopWorkspace(null);
     setEditorSelectedFile(null);
     setWorkspaceBranches(null);
-    setSandboxId(null);
     setStoredWorkspaceRoot(null);
-  };
+  }, [
+    deleteThreadSession,
+    recentThreads,
+    resetThreadUiChrome,
+    setDesktopWorkspace,
+    setEditorSelectedFile,
+    setWorkspaceBranches,
+    threadId,
+  ]);
 
-  const handleSelectEditorFile = useCallback(
-    async (path: string) => {
-      if (!isDesktopRuntime) return;
-      try {
-        const file = await readDesktopWorkspaceFile(path);
-        setEditorSelectedFile(file);
-      } catch {
-        // Ignore file read errors
-      }
-    },
-    [isDesktopRuntime]
-  );
-
-  const handleChangeWorkspaceRoot = useCallback(async () => {
-    if (!isDesktopRuntime) {
-      if (typeof window === "undefined") return;
-      const nextValue = window.prompt("Set thread directory", workspaceRoot ?? "");
-      if (nextValue === null) return;
-      handleNewThread(nextValue.trim() || null);
-      return;
-    }
-
-    const selectedPath = await pickWorkspaceDirectory();
-    if (!selectedPath) return;
-    logWorkspaceDebug("handleChangeWorkspaceRoot:selected", {
-      selectedPath,
-      currentThreadId: threadId || null,
-      currentWorkspaceRoot: workspaceRoot,
-    });
-    handleNewThread(selectedPath);
-    await loadDesktopWorkspaceFromPath(selectedPath);
-  }, [handleNewThread, isDesktopRuntime, loadDesktopWorkspaceFromPath, threadId, workspaceRoot]);
-
-  const handleWorkspaceBranchChange = useCallback(
-    async (targetWorkspaceRoot: string) => {
-      if (!isDesktopRuntime) return;
-      if (targetWorkspaceRoot !== workspaceRoot) return;
-      await loadDesktopWorkspaceFromPath(targetWorkspaceRoot);
-    },
-    [isDesktopRuntime, loadDesktopWorkspaceFromPath, workspaceRoot]
-  );
-
-  const handleHeaderBranchChange = useCallback(
-    async (branch: string) => {
-      if (!isDesktopRuntime) return;
-      setWorkspaceBranchLoading(true);
-      try {
-        const payload = await switchWorkspaceBranch(workspaceRoot, branch);
-        setWorkspaceBranches(payload);
-        await loadDesktopWorkspaceFromPath(workspaceRoot);
-      } finally {
-        setWorkspaceBranchLoading(false);
-      }
-    },
-    [isDesktopRuntime, loadDesktopWorkspaceFromPath, workspaceRoot]
-  );
-
-  const handleCommitWorkspace = useCallback(async () => {
-    if (!isDesktopRuntime) return;
-    const message = window.prompt("提交说明", "Update workspace");
-    if (!message) return;
-
-    try {
-      setWorkspaceBranchLoading(true);
-      const payload = await commitWorkspaceChanges(workspaceRoot, message);
-      setWorkspaceBranches(payload);
-      gooeyToast.success("提交成功");
-      await loadDesktopWorkspaceFromPath(workspaceRoot);
-    } catch (error) {
-      gooeyToast.error(error instanceof Error ? error.message : "提交失败");
-    } finally {
-      setWorkspaceBranchLoading(false);
-    }
-  }, [isDesktopRuntime, loadDesktopWorkspaceFromPath, workspaceRoot]);
-
-  const handlePushWorkspace = useCallback(async () => {
-    if (!isDesktopRuntime) return;
-
-    try {
-      setWorkspaceBranchLoading(true);
-      const payload = await pushWorkspaceBranch(workspaceRoot);
-      setWorkspaceBranches(payload);
-      gooeyToast.success("推送成功");
-    } catch (error) {
-      gooeyToast.error(error instanceof Error ? error.message : "推送失败");
-    } finally {
-      setWorkspaceBranchLoading(false);
-    }
-  }, [isDesktopRuntime, workspaceRoot]);
-
+  const handleSelectEditorFile = handleOpenWorkspaceFile;
+  const handleHeaderBranchChange = handleSwitchWorkspaceBranch;
+  const handlePushWorkspace = handlePushWorkspaceBranch;
   const handleCreateBranch = useCallback(async () => {
     if (!isDesktopRuntime) return;
     const branchName = window.prompt("新分支名称", "feature/");
-    if (!branchName) return;
-    await handleHeaderBranchChange(branchName);
+    if (!branchName?.trim()) return;
+    await handleHeaderBranchChange(branchName.trim());
   }, [handleHeaderBranchChange, isDesktopRuntime]);
-
-  const handleStopLocalProcess = useCallback(async (processId: string) => {
-    setServiceActionId(processId);
-    try {
-      const response = await fetch(`/api/local-processes/${processId}`, {
-        method: "DELETE",
-      });
-      const payload = (await response.json().catch(() => null)) as
-        | { error?: string }
-        | null;
-      if (!response.ok) {
-        throw new Error(payload?.error || "Failed to stop local process");
-      }
-      await loadLocalProcesses({ silent: true });
-      if (expandedServiceId === processId) {
-        await loadServiceLogs(processId);
-      }
-    } catch (error) {
-      setError(error instanceof Error ? error.message : "Failed to stop local process");
-    } finally {
-      setServiceActionId(null);
-    }
-  }, [expandedServiceId, loadLocalProcesses, loadServiceLogs]);
-
-  const queuedSubmissionPreview = queuedSubmissions[0] ?? null;
-  const projectTitle = desktopWorkspace?.rootName ?? "Project Alpha";
-  const activeDesktopFile = desktopWorkspace?.activeFile ?? null;
-  const currentEditorFile = editorSelectedFile ?? activeDesktopFile;
-  const activeFileSegments = activeDesktopFile?.path.split("/").filter(Boolean) ?? [
-    "src",
-    "components",
-    "Editor.tsx",
-  ];
-  const activeFileName = activeDesktopFile?.name ?? "Editor.tsx";
-  const backgroundCode = activeDesktopFile?.content
-    ? activeDesktopFile.content
-    : `import React from 'react';
-import { Command } from './components/Command';
-
-export const Editor: React.FC = () => {
-  const [isOpen, setIsOpen] = React.useState(true);
-
-  return (
-    <div className="flex-1 bg-slate-950 relative overflow-hidden">
-      <CodeOverlay />
-      {isOpen && (
-        <CommandPalette
-          placeholder="What can I help you build?"
-          onClose={() => setIsOpen(false)}
-        />
-      )}
-    </div>
-  );
-};
-
-const CodeOverlay = () => {
-  return <div className="absolute inset-0 backdrop-blur-sm bg-slate-900/50" />;
-};`;
-  const activeLanguage = activeDesktopFile?.language ?? "tsx";
-  const diffPreviewCode = buildRefactorPreview(backgroundCode, activeLanguage);
-  const handleCommandAction = (value: string) => {
-    setCommandDialogOpen(false);
-
-    if (value === "refactor") {
-      setPreviewTab("diff");
-      return;
-    }
-
-    setPreviewTab("code");
-  };
 
   if (!hasMounted) {
     return null;
@@ -2813,13 +1716,15 @@ const CodeOverlay = () => {
         onSelectThread={handleSelectThread}
         onDeleteThread={handleDeleteThread}
         onOpenWorkspace={handleChangeWorkspaceRoot}
+        onOpenSettings={() => setActiveSection("settings")}
+        activeSection={activeSection}
         recentThreads={recentThreads}
         workspaceRoot={workspaceRoot}
       />
-      <SidebarInset className="bg-background">
-        <div className="flex h-screen flex-col overflow-hidden bg-background text-foreground">
+      <SidebarInset className="app-shell bg-transparent">
+        <div className="app-shell flex h-screen flex-col overflow-hidden bg-transparent text-foreground">
           <main className="min-h-0 flex-1 overflow-hidden">
-            <section className="flex h-full min-h-0 min-w-0 flex-col border-l border-border/60 bg-[radial-gradient(circle_at_top_left,_color-mix(in_srgb,var(--primary)_14%,transparent),transparent_34%),radial-gradient(circle_at_bottom_right,_color-mix(in_srgb,var(--accent)_12%,transparent),transparent_28%),linear-gradient(180deg,color-mix(in_srgb,var(--background)_92%,white_8%)_0%,color-mix(in_srgb,var(--background)_96%,var(--primary)_4%)_100%)]">
+            <section className="flex h-full min-h-0 min-w-0 flex-col border-l border-border/50 bg-transparent">
               <Card className="flex min-h-0 flex-1 flex-col gap-2 rounded-none border-0 bg-transparent pt-0 shadow-none">
                 <CardHeader className="border-border/50 border-b px-0 py-2.5">
                   <div
@@ -2833,37 +1738,61 @@ const CodeOverlay = () => {
                       <div className="min-w-0">
                         <div className="flex items-center gap-2">
                           <span className="truncate text-[14px] font-medium tracking-tight text-foreground/92">
-                            {activeThreadRecord?.title ?? "Untitled thread"}
+                            {activeSection === "settings"
+                              ? "设置"
+                              : activeThreadRecord?.title ?? "Untitled thread"}
                           </span>
-                          <Badge
-                            variant="secondary"
-                            className="rounded-full border border-border/45 bg-background px-2 py-0.5 text-[9px] font-medium uppercase tracking-wide text-muted-foreground/85"
-                          >
-                            {status === "streaming"
-                              ? "Running"
-                              : status === "error"
-                                ? "Attention"
-                                : "Ready"}
-                          </Badge>
+                          {activeSection === "chat" ? (
+                            <Badge
+                              variant="secondary"
+                              className="rounded-full border border-border/45 bg-background px-2 py-0.5 text-[9px] font-medium uppercase tracking-wide text-muted-foreground/85"
+                            >
+                              {status === "streaming"
+                                ? "Running"
+                                : status === "error"
+                                  ? "Attention"
+                                  : "Ready"}
+                            </Badge>
+                          ) : null}
                         </div>
                         <div className="mt-1 flex items-center gap-2 overflow-hidden text-[10px] text-muted-foreground/80">
-                          <span className="truncate">
-                            {activeWorkspaceLabel}
-                          </span>
-                          <span className="text-border">•</span>
-                          <span className="truncate">
-                            {selectedAgentData?.name ?? "Build Agent"}
-                          </span>
-                          <span className="text-border">•</span>
-                          <span className="truncate">
-                            {activeThreadRecord?.updatedAt
-                              ? formatRelativeUpdatedAt(activeThreadRecord.updatedAt)
-                              : "just now"}
-                          </span>
+                          {activeSection === "settings" ? (
+                            <>
+                              <span className="truncate">Coding Agent</span>
+                              <span className="text-border">•</span>
+                              <span className="truncate">外观与偏好设置</span>
+                            </>
+                          ) : (
+                            <>
+                              <span className="truncate">
+                                {activeWorkspaceLabel}
+                              </span>
+                              <span className="text-border">•</span>
+                              <span className="truncate">
+                                {selectedAgentData?.name ?? "Build Agent"}
+                              </span>
+                              <span className="text-border">•</span>
+                              <span className="truncate">
+                                {activeThreadRecord?.updatedAt
+                                  ? formatRelativeUpdatedAt(activeThreadRecord.updatedAt)
+                                  : "just now"}
+                              </span>
+                            </>
+                          )}
                         </div>
                       </div>
                     </div>
                     <div className="hidden items-center gap-2 md:flex">
+                      {activeSection === "settings" ? (
+                        <button
+                          type="button"
+                          onClick={() => setActiveSection("chat")}
+                          className="flex h-9 items-center gap-2 rounded-xl border border-border/60 bg-background px-3 text-[12px] text-muted-foreground transition-colors hover:text-foreground"
+                        >
+                          返回对话
+                        </button>
+                      ) : (
+                        <>
                       <button
                         type="button"
                         onClick={() => setWorkspaceSearchOpen(true)}
@@ -2904,7 +1833,7 @@ const CodeOverlay = () => {
                             </DropdownMenuTrigger>
                             <DropdownMenuContent
                               align="end"
-                              className="min-w-[220px] rounded-2xl border border-white/10 bg-[#242321]/95 p-1.5 text-white shadow-[0_22px_50px_rgba(0,0,0,0.28)] backdrop-blur-xl"
+                              className="min-w-[220px] rounded-xl border border-white/10 bg-[#242321] p-1.5 text-white shadow-[0_16px_36px_rgba(0,0,0,0.24)]"
                             >
                               <DropdownMenuItem
                                 onClick={() => void handleCommitWorkspace()}
@@ -2942,11 +1871,16 @@ const CodeOverlay = () => {
                           初始化分支
                         </button>
                       )}
+                        </>
+                      )}
                     </div>
                   </div>
                 </CardHeader>
 
                 <CardContent className="flex min-h-0 flex-1 flex-col overflow-hidden px-0">
+                  {activeSection === "settings" ? (
+                    <ThemeSettingsPanel onBack={() => setActiveSection("chat")} />
+                  ) : (
                   <Conversation className="flex min-h-0 flex-1 overflow-hidden">
                     <ConversationContent
                       className={cn(
@@ -3022,7 +1956,7 @@ const CodeOverlay = () => {
 
                           if (item.type === "agent") {
                             const childTools = items.filter(
-                              (entry) =>
+                              (entry): entry is Extract<ChatItem, { type: "tool" }> =>
                                 entry.type === "tool" &&
                                 entry.parentToolCallId === item.parentToolCallId
                             );
@@ -3262,7 +2196,7 @@ const CodeOverlay = () => {
                                       <Image
                                         key={`${item.id}-${index}`}
                                         {...img}
-                                        alt={img.alt ?? ""}
+                                        alt=""
                                       />
                                     ))}
                                   </div>
@@ -3305,65 +2239,83 @@ const CodeOverlay = () => {
                     </ConversationContent>
                     <ConversationScrollButton />
                   </Conversation>
+                  )}
                 </CardContent>
 
-                <CardFooter className="bg-background px-4 py-3">
+                {activeSection === "chat" ? (
+                <CardFooter className="px-4 py-3">
                   <PromptInputProvider initialInput="">
-                    <div className={cn(CHAT_COLUMN_CLASS, "space-y-1.5")}>
-                      {activePlan ? (
-                        <div className="w-full">
+                    <div className={cn(CHAT_COLUMN_CLASS)}>
+                      <div
+                        className={cn(
+                          "app-panel app-frosted overflow-hidden",
+                          activePlan ? "rounded-[18px]" : "rounded-[16px]",
+                        )}
+                      >
+                        {activePlan ? (
                           <Plan
                             {...activePlan}
                             maxVisibleTodos={2}
                             showProgress
-                            className="w-full"
+                            className="w-full rounded-none border-0 border-b border-border/45 bg-transparent py-0 shadow-none"
                           />
-                        </div>
-                      ) : null}
+                        ) : null}
 
-                      {queuedSubmissionPreview ? (
-                        <div className="flex w-full items-center gap-2 rounded-2xl border border-border/50 bg-muted/25 px-4 py-3 text-[12px] text-muted-foreground">
-                          <LoaderCircleIcon className="size-3.5 animate-spin" />
-                          <span className="truncate">
-                            {summarizeQueuedSubmission(queuedSubmissionPreview)}
-                          </span>
-                        </div>
-                      ) : null}
+                        {queuedSubmissionPreview ? (
+                          <div
+                            className={cn(
+                              "app-soft-card flex w-full items-center gap-2 rounded-none border-x-0 border-t-0 px-4 py-3 text-[12px] text-muted-foreground shadow-none",
+                              activePlan ? "border-b border-border/40" : "",
+                            )}
+                          >
+                            <LoaderCircleIcon className="size-3.5 animate-spin" />
+                            <span className="truncate">
+                              {summarizeQueuedSubmission(queuedSubmissionPreview)}
+                            </span>
+                          </div>
+                        ) : null}
 
-                      <PromptInput
-                        className="rounded-[24px] border border-border/50 bg-background p-0 shadow-[0_4px_14px_rgba(15,23,42,0.05)]"
-                        globalDrop
-                        multiple
-                        onSubmit={handleSubmit}
-                      >
-                        <PromptInputAttachmentsDisplay />
-                        <PromptInputBody>
-                          <FileMentionTextarea
-                            workspaceTree={desktopWorkspace?.tree ?? []}
-                            className="min-h-[60px] rounded-none border-0 bg-transparent px-5 py-3 text-[14px] leading-6 shadow-none focus-visible:ring-0"
-                            placeholder="输入 @ 选择文件，然后继续描述你的需求"
-                          />
-                        </PromptInputBody>
-                        <PromptInputFooter className="border-border/40 border-t bg-transparent px-4 py-2.5">
-                          <div className="flex flex-1" />
-                          <PromptInputTools className="gap-2">
-                            <PromptInputActionMenu>
-                              <PromptInputActionMenuTrigger />
-                              <PromptInputActionMenuContent>
-                                <PromptInputActionAddAttachments />
-                              </PromptInputActionMenuContent>
-                            </PromptInputActionMenu>
-                          </PromptInputTools>
-                          <PromptInputSubmit
-                            className="size-9 rounded-full border border-border/50 shadow-none"
-                            onStop={handleStop}
-                            status={status}
-                          />
-                        </PromptInputFooter>
-                      </PromptInput>
+                        <PromptInput
+                          className={cn(
+                            "border-0 bg-transparent p-0 shadow-none",
+                            activePlan || queuedSubmissionPreview
+                              ? "rounded-none"
+                              : "rounded-[16px]",
+                          )}
+                          globalDrop
+                          multiple
+                          onSubmit={handleSubmit}
+                        >
+                          <PromptInputAttachmentsDisplay />
+                          <PromptInputBody>
+                            <FileMentionTextarea
+                              workspaceTree={desktopWorkspace?.tree ?? []}
+                              className="min-h-[60px] rounded-none border-0 bg-transparent px-5 py-3 text-[14px] leading-6 shadow-none focus-visible:ring-0"
+                              placeholder="输入 @ 选择文件，然后继续描述你的需求"
+                            />
+                          </PromptInputBody>
+                          <PromptInputFooter className="border-border/40 border-t bg-transparent px-4 py-2.5">
+                            <div className="flex flex-1" />
+                            <PromptInputTools className="gap-2">
+                              <PromptInputActionMenu>
+                                <PromptInputActionMenuTrigger />
+                                <PromptInputActionMenuContent>
+                                  <PromptInputActionAddAttachments />
+                                </PromptInputActionMenuContent>
+                              </PromptInputActionMenu>
+                            </PromptInputTools>
+                            <PromptInputSubmit
+                              className="app-control size-9 rounded-[10px] border-0 shadow-none"
+                              onStop={handleStop}
+                              status={status}
+                            />
+                          </PromptInputFooter>
+                        </PromptInput>
+                      </div>
                     </div>
                   </PromptInputProvider>
                 </CardFooter>
+                ) : null}
               </Card>
             </section>
           </main>

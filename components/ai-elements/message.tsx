@@ -319,62 +319,16 @@ export const MessageBranchPage = ({
 
 export type MessageResponseProps = ComponentProps<typeof Streamdown>;
 
-const BLOCK_RENDER_TAGS = new Set([
-  "p",
-  "div",
-  "section",
-  "article",
-  "blockquote",
-  "pre",
-  "table",
-  "ul",
-  "ol",
-  "li",
-  "h1",
-  "h2",
-  "h3",
-  "h4",
-  "h5",
-  "h6",
-]);
-
-function hasBlockDescendant(node: ReactNode): boolean {
-  return Children.toArray(node).some((child) => {
-    if (!isValidElement(child)) {
-      return false;
-    }
-
-    if (typeof child.type === "string" && BLOCK_RENDER_TAGS.has(child.type)) {
-      return true;
-    }
-
-    const childNode = child.props as { node?: { tagName?: string }; children?: ReactNode };
-    if (childNode.node?.tagName && BLOCK_RENDER_TAGS.has(childNode.node.tagName)) {
-      return true;
-    }
-
-    return childNode.children ? hasBlockDescendant(childNode.children) : false;
-  });
-}
-
 export const markdownComponents = {
   p: ({
     children,
     className,
     ...props
   }: HTMLAttributes<HTMLParagraphElement>) => {
-    if (hasBlockDescendant(children)) {
-      return (
-        <div className={className} {...props}>
-          {children}
-        </div>
-      );
-    }
-
     return (
-      <p className={className} {...props}>
+      <div className={className} data-paragraph="true" {...props}>
         {children}
-      </p>
+      </div>
     );
   },
 };
@@ -389,7 +343,7 @@ export const MessageResponse = memo(
     return (
       <Streamdown
         className={cn(
-          "size-full text-[14px] leading-7 [&>*:first-child]:mt-0 [&>*:last-child]:mb-0 [&_p]:my-0 [&_p+*]:mt-3.5 [&_ul]:my-2.5 [&_ol]:my-2.5 [&_li]:leading-7 [&_code]:rounded-md [&_code]:bg-muted/60 [&_code]:px-1.5 [&_code]:py-0.5 [&_pre]:rounded-2xl [&_pre]:border [&_pre]:border-border/60 [&_pre]:bg-background/80 [&_pre]:shadow-sm [&_table]:overflow-hidden [&_table]:rounded-xl [&_table]:border [&_table]:border-border/60",
+          "size-full text-[14px] leading-7 [&>*:first-child]:mt-0 [&>*:last-child]:mb-0 [&_[data-paragraph=true]]:my-0 [&_[data-paragraph=true]+*]:mt-3.5 [&_ul]:my-2.5 [&_ol]:my-2.5 [&_li]:leading-7 [&_code]:rounded-md [&_code]:bg-muted/60 [&_code]:px-1.5 [&_code]:py-0.5 [&_pre]:rounded-2xl [&_pre]:border [&_pre]:border-border/60 [&_pre]:bg-background/80 [&_pre]:shadow-sm [&_table]:overflow-hidden [&_table]:rounded-xl [&_table]:border [&_table]:border-border/60",
           className
         )}
         components={mergedComponents}

@@ -35,6 +35,10 @@ export default function RootLayout({
     <html lang="en" suppressHydrationWarning>
       <body
         className={`${geistSans.variable} ${geistMono.variable} ${spaceGrotesk.variable} antialiased transition-colors duration-300`}
+        style={{
+          backgroundColor: "#0a0c11",
+          color: "#f4f7fb",
+        }}
       >
         <ThemeProvider attribute="class" defaultTheme="system" enableSystem>
           {children}

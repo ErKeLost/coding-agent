@@ -1,9 +1,9 @@
+import { mkdir, writeFile } from 'node:fs/promises';
+import path from 'node:path';
 import { createTool } from '@mastra/core/tools';
 import { OpenRouter } from '@openrouter/sdk';
 import { createClient } from '@supabase/supabase-js';
 import { z } from 'zod';
-import { getSandboxById } from './daytona-client';
-import { ensureSandboxDir, getSandboxIdOrThrow, normalizeSandboxPath } from './sandbox-helpers';
 
 // const DEFAULT_MODEL = 'black-forest-labs/flux.2-klein-4b';
 const DEFAULT_MODEL = 'google/gemini-3.1-flash-image-preview';
@@ -17,10 +17,53 @@ type SupabaseConfig = {
   prefix?: string;
 };
 
+type RequestContextLike = {
+  get?: (key: string) => unknown;
+};
+
+type ToolContextLike = {
+  requestContext?: RequestContextLike;
+  runtimeContext?: RequestContextLike;
+  context?: { requestContext?: RequestContextLike };
+  agent?: { requestContext?: RequestContextLike };
+};
+
 function parseDataUrl(value: string) {
   const match = /^data:([^;]+);base64,(.+)$/.exec(value);
   if (!match) return null;
   return { mimeType: match[1], base64: match[2] };
+}
+
+function readContextString(context: ToolContextLike | undefined, key: string) {
+  const candidates = [
+    context?.requestContext,
+    context?.runtimeContext,
+    context?.context?.requestContext,
+    context?.agent?.requestContext,
+  ];
+
+  for (const candidate of candidates) {
+    const value = candidate?.get?.(key);
+    if (typeof value === 'string' && value.trim()) {
+      return value.trim();
+    }
+  }
+
+  return undefined;
+}
+
+function resolveOutputPath(
+  requestedPath: string | undefined,
+  context: ToolContextLike | undefined,
+) {
+  const workspaceRoot = readContextString(context, 'workspaceRoot');
+  const baseDir = workspaceRoot ? path.resolve(workspaceRoot) : process.cwd();
+  if (!requestedPath?.trim()) {
+    return path.join(baseDir, 'generated-image.png');
+  }
+  return path.isAbsolute(requestedPath)
+    ? path.normalize(requestedPath)
+    : path.join(baseDir, requestedPath);
 }
 
 function extractImagePayloadsFromChat(result: Record<string, unknown>) {
@@ -179,14 +222,13 @@ export const imageGenerateTool = createTool({
     model: z.string().default(DEFAULT_MODEL),
     returnType: z.enum(['url', 'base64', 'file']).default('url'),
     maxImages: z.number().int().min(1).max(8).default(1),
-    sandboxId: z.string().optional(),
     path: z.string().optional(),
     uploadToSupabase: z.boolean().default(true),
     supabaseBucket: z.string().optional(),
     supabasePrefix: z.string().optional(),
   }),
   outputSchema,
-  execute: async (inputData, _context?): Promise<ImageGenerateOutput> => {
+  execute: async (inputData, context): Promise<ImageGenerateOutput> => {
     try {
       if (!process.env.OPENROUTER_API_KEY) {
         throw new Error('OPENROUTER_API_KEY is not set.');
@@ -257,7 +299,7 @@ export const imageGenerateTool = createTool({
         return { error: 'Provider did not return an image URL.' };
       }
 
-      if (inputData.returnType === 'base64' && !inputData.sandboxId) {
+      if (inputData.returnType === 'base64') {
         const items = selected.map((item, index) => {
           const urlFromSupabase = supabaseUrls?.[index];
           const parsed = parseDataUrl(item);
@@ -294,25 +336,19 @@ export const imageGenerateTool = createTool({
         return { error: 'Provider did not return image data.' };
       }
 
-      const sandboxId = getSandboxIdOrThrow(inputData.sandboxId);
-      const basePath = normalizeSandboxPath(inputData.path ?? '/tmp/generated-image.png');
+      const basePath = resolveOutputPath(inputData.path, context);
       const buildIndexedPath = (index: number) => {
-        const lastSlash = basePath.lastIndexOf('/');
-        const fileName = lastSlash >= 0 ? basePath.slice(lastSlash + 1) : basePath;
-        const dir = lastSlash >= 0 ? basePath.slice(0, lastSlash) : '';
+        const fileName = path.basename(basePath);
+        const dir = path.dirname(basePath);
         const dot = fileName.lastIndexOf('.');
         if (dot > 0) {
           const name = fileName.slice(0, dot);
           const ext = fileName.slice(dot);
-          return `${dir}/${name}-${index + 1}${ext}`;
+          return path.join(dir, `${name}-${index + 1}${ext}`);
         }
-        return `${dir}/${fileName}-${index + 1}.png`;
+        return path.join(dir, `${fileName}-${index + 1}.png`);
       };
       const paths = selected.length > 1 ? selected.map((_, i) => buildIndexedPath(i)) : [basePath];
-      for (const p of paths) {
-        await ensureSandboxDir(sandboxId, p);
-      }
-      const sandbox = await getSandboxById(sandboxId);
 
       const items: ImageGenerateOutput[] = [];
       for (let i = 0; i < selected.length; i += 1) {
@@ -334,12 +370,8 @@ export const imageGenerateTool = createTool({
         }
 
         const destination = paths[i]!;
-        await sandbox.fs.uploadFiles([
-          {
-            source: buffer,
-            destination,
-          },
-        ]);
+        await mkdir(path.dirname(destination), { recursive: true });
+        await writeFile(destination, buffer);
 
         items.push({
           kind: 'file' as const,

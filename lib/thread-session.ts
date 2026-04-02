@@ -32,7 +32,6 @@ export type { WorkflowGraphEdge, WorkflowGraphNode, WorkflowGraphSnapshot };
 
 export type ThreadSessionState = {
   workspaceRoot?: string | null;
-  sandboxId?: string | null;
   previewUrl?: string | null;
   items?: unknown[];
   plan?: SerializablePlan | null;

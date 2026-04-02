@@ -511,7 +511,7 @@ dependencies = [
 
 [[package]]
 name = "coding-agent-desktop"
-version = "0.1.0"
+version = "0.2.4"
 dependencies = [
  "rfd",
  "serde",
@@ -519,6 +519,7 @@ dependencies = [
  "tauri",
  "tauri-build",
  "tauri-plugin-opener",
+ "tauri-plugin-process",
  "tauri-plugin-updater",
 ]
 
@@ -4147,6 +4148,16 @@ dependencies = [
  "url",
  "windows",
  "zbus",
+]
+
+[[package]]
+name = "tauri-plugin-process"
+version = "2.3.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d55511a7bf6cd70c8767b02c97bf8134fa434daf3926cfc1be0a0f94132d165a"
+dependencies = [
+ "tauri",
+ "tauri-plugin",
 ]
 
 [[package]]

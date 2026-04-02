@@ -3,6 +3,44 @@
 import * as React from "react";
 
 type Theme = "light" | "dark" | "system";
+export type ColorTheme =
+  | "sand"
+  | "graphite"
+  | "ocean"
+  | "forest"
+  | "rose";
+
+export const COLOR_THEMES: Array<{
+  value: ColorTheme;
+  label: string;
+  description: string;
+}> = [
+  {
+    value: "sand",
+    label: "Sand",
+    description: "暖米色玻璃质感，适合默认工作流界面。",
+  },
+  {
+    value: "graphite",
+    label: "Graphite",
+    description: "冷灰工业感，适合更克制的编码氛围。",
+  },
+  {
+    value: "ocean",
+    label: "Ocean",
+    description: "深海青蓝高对比，强调专注和层次。",
+  },
+  {
+    value: "forest",
+    label: "Forest",
+    description: "松针绿与苔色，偏系统控制台气质。",
+  },
+  {
+    value: "rose",
+    label: "Rose",
+    description: "酒红与暖粉点缀，整体更有品牌感。",
+  },
+];
 
 type ThemeProviderProps = {
   children: React.ReactNode;
@@ -19,6 +57,9 @@ type ThemeProviderState = {
   setTheme: (theme: Theme) => void;
   themes: Theme[];
   systemTheme: Exclude<Theme, "system">;
+  colorTheme: ColorTheme;
+  setColorTheme: (theme: ColorTheme) => void;
+  colorThemes: typeof COLOR_THEMES;
 };
 
 const ThemeProviderContext = React.createContext<ThemeProviderState | undefined>(
@@ -27,7 +68,24 @@ const ThemeProviderContext = React.createContext<ThemeProviderState | undefined>
 
 const MEDIA_QUERY = "(prefers-color-scheme: dark)";
 const DEFAULT_STORAGE_KEY = "theme";
+const DEFAULT_COLOR_THEME_STORAGE_KEY = "app-color-theme";
 const AVAILABLE_THEMES: Theme[] = ["light", "dark", "system"];
+
+function readStoredColorTheme(
+  storageKey: string,
+  fallback: ColorTheme
+): ColorTheme {
+  if (typeof window === "undefined") return fallback;
+
+  try {
+    const storedTheme = window.localStorage.getItem(storageKey);
+    if (COLOR_THEMES.some((theme) => theme.value === storedTheme)) {
+      return storedTheme as ColorTheme;
+    }
+  } catch {}
+
+  return fallback;
+}
 
 function getSystemTheme(): Exclude<Theme, "system"> {
   if (typeof window === "undefined") return "light";
@@ -89,6 +147,9 @@ export function ThemeProvider({
   const [theme, setThemeState] = React.useState<Theme>(() =>
     readStoredTheme(storageKey, defaultTheme)
   );
+  const [colorTheme, setColorThemeState] = React.useState<ColorTheme>(() =>
+    readStoredColorTheme(DEFAULT_COLOR_THEME_STORAGE_KEY, "sand")
+  );
   const [systemTheme, setSystemTheme] = React.useState<Exclude<Theme, "system">>(
     () => getSystemTheme()
   );
@@ -127,6 +188,10 @@ export function ThemeProvider({
     });
   }, [attribute, enableColorScheme, resolvedTheme]);
 
+  React.useEffect(() => {
+    document.documentElement.setAttribute("data-color-theme", colorTheme);
+  }, [colorTheme]);
+
   const setTheme = React.useCallback(
     (nextTheme: Theme) => {
       setThemeState(nextTheme);
@@ -137,6 +202,13 @@ export function ThemeProvider({
     [storageKey]
   );
 
+  const setColorTheme = React.useCallback((nextTheme: ColorTheme) => {
+    setColorThemeState(nextTheme);
+    try {
+      window.localStorage.setItem(DEFAULT_COLOR_THEME_STORAGE_KEY, nextTheme);
+    } catch {}
+  }, []);
+
   const value = React.useMemo<ThemeProviderState>(
     () => ({
       theme,
@@ -144,8 +216,19 @@ export function ThemeProvider({
       setTheme,
       themes: enableSystem ? AVAILABLE_THEMES : ["light", "dark"],
       systemTheme,
+      colorTheme,
+      setColorTheme,
+      colorThemes: COLOR_THEMES,
     }),
-    [enableSystem, resolvedTheme, setTheme, systemTheme, theme]
+    [
+      colorTheme,
+      enableSystem,
+      resolvedTheme,
+      setColorTheme,
+      setTheme,
+      systemTheme,
+      theme,
+    ]
   );
 
   return (

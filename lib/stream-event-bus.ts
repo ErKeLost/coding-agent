@@ -78,7 +78,6 @@ export type StreamPayload = {
   type?: string;
   event?: string;
   eventName?: string;
-  streamCanonicalized?: boolean;
   data?: unknown;
   payload?: unknown;
   text?: string;
@@ -155,7 +154,6 @@ type EventBusParams = {
   setError: (value: string | null) => void;
   setStatus: (value: "submitted" | "streaming" | "ready" | "error") => void;
   setPreviewUrl: (value: string | null) => void;
-  setSandboxId?: (value: string | null) => void;
   setStreamingMessageId: (value: string | null) => void;
   assistantIdRef: MutableRefObject<string | null>;
   itemsRef: MutableRefObject<ChatItem[]>;
@@ -405,7 +403,6 @@ export const createStreamEventBus = ({
   setError,
   setStatus,
   setPreviewUrl,
-  setSandboxId,
   setStreamingMessageId,
   assistantIdRef,
   itemsRef,
@@ -951,10 +948,6 @@ export const createStreamEventBus = ({
           depth: codexEvent.depth,
         });
         if (codexEvent.result && typeof codexEvent.result === "object") {
-          const sandboxId = (codexEvent.result as { sandboxId?: unknown }).sandboxId;
-          if (typeof sandboxId === "string" && sandboxId.trim()) {
-            setSandboxId?.(sandboxId.trim());
-          }
           const possibleUrl =
             (codexEvent.result as { previewUrl?: string }).previewUrl ??
             (codexEvent.result as { deploymentUrl?: string }).deploymentUrl ??
@@ -987,9 +980,6 @@ export const createStreamEventBus = ({
         return;
       }
       if (codexEvent.eventName === "session.updated") {
-        if (typeof codexEvent.sandboxId === "string" && codexEvent.sandboxId.trim()) {
-          setSandboxId?.(codexEvent.sandboxId.trim());
-        }
         if (typeof codexEvent.previewUrl === "string" && codexEvent.previewUrl) {
           setPreviewUrl(codexEvent.previewUrl);
         }
@@ -1023,14 +1013,6 @@ export const createStreamEventBus = ({
         });
         return;
       }
-    }
-
-    if (normalized.streamCanonicalized) {
-      const images = extractImages(normalized);
-      if (images.length) {
-        appendAssistantImages(images);
-      }
-      return;
     }
 
     const images = extractImages(normalized);
@@ -1099,10 +1081,6 @@ export const createStreamEventBus = ({
         costUSD,
       });
       if (result && typeof result === "object") {
-        const sandboxId = (result as { sandboxId?: unknown }).sandboxId;
-        if (typeof sandboxId === "string" && sandboxId.trim()) {
-          setSandboxId?.(sandboxId.trim());
-        }
         const possibleUrl =
           (result as { previewUrl?: string }).previewUrl ??
           (result as { deploymentUrl?: string }).deploymentUrl ??

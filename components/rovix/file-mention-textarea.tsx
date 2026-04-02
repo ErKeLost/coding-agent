@@ -4,8 +4,7 @@ import { PromptInputTextarea, usePromptInputController } from "@/components/ai-e
 import type { DesktopWorkspaceNode } from "@/lib/desktop-workspace";
 import { cn } from "@/lib/utils";
 import { FileCode2Icon } from "lucide-react";
-import { useEffect, useMemo, useRef, useState } from "react";
-import { createPortal } from "react-dom";
+import { useMemo, useRef, useState } from "react";
 
 type MentionCandidate = {
   path: string;
@@ -79,7 +78,6 @@ export function FileMentionTextarea({
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const [activeMention, setActiveMention] = useState<ActiveMention | null>(null);
   const [selectedIndex, setSelectedIndex] = useState(0);
-  const [panelStyle, setPanelStyle] = useState<React.CSSProperties | null>(null);
   const lastMentionQueryRef = useRef<string | null>(null);
   const files = useMemo(() => flattenWorkspaceFiles(workspaceTree), [workspaceTree]);
 
@@ -135,46 +133,15 @@ export function FileMentionTextarea({
     });
   };
 
-  useEffect(() => {
-    if (!activeMention) {
-      return;
-    }
-
-    const updatePanelPosition = () => {
-      const textarea = textareaRef.current;
-      if (!textarea) return;
-      const rect = textarea.getBoundingClientRect();
-      setPanelStyle({
-        position: "fixed",
-        left: rect.left,
-        top: rect.top - 12,
-        width: rect.width,
-        transform: "translateY(-100%)",
-        zIndex: 80,
-      });
-    };
-
-    updatePanelPosition();
-    window.addEventListener("resize", updatePanelPosition);
-    window.addEventListener("scroll", updatePanelPosition, true);
-
-    return () => {
-      window.removeEventListener("resize", updatePanelPosition);
-      window.removeEventListener("scroll", updatePanelPosition, true);
-    };
-  }, [activeMention]);
-
-  const mentionPanel =
-    activeMention && panelStyle
-      ? createPortal(
-          <div
-            style={panelStyle}
-            className="overflow-hidden rounded-2xl border border-border/70 bg-popover/96 p-2 text-popover-foreground shadow-2xl backdrop-blur-xl"
-          >
-            <div className="mb-2 px-2 text-[11px] font-medium text-muted-foreground">
+  return (
+    <div className="relative w-full">
+      {activeMention ? (
+        <div className="mb-[-1px]">
+          <div className="overflow-hidden rounded-t-[14px] border border-primary/30 border-b-0 bg-background text-popover-foreground shadow-[0_12px_28px_rgba(15,23,42,0.08)] dark:shadow-none">
+            <div className="border-primary/20 border-b bg-primary/[0.04] px-5 py-3 text-[11px] font-medium tracking-[0.08em] text-primary/70 uppercase">
               Files
             </div>
-            <div className="space-y-1">
+            <div className="max-h-64 space-y-1 overflow-y-auto px-2 py-2">
               {mentionResults.length > 0 ? (
                 mentionResults.map((candidate, index) => (
                   <button
@@ -185,11 +152,11 @@ export function FileMentionTextarea({
                       insertMention(candidate);
                     }}
                     className={cn(
-                      "flex w-full items-start gap-3 rounded-xl px-3 py-2 text-left transition-colors",
-                      index === selectedIndex ? "bg-muted" : "hover:bg-muted/70"
+                      "flex w-full items-start gap-3 rounded-[12px] px-3 py-2.5 text-left transition-colors",
+                      index === selectedIndex ? "bg-primary/10" : "hover:bg-primary/[0.06]"
                     )}
                   >
-                    <span className="mt-0.5 flex size-8 shrink-0 items-center justify-center rounded-lg border border-border/60 bg-muted/40 text-muted-foreground">
+                    <span className="mt-0.5 flex size-8 shrink-0 items-center justify-center rounded-xl border border-primary/20 bg-primary/[0.08] text-primary">
                       <FileCode2Icon className="size-4" />
                     </span>
                     <span className="min-w-0">
@@ -203,24 +170,18 @@ export function FileMentionTextarea({
                   </button>
                 ))
               ) : (
-                <div className="px-3 py-6 text-center text-[12px] text-muted-foreground">
+                <div className="px-3 py-8 text-center text-[12px] text-muted-foreground">
                   没有匹配文件
                 </div>
               )}
             </div>
-          </div>,
-          document.body
-        )
-      : null;
-
-  return (
-    <>
-      {mentionPanel}
-
+          </div>
+        </div>
+      ) : null}
       <PromptInputTextarea
         {...props}
         textareaRef={textareaRef}
-        className={className}
+        className={cn(className, activeMention && "rounded-t-none border-t-0")}
         onChange={(event) => {
           onChange?.(event);
           syncMentionState(event.currentTarget.value, event.currentTarget.selectionStart ?? event.currentTarget.value.length);
@@ -254,6 +215,6 @@ export function FileMentionTextarea({
           onKeyDown?.(event);
         }}
       />
-    </>
+    </div>
   );
 }

@@ -5,7 +5,6 @@ use std::{
   process::Command,
   sync::Mutex,
 };
-#[cfg(not(debug_assertions))]
 use std::{
   net::{TcpListener, TcpStream},
   time::{Duration, Instant},
@@ -729,7 +728,6 @@ fn find_free_port() -> u16 {
 }
 
 /// Busy-poll `addr` until a TCP connection succeeds or `timeout_secs` elapses.
-#[cfg(not(debug_assertions))]
 fn wait_for_server(addr: &str, timeout_secs: u64) -> bool {
   let deadline = Instant::now() + Duration::from_secs(timeout_secs);
   while Instant::now() < deadline {
@@ -766,16 +764,39 @@ pub fn run() {
       // ── Dev build: point directly at the Next.js dev server ──────────────
       #[cfg(debug_assertions)]
       {
+        let splash_window = WebviewWindowBuilder::new(
+          app,
+          "splashscreen",
+          WebviewUrl::App("splashscreen.html".into()),
+        )
+        .title("Coding Agent")
+        .inner_size(400.0, 280.0)
+        .center()
+        .decorations(false)
+        .resizable(false)
+        .always_on_top(true)
+        .build()
+        .ok();
+
+        if !wait_for_server("127.0.0.1:3000", 30) {
+          return Err("Next.js dev server did not become ready within 30 seconds.".into());
+        }
+
         let window = WebviewWindowBuilder::new(
           app,
           "main",
-          WebviewUrl::External("http://localhost:3000".parse().unwrap()),
+          WebviewUrl::External("http://127.0.0.1:3000".parse().unwrap()),
         )
         .title("Coding Agent")
         .inner_size(1440.0, 960.0)
         .min_inner_size(1080.0, 720.0)
         .resizable(true)
         .build()?;
+
+        if let Some(sw) = splash_window {
+          let _ = sw.close();
+        }
+
         window.open_devtools();
       }
 

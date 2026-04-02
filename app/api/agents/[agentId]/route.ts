@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
-import { RequestContext } from "@mastra/core/request-context";
 import { mastra } from "@/mastra";
 import { getModelTuning } from "@/lib/model-tuning";
+import { buildAgentRequestContext } from "@/lib/server/agent-request-context";
 
 export const runtime = "nodejs";
 const BUILD_AGENT_ID = "build-agent";
@@ -32,15 +32,7 @@ export async function POST(
     return NextResponse.json({ error: "message is required" }, { status: 400 });
   }
 
-  const requestContext = new RequestContext();
-  if (payload.requestContext && typeof payload.requestContext === "object") {
-    for (const [key, value] of Object.entries(payload.requestContext)) {
-      requestContext.set(key, value);
-    }
-  }
-  if (payload.model) {
-    requestContext.set("model", payload.model);
-  }
+  const { requestContext } = await buildAgentRequestContext(payload);
   const tuning = getModelTuning(payload.model);
 
   const { agentId } = await params;

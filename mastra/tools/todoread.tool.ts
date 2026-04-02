@@ -8,12 +8,12 @@ export const todoReadTool = createTool({
   id: 'todoread',
   description: TODOREAD_DESCRIPTION,
   inputSchema: z.object({
-    sandboxId: z.string().min(1).optional(),
+    scopeId: z.string().min(1).optional(),
     sessionId: z.string().default('default'),
   }),
   outputSchema: HowOneResultSchema,
   execute: async (inputData, context) => {
-    const scopeId = inputData.sandboxId ?? resolveLocalSessionScope(context) ?? 'default';
+    const scopeId = inputData.scopeId ?? resolveLocalSessionScope(context) ?? 'default';
     const sessionId = inputData.sessionId ?? 'default';
     const todos = readTodos(scopeId, sessionId);
     const remaining = todos.filter(item => item.status !== 'completed').length;

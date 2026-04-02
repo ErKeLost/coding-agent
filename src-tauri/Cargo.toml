@@ -1,6 +1,6 @@
 [package]
 name = "coding-agent-desktop"
-version = "0.2.3"
+version = "0.2.4"
 description = "Desktop shell for the Coding Agent app"
 authors = ["Coding Agent"]
 edition = "2021"
