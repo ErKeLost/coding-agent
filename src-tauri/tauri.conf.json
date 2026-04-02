@@ -1,8 +1,8 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "Coding Agent",
+  "productName": "Rovix",
   "identifier": "com.codingagent.desktop",
-  "version": "0.2.5",
+  "version": "0.2.6",
   "build": {
     "beforeDevCommand": "node ./scripts/desktop-dev-server.mjs",
     "devUrl": "http://localhost:3000",
@@ -13,7 +13,7 @@
     "windows": [
       {
         "label": "main",
-        "title": "Coding Agent",
+        "title": "Rovix",
         "width": 1440,
         "height": 960,
         "minWidth": 1080,

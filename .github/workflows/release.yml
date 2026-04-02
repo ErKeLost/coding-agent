@@ -58,7 +58,7 @@ jobs:
           NEXT_PUBLIC_TAURI_UPDATER_ENABLED: "1"
         with:
           tagName: ${{ github.ref_name }}
-          releaseName: 'Coding Agent ${{ github.ref_name }}'
+          releaseName: 'Rovix ${{ github.ref_name }}'
           releaseBody: 'See the assets to download and install this version.'
           releaseDraft: false
           prerelease: false

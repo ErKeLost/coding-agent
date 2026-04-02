@@ -1928,7 +1928,7 @@ export default function Home() {
                         <div className="mt-1 flex items-center gap-2 overflow-hidden text-[10px] text-muted-foreground/80">
                           {activeSection === "settings" ? (
                             <>
-                              <span className="truncate">Coding Agent</span>
+                              <span className="truncate">Rovix</span>
                               <span className="text-border">•</span>
                               <span className="truncate">外观与偏好设置</span>
                             </>

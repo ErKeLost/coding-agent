@@ -1,8 +1,8 @@
 [package]
-name = "coding-agent-desktop"
-version = "0.2.5"
-description = "Desktop shell for the Coding Agent app"
-authors = ["Coding Agent"]
+name = "rovix"
+version = "0.2.6"
+description = "Desktop shell for the Rovix app"
+authors = ["Rovix"]
 edition = "2021"
 
 [build-dependencies]
@@ -20,5 +20,5 @@ tauri-plugin-process = "2"
 tauri-plugin-updater = "2"
 
 [lib]
-name = "coding_agent_desktop_lib"
+name = "rovix"
 crate-type = ["staticlib", "cdylib", "rlib"]

@@ -769,7 +769,7 @@ pub fn run() {
           "splashscreen",
           WebviewUrl::App("splashscreen.html".into()),
         )
-        .title("Coding Agent")
+        .title("Rovix")
         .inner_size(400.0, 280.0)
         .center()
         .decorations(false)
@@ -787,7 +787,7 @@ pub fn run() {
           "main",
           WebviewUrl::External("http://127.0.0.1:3000".parse().unwrap()),
         )
-        .title("Coding Agent")
+        .title("Rovix")
         .inner_size(1440.0, 960.0)
         .min_inner_size(1080.0, 720.0)
         .resizable(true)
@@ -820,7 +820,7 @@ pub fn run() {
           "splashscreen",
           WebviewUrl::App("splashscreen.html".into()),
         )
-        .title("Coding Agent")
+        .title("Rovix")
         .inner_size(400.0, 280.0)
         .center()
         .decorations(false)
@@ -832,9 +832,9 @@ pub fn run() {
         // Spawn Next.js standalone server as a detached background process.
         // We intentionally do not keep the Child handle so it stays alive for
         // the duration of the app process (the OS will reap it on exit).
-        // Write server logs to ~/Library/Logs/Coding Agent/server.log
+        // Write server logs to ~/Library/Logs/Rovix/server.log
         let log_dir = app.path().home_dir()?
-          .join("Library/Logs/Coding Agent");
+          .join("Library/Logs/Rovix");
         std::fs::create_dir_all(&log_dir)
           .map_err(|e| format!("Failed to create log dir: {e}"))?;
         let log_file = std::fs::OpenOptions::new()
@@ -917,7 +917,7 @@ pub fn run() {
           "main",
           WebviewUrl::External(server_url.parse().unwrap()),
         )
-        .title("Coding Agent")
+        .title("Rovix")
         .inner_size(1440.0, 960.0)
         .min_inner_size(1080.0, 720.0)
         .resizable(true)
