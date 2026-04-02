@@ -9,7 +9,8 @@
     "start": "next start",
     "lint": "eslint",
     "desktop:dev": "tauri dev",
-    "desktop:build": "tauri build"
+    "desktop:build": "tauri build",
+    "prepare:sidecar": "node scripts/prepare-sidecar.mjs"
   },
   "dependencies": {
     "@daytonaio/sdk": "^0.157.0",

@@ -5,7 +5,14 @@ use std::{
   process::Command,
   sync::Mutex,
 };
-use tauri::{Manager, State};
+#[cfg(not(debug_assertions))]
+use std::{
+  net::{TcpListener, TcpStream},
+  time::{Duration, Instant},
+};
+use tauri::{State, WebviewUrl, WebviewWindowBuilder};
+#[cfg(not(debug_assertions))]
+use tauri::Manager;
 
 struct WorkspaceState(Mutex<Option<PathBuf>>);
 
@@ -647,6 +654,51 @@ async fn search_workspace_content(
   .map_err(|err| format!("failed to search workspace content: {err}"))?
 }
 
+/// Find the Node.js (or Bun) runtime binary, checking common macOS/Linux paths.
+#[cfg(not(debug_assertions))]
+fn find_node_binary() -> Option<PathBuf> {
+  let candidates = [
+    // Homebrew (Apple Silicon)
+    "/opt/homebrew/bin/bun",
+    "/opt/homebrew/bin/node",
+    // Homebrew (Intel)
+    "/usr/local/bin/bun",
+    "/usr/local/bin/node",
+    // System
+    "/usr/bin/node",
+  ];
+  for path in &candidates {
+    let p = PathBuf::from(path);
+    if p.exists() {
+      return Some(p);
+    }
+  }
+  None
+}
+
+/// Claim a free TCP port from the OS (port 0 trick).
+#[cfg(not(debug_assertions))]
+fn find_free_port() -> u16 {
+  TcpListener::bind("127.0.0.1:0")
+    .expect("failed to bind port 0 to find free port")
+    .local_addr()
+    .expect("failed to get local addr")
+    .port()
+}
+
+/// Busy-poll `addr` until a TCP connection succeeds or `timeout_secs` elapses.
+#[cfg(not(debug_assertions))]
+fn wait_for_server(addr: &str, timeout_secs: u64) -> bool {
+  let deadline = Instant::now() + Duration::from_secs(timeout_secs);
+  while Instant::now() < deadline {
+    if TcpStream::connect(addr).is_ok() {
+      return true;
+    }
+    std::thread::sleep(Duration::from_millis(250));
+  }
+  false
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
   tauri::Builder::default()
@@ -668,11 +720,63 @@ pub fn run() {
       app.handle()
         .plugin(tauri_plugin_updater::Builder::new().build())?;
 
+      // ── Dev build: point directly at the Next.js dev server ──────────────
       #[cfg(debug_assertions)]
       {
-        let window = app.get_webview_window("main").unwrap();
+        let window = WebviewWindowBuilder::new(
+          app,
+          "main",
+          WebviewUrl::External("http://localhost:3000".parse().unwrap()),
+        )
+        .title("Coding Agent")
+        .inner_size(1440.0, 960.0)
+        .min_inner_size(1080.0, 720.0)
+        .resizable(true)
+        .build()?;
         window.open_devtools();
       }
+
+      // ── Production build: spawn Next.js standalone server then open window ─
+      #[cfg(not(debug_assertions))]
+      {
+        let node_bin = find_node_binary().ok_or("Could not find node or bun – please install Node.js (https://nodejs.org) and restart the app.")?;
+
+        let port = find_free_port();
+        let addr = format!("127.0.0.1:{port}");
+        let server_url = format!("http://127.0.0.1:{port}");
+
+        let resource_dir = app.path().resource_dir()?;
+        let server_dir = resource_dir.join("next-server");
+        let server_js = server_dir.join("server.js");
+
+        // Spawn Next.js standalone server as a detached background process.
+        // We intentionally do not keep the Child handle so it stays alive for
+        // the duration of the app process (the OS will reap it on exit).
+        std::process::Command::new(&node_bin)
+          .arg(&server_js)
+          .env("PORT", port.to_string())
+          .env("HOSTNAME", "127.0.0.1")
+          .env("NODE_ENV", "production")
+          .current_dir(&server_dir)
+          .spawn()
+          .map_err(|e| format!("Failed to spawn Next.js server: {e}"))?;
+
+        if !wait_for_server(&addr, 30) {
+          return Err("Next.js server did not become ready within 30 seconds.".into());
+        }
+
+        WebviewWindowBuilder::new(
+          app,
+          "main",
+          WebviewUrl::External(server_url.parse().unwrap()),
+        )
+        .title("Coding Agent")
+        .inner_size(1440.0, 960.0)
+        .min_inner_size(1080.0, 720.0)
+        .resizable(true)
+        .build()?;
+      }
+
       Ok(())
     })
     .run(tauri::generate_context!())
