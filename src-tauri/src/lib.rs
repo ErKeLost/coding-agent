@@ -801,7 +801,7 @@ pub fn run() {
         )
         .title("Coding Agent")
         .inner_size(400.0, 280.0)
-        .center(true)
+        .center()
         .decorations(false)
         .resizable(false)
         .always_on_top(true)
