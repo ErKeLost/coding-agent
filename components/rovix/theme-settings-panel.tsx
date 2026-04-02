@@ -53,55 +53,55 @@ export function ThemeSettingsPanel({ onBack }: { onBack?: () => void }) {
   const [activeSection, setActiveSection] = useState<SettingsSection>("appearance");
 
   return (
-    <div className="flex min-h-0 flex-1 overflow-hidden">
-      {/* ── 左侧导航 ── */}
-      <nav className="flex w-52 shrink-0 flex-col border-r border-border/40 bg-sidebar/60 px-2 py-4">
-        {onBack && (
-          <button
-            type="button"
-            onClick={onBack}
-            className="mb-3 flex items-center gap-2 rounded-lg px-3 py-2 text-[13px] text-muted-foreground transition-colors hover:bg-muted/40 hover:text-foreground"
-          >
-            <ArrowLeftIcon className="size-3.5" />
-            返回应用
-          </button>
-        )}
-        <div className="mb-1 px-3 text-[10px] font-semibold tracking-[0.15em] text-muted-foreground/60 uppercase">
-          设置
-        </div>
-        <div className="space-y-0.5">
-          {NAV_ITEMS.map((item) => (
-            <button
-              key={item.id}
-              type="button"
-              onClick={() => setActiveSection(item.id)}
-              className={cn(
-                "flex w-full items-center rounded-lg px-3 py-2 text-[13px] text-left transition-colors",
-                activeSection === item.id
-                  ? "bg-primary/10 font-medium text-primary"
-                  : "text-sidebar-foreground/70 hover:bg-muted/40 hover:text-sidebar-foreground",
-              )}
-            >
-              {item.label}
-            </button>
-          ))}
-        </div>
-      </nav>
+    <div className="scrollbar-frost-thin min-h-0 flex-1 overflow-y-auto">
+      <div className="mx-auto flex max-w-3xl flex-col gap-8 px-6 py-6 md:px-8 md:py-8">
+        <div className="space-y-4 rounded-[18px] border border-border/45 bg-background/55 p-5 shadow-[0_16px_40px_rgba(15,23,42,0.04)]">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div className="space-y-1">
+              <div className="text-[10px] font-semibold tracking-[0.18em] text-muted-foreground/60 uppercase">
+                设置
+              </div>
+              <h2 className="text-[22px] font-semibold tracking-tight text-foreground">
+                外观
+              </h2>
+              <p className="text-[13px] leading-6 text-muted-foreground">
+                调整明暗模式和整体色板，主题色会影响整个界面的渐变、侧栏和输入区。
+              </p>
+            </div>
+            {onBack ? (
+              <button
+                type="button"
+                onClick={onBack}
+                className="app-soft-hover inline-flex items-center gap-2 rounded-lg px-3 py-2 text-[13px] text-muted-foreground transition-colors hover:text-foreground"
+              >
+                <ArrowLeftIcon className="size-3.5" />
+                返回应用
+              </button>
+            ) : null}
+          </div>
 
-      {/* ── 右侧内容 ── */}
-      <div className="scrollbar-frost-thin min-h-0 flex-1 overflow-y-auto">
-        <div className="mx-auto max-w-2xl px-8 py-8">
+          <div className="flex flex-wrap gap-2">
+            {NAV_ITEMS.map((item) => (
+              <button
+                key={item.id}
+                type="button"
+                onClick={() => setActiveSection(item.id)}
+                className={cn(
+                  "rounded-full px-3 py-1.5 text-[12px] transition-colors",
+                  activeSection === item.id
+                    ? "bg-primary/10 font-medium text-primary"
+                    : "bg-muted/35 text-sidebar-foreground/70 hover:bg-muted/55 hover:text-sidebar-foreground",
+                )}
+              >
+                {item.label}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <div>
           {activeSection === "appearance" && (
             <div className="space-y-8">
-              <div className="space-y-1">
-                <h2 className="text-[22px] font-semibold tracking-tight text-foreground">
-                  外观
-                </h2>
-                <p className="text-[13px] leading-6 text-muted-foreground">
-                  调整明暗模式和整体色板，主题色会影响整个界面的渐变、侧栏和输入区。
-                </p>
-              </div>
-
               <section className="overflow-hidden rounded-[14px] border border-border/50 bg-background/40">
                 <div className="flex items-center gap-2 border-b border-border/40 px-5 py-3.5 text-[12px] font-semibold tracking-wide text-muted-foreground uppercase">
                   <Settings2Icon className="size-3.5" />

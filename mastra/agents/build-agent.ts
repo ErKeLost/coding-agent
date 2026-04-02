@@ -69,6 +69,8 @@ const buildInstructions = ({ requestContext }: { requestContext: RequestContext 
   );
   const continuationPlanTitle = getRequestContextString(requestContext, 'continuationPlanTitle');
   const continuationPlanStep = getRequestContextString(requestContext, 'continuationPlanStep');
+  const guideMode = getRequestContextString(requestContext, 'guideMode');
+  const guideText = getRequestContextString(requestContext, 'guideText');
   const emptyTurnRetry = getRequestContextString(requestContext, 'emptyTurnRetry');
 
   const runtimeDirectives = [
@@ -92,6 +94,15 @@ const buildInstructions = ({ requestContext }: { requestContext: RequestContext 
 ${continuationLastUserGoal ? `- Last explicit user goal: ${continuationLastUserGoal}` : ''}
 ${continuationPlanTitle ? `- Existing plan: ${continuationPlanTitle}` : ''}
 ${continuationPlanStep ? `- Next unfinished step: ${continuationPlanStep}` : ''}`.trim());
+  }
+
+  if (guideMode === 'steer') {
+    runtimeDirectives.push(`Guide policy:
+- This user input is guidance for the current task, not a brand new unrelated request.
+- Apply it immediately as a correction, preference, or constraint on the in-flight work.
+- Continue the current objective unless the guidance explicitly changes direction.
+- Do not treat this as a queueing acknowledgement or ask unnecessary clarification first.
+${guideText ? `- Active guidance: ${guideText}` : ''}`.trim());
   }
 
   if (emptyTurnRetry === '1') {

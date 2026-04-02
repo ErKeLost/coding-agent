@@ -17,6 +17,7 @@ import {
 import {
   buildAgentRequestContext,
 } from "@/lib/server/agent-request-context";
+import { consumeThreadSteers } from "@/lib/server/steer-queue";
 
 export const runtime = "nodejs";
 const BUILD_AGENT_ID = "build-agent";
@@ -150,6 +151,11 @@ type StreamEvent =
       targetName?: string;
       iteration?: number;
       selectionReason?: string;
+    }
+  | {
+      type: "stream.event";
+      eventName: "guide.applied";
+      text: string;
     };
 
 type AgentStreamRequest = {
@@ -756,6 +762,7 @@ export async function POST(
   let streamOutcome: "idle" | "streaming" | "done" | "error" = "idle";
   let activeAgentLabel: string | undefined = agent.name;
   let activeAgentMeta: string | undefined;
+  const pendingAppliedSteers: string[] = [];
   const memory =
     payload.memory ??
     (payload.threadId
@@ -772,6 +779,18 @@ export async function POST(
       providerOptions: tuning.providerOptions,
       memory,
       abortSignal: req.signal,
+      onIterationComplete: () => {
+        if (!payload.threadId) return;
+        const pendingSteers = consumeThreadSteers(payload.threadId);
+        if (!pendingSteers.length) return;
+
+        const steerText = pendingSteers.map((entry) => entry.text).join("\n\n");
+        pendingAppliedSteers.push(...pendingSteers.map((entry) => entry.text));
+
+        return {
+          feedback: `User steer for the current task:\n${steerText}`,
+        };
+      },
     });
     return streamResult.fullStream.getReader();
   };
@@ -1114,6 +1133,15 @@ export async function POST(
           const streamEvents = mapChunkToStreamEvents(chunk);
           for (const event of streamEvents) {
             applyStreamEvent(controller, event);
+          }
+          while (pendingAppliedSteers.length > 0) {
+            const steerText = pendingAppliedSteers.shift();
+            if (!steerText) continue;
+            enqueueJson(controller, {
+              type: "stream.event",
+              eventName: "guide.applied",
+              text: steerText,
+            } satisfies StreamEvent);
           }
           emitUsageIfNeeded(controller, chunk);
         }

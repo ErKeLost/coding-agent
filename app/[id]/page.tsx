@@ -43,11 +43,25 @@ import {
   PromptInputActionMenuTrigger,
   PromptInputBody,
   PromptInputFooter,
+  type PromptInputMessage,
   PromptInputProvider,
   PromptInputSubmit,
   PromptInputTools,
   usePromptInputAttachments,
 } from "@/components/ai-elements/prompt-input";
+import {
+  ModelSelector,
+  ModelSelectorContent,
+  ModelSelectorEmpty,
+  ModelSelectorGroup,
+  ModelSelectorInput,
+  ModelSelectorItem,
+  ModelSelectorList,
+  ModelSelectorLogo,
+  ModelSelectorLogoGroup,
+  ModelSelectorName,
+  ModelSelectorTrigger,
+} from "@/components/ai-elements/model-selector";
 import { Image } from "@/components/ai-elements/image";
 import { Plan } from "@/components/tool-ui/plan";
 import { AppSidebar } from "@/components/app-sidebar";
@@ -69,6 +83,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { Button } from "@/components/ui/button";
 import {
   SidebarInset,
   SidebarProvider,
@@ -82,6 +97,7 @@ import {
 import {
   AppWindowIcon,
   CameraIcon,
+  CheckIcon,
   ChevronDownIcon,
   ChevronRightIcon,
   FileCode2Icon,
@@ -176,6 +192,13 @@ const models = [
   {
     id: "openrouter/z-ai/glm-5",
     name: "GLM-5",
+    chef: "Z.AI",
+    chefSlug: "zai",
+    providers: ["openrouter"],
+  },
+  {
+    id: "openrouter/z-ai/glm-5v-turbo",
+    name: "GLM-5V Turbo",
     chef: "Z.AI",
     chefSlug: "zai",
     providers: ["openrouter"],
@@ -1203,6 +1226,7 @@ const modelSupportsImageInput = (modelId?: string) => {
     id.includes("gpt-5") ||
     id.includes("claude") ||
     id.includes("gemini") ||
+    id.includes("glm-5v") ||
     id.includes("glm-4.7") ||
     id.includes("glm-5")
   );
@@ -1377,8 +1401,60 @@ const PromptInputAttachmentsDisplay = () => {
   );
 };
 
+const PromptGuideButton = ({
+  disabled,
+  onClick,
+}: {
+  disabled?: boolean;
+  onClick: () => void;
+}) => {
+  return (
+    <button
+      type="button"
+      disabled={disabled}
+      onClick={onClick}
+      className="app-control inline-flex h-9 items-center gap-2 rounded-full border-0 px-3 text-[12px] font-medium text-foreground/88 shadow-none disabled:cursor-not-allowed disabled:opacity-50"
+    >
+      <SparklesIcon className="size-3.5 text-primary/80" />
+      引导
+    </button>
+  );
+};
+
+const ModelSelectorItemRow = ({
+  model,
+  selected,
+  onSelect,
+}: {
+  model: (typeof models)[number];
+  selected: boolean;
+  onSelect: (id: string) => void;
+}) => {
+  return (
+    <ModelSelectorItem
+      value={model.id}
+      onSelect={() => onSelect(model.id)}
+      className="gap-2 rounded-xl px-3 py-2 text-[12px]"
+    >
+      <ModelSelectorLogo className="size-3.5" provider={model.chefSlug} />
+      <ModelSelectorName className="text-[12px] font-medium">
+        {model.name}
+      </ModelSelectorName>
+      <ModelSelectorLogoGroup className="mr-1 [&>img]:size-3.5">
+        {model.providers.slice(0, 3).map((provider) => (
+          <ModelSelectorLogo key={provider} provider={provider} />
+        ))}
+      </ModelSelectorLogoGroup>
+      {selected ? <CheckIcon className="ml-auto size-3.5" /> : <div className="ml-auto size-3.5" />}
+    </ModelSelectorItem>
+  );
+};
+
 const CHAT_COLUMN_CLASS =
   "mx-auto w-full max-w-5xl px-6 md:px-8 xl:px-10";
+
+const MODEL_STORAGE_KEY = "chat-selected-model";
+const DEFAULT_MODEL_ID = "openrouter/openai/gpt-5.4-mini";
 
 const logWorkspaceDebug = (label: string, payload?: Record<string, unknown>) => {
   console.info(`[workspace-debug] ${label}`, payload ?? {});
@@ -1391,7 +1467,8 @@ export default function Home() {
     () => false,
   );
   const [activeSection, setActiveSection] = useState<"chat" | "settings">("chat");
-  const [model] = useState("openrouter/qwen/qwen3.6-plus-preview:free");
+  const [model, setModel] = useState(DEFAULT_MODEL_ID);
+  const [modelDialogOpen, setModelDialogOpen] = useState(false);
   const [selectedAgent] = useState(DEFAULT_AGENT_ID);
   const [reasoningOpenState, setReasoningOpenState] = useState<Record<string, boolean>>({});
   const [toolOpenState, setToolOpenState] = useState<Record<string, boolean>>({});
@@ -1400,8 +1477,36 @@ export default function Home() {
   const params = useParams();
   const router = useRouter();
   const selectedModelData = models.find((m) => m.id === model);
+  const modelChefs = useMemo(
+    () => [...new Set(models.map((entry) => entry.chef))],
+    [],
+  );
   const selectedAgentData = AGENTS.find((agent) => agent.id === selectedAgent);
   const [threadSessionError, setThreadSessionError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!hasMounted) return;
+    try {
+      const savedModel = window.localStorage.getItem(MODEL_STORAGE_KEY)?.trim();
+      if (savedModel && models.some((entry) => entry.id === savedModel)) {
+        setModel(savedModel);
+        return;
+      }
+    } catch {
+      // Ignore storage errors.
+    }
+
+    setModel(DEFAULT_MODEL_ID);
+  }, [hasMounted]);
+
+  useEffect(() => {
+    if (!hasMounted || !model) return;
+    try {
+      window.localStorage.setItem(MODEL_STORAGE_KEY, model);
+    } catch {
+      // Ignore storage errors.
+    }
+  }, [hasMounted, model]);
   const {
     items,
     setItems,
@@ -1437,8 +1542,11 @@ export default function Home() {
   const {
     status,
     error,
+    guideState,
+    guideText,
     queuedSubmissionPreview,
     handleSubmit,
+    promoteQueuedSubmissionToGuide,
     handleStop,
     drainSubmissionQueue,
   } = useAgentStream({
@@ -1621,6 +1729,23 @@ export default function Home() {
     };
   }, [plan, status, threadId]);
 
+  const guideBanner = useMemo(() => {
+    if (guideState === "queued") {
+      return {
+        tone: "pending" as const,
+        text: "引导已挂起，等待当前流在下一次 step/iteration 边界注入。",
+      };
+    }
+
+    return null;
+  }, [guideState]);
+
+  const canStartConversation = Boolean(threadId) && !isHydratingThread;
+  const canSubmitChat = canStartConversation && Boolean(model);
+  const chatDisabledReason = canStartConversation
+    ? null
+    : "请先创建或选择一个线程，然后再开始对话。";
+
   const {
     isDesktopRuntime,
     desktopWorkspace,
@@ -1697,6 +1822,26 @@ export default function Home() {
   const handleSelectEditorFile = handleOpenWorkspaceFile;
   const handleHeaderBranchChange = handleSwitchWorkspaceBranch;
   const handlePushWorkspace = handlePushWorkspaceBranch;
+  const handleChatSubmit = useCallback(async (message: PromptInputMessage) => {
+    if (!canStartConversation) {
+      setThreadSessionError("请先创建或选择一个线程，然后再开始对话。");
+      return;
+    }
+
+    if (!model) {
+      setModelDialogOpen(true);
+      setThreadSessionError("请先选择模型，然后再发送消息。");
+      return;
+    }
+
+    await handleSubmit(message);
+  }, [canStartConversation, handleSubmit, model]);
+
+  const handleSelectModel = useCallback((nextModel: string) => {
+    setModel(nextModel);
+    setModelDialogOpen(false);
+  }, []);
+
   const handleCreateBranch = useCallback(async () => {
     if (!isDesktopRuntime) return;
     const branchName = window.prompt("新分支名称", "feature/");
@@ -1722,6 +1867,31 @@ export default function Home() {
         workspaceRoot={workspaceRoot}
       />
       <SidebarInset className="app-shell bg-transparent">
+        <ModelSelector open={modelDialogOpen} onOpenChange={setModelDialogOpen}>
+          <ModelSelectorContent
+            className="max-w-[420px] rounded-[20px] border border-border/60 bg-background/96 shadow-2xl backdrop-blur"
+            title="选择模型"
+          >
+            <ModelSelectorInput placeholder="搜索模型..." className="text-[12px]" />
+            <ModelSelectorList className="max-h-[340px]">
+              <ModelSelectorEmpty>没有找到模型。</ModelSelectorEmpty>
+              {modelChefs.map((chef) => (
+                <ModelSelectorGroup key={chef} heading={chef}>
+                  {models
+                    .filter((entry) => entry.chef === chef)
+                    .map((entry) => (
+                      <ModelSelectorItemRow
+                        key={entry.id}
+                        model={entry}
+                        selected={model === entry.id}
+                        onSelect={handleSelectModel}
+                      />
+                    ))}
+                </ModelSelectorGroup>
+              ))}
+            </ModelSelectorList>
+          </ModelSelectorContent>
+        </ModelSelector>
         <div className="app-shell flex h-screen flex-col overflow-hidden bg-transparent text-foreground">
           <main className="min-h-0 flex-1 overflow-hidden">
             <section className="flex h-full min-h-0 min-w-0 flex-col border-l border-border/50 bg-transparent">
@@ -2186,7 +2356,7 @@ export default function Home() {
                             <Message
                               key={item.id}
                               from={item.role}
-                              className={item.role === "assistant" ? "mt-3" : "mt-2.5"}
+                              className={item.role === "assistant" ? "mt-3" : "mt-1.5"}
                             >
                               <MessageContent>
                                 <MessageResponse>{item.content}</MessageResponse>
@@ -2264,14 +2434,42 @@ export default function Home() {
                         {queuedSubmissionPreview ? (
                           <div
                             className={cn(
-                              "app-soft-card flex w-full items-center gap-2 rounded-none border-x-0 border-t-0 px-4 py-3 text-[12px] text-muted-foreground shadow-none",
+                              "app-soft-card flex w-full flex-wrap items-center justify-between gap-2 rounded-none border-x-0 border-t-0 px-4 py-3 text-[12px] text-muted-foreground shadow-none",
                               activePlan ? "border-b border-border/40" : "",
                             )}
                           >
-                            <LoaderCircleIcon className="size-3.5 animate-spin" />
-                            <span className="truncate">
-                              {summarizeQueuedSubmission(queuedSubmissionPreview)}
-                            </span>
+                            <div className="flex min-w-0 flex-1 items-center gap-2">
+                              <LoaderCircleIcon className="size-3.5 animate-spin" />
+                              <span className="truncate">
+                                {summarizeQueuedSubmission(queuedSubmissionPreview)}
+                              </span>
+                            </div>
+                            <PromptGuideButton
+                              disabled={!canStartConversation}
+                              onClick={() => void promoteQueuedSubmissionToGuide()}
+                            />
+                          </div>
+                        ) : null}
+
+                        {guideBanner ? (
+                          <div
+                            className="app-soft-card flex w-full flex-wrap items-center justify-between gap-2 rounded-none border-x-0 border-t-0 px-4 py-3 text-[12px] text-muted-foreground shadow-none"
+                          >
+                            <div className="flex min-w-0 flex-1 items-center gap-2">
+                              <SparklesIcon className="size-3.5 shrink-0 text-primary/80" />
+                              <span className="truncate">
+                                {guideBanner.text}
+                              </span>
+                            </div>
+                            {queuedSubmissionPreview ? (
+                              <button
+                                type="button"
+                                onClick={() => void promoteQueuedSubmissionToGuide()}
+                                className="shrink-0 text-[11px] text-foreground/75 transition-colors hover:text-foreground"
+                              >
+                                转为引导
+                              </button>
+                            ) : null}
                           </div>
                         ) : null}
 
@@ -2282,30 +2480,67 @@ export default function Home() {
                               ? "rounded-none"
                               : "rounded-[16px]",
                           )}
-                          globalDrop
+                          globalDrop={canStartConversation}
                           multiple
-                          onSubmit={handleSubmit}
+                          onSubmit={handleChatSubmit}
                         >
                           <PromptInputAttachmentsDisplay />
                           <PromptInputBody>
                             <FileMentionTextarea
                               workspaceTree={desktopWorkspace?.tree ?? []}
                               className="min-h-[60px] rounded-none border-0 bg-transparent px-5 py-3 text-[14px] leading-6 shadow-none focus-visible:ring-0"
-                              placeholder="输入 @ 选择文件，然后继续描述你的需求"
+                              placeholder={
+                                canStartConversation
+                                  ? "输入 @ 选择文件，然后继续描述你的需求"
+                                  : "请先创建或选择一个线程"
+                              }
+                              readOnly={!canStartConversation}
                             />
                           </PromptInputBody>
-                          <PromptInputFooter className="border-border/40 border-t bg-transparent px-4 py-2.5">
-                            <div className="flex flex-1" />
-                            <PromptInputTools className="gap-2">
+                          {!canStartConversation ? (
+                            <div className="border-border/35 border-t px-5 py-2.5 text-[12px] text-muted-foreground">
+                              {chatDisabledReason}
+                            </div>
+                          ) : !model ? (
+                            <div className="border-border/35 border-t px-5 py-2.5 text-[12px] text-muted-foreground">
+                              请先选择模型，然后再发送消息。
+                            </div>
+                          ) : null}
+                          <PromptInputFooter className="flex-wrap border-border/40 border-t bg-transparent px-4 py-2.5">
+                            <div className="flex min-w-0 flex-1 items-center gap-2 max-sm:w-full">
+                              <ModelSelector open={modelDialogOpen} onOpenChange={setModelDialogOpen}>
+                                <ModelSelectorTrigger asChild>
+                                  <Button
+                                    variant="outline"
+                                    className="h-8 min-w-0 max-w-[180px] justify-between gap-2 rounded-[10px] border-border/60 bg-background/80 px-2.5 text-[11px] shadow-none max-sm:w-full max-sm:max-w-none"
+                                  >
+                                    <div className="flex min-w-0 items-center gap-2">
+                                      {selectedModelData?.chefSlug ? (
+                                        <ModelSelectorLogo
+                                          className="size-3.5 shrink-0"
+                                          provider={selectedModelData.chefSlug}
+                                        />
+                                      ) : null}
+                                      <span className="truncate">
+                                        {selectedModelData?.name ?? "选择模型"}
+                                      </span>
+                                    </div>
+                                    <ChevronDownIcon className="size-3.5 shrink-0 text-muted-foreground" />
+                                  </Button>
+                                </ModelSelectorTrigger>
+                              </ModelSelector>
+                            </div>
+                            <PromptInputTools className="shrink-0 gap-2 max-sm:ml-auto">
                               <PromptInputActionMenu>
-                                <PromptInputActionMenuTrigger />
+                                <PromptInputActionMenuTrigger disabled={!canStartConversation} />
                                 <PromptInputActionMenuContent>
                                   <PromptInputActionAddAttachments />
                                 </PromptInputActionMenuContent>
                               </PromptInputActionMenu>
                             </PromptInputTools>
                             <PromptInputSubmit
-                              className="app-control size-9 rounded-[10px] border-0 shadow-none"
+                              className="app-control size-9 shrink-0 rounded-[10px] border-0 shadow-none"
+                              disabled={!canSubmitChat && status !== "streaming"}
                               onStop={handleStop}
                               status={status}
                             />

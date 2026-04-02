@@ -19,6 +19,9 @@ export type QueuedSubmission = {
   files: FileUIPart[];
 };
 
+export type SubmissionMode = "default" | "guide";
+export type GuideState = "idle" | "queued" | "applied" | "error";
+
 type SerializablePlan = {
   title: string;
   todos: Array<{
@@ -80,6 +83,8 @@ export function useAgentStream({
   const [status, setStatus] = useState<"submitted" | "streaming" | "ready" | "error">("ready");
   const [error, setError] = useState<string | null>(null);
   const [queuedSubmissions, setQueuedSubmissions] = useState<QueuedSubmission[]>([]);
+  const [guideState, setGuideState] = useState<GuideState>("idle");
+  const [guideText, setGuideText] = useState<string | null>(null);
 
   const abortRef = useRef<AbortController | null>(null);
   const assistantIdRef = useRef<string | null>(null);
@@ -111,10 +116,15 @@ export function useAgentStream({
     [createId, model, setItems, setPlan, setPreviewLogs, setPreviewUrl],
   );
 
-  const processSubmission = useCallback(async (message: PromptInputMessage) => {
+  const processSubmission = useCallback(async (
+    message: PromptInputMessage,
+    options?: { mode?: SubmissionMode },
+  ) => {
     const text = message.text?.trim();
     const attachments = message.files ?? [];
     if (!text && attachments.length === 0) return;
+    const mode = options?.mode ?? "default";
+    const isGuide = mode === "guide";
 
     const containsImageAttachment = attachments.some((file) =>
       file.mediaType.startsWith("image/"),
@@ -127,8 +137,10 @@ export function useAgentStream({
       return;
     }
 
-    setPlan(null);
-    setPreviewUrl(null);
+    if (!isGuide) {
+      setPlan(null);
+      setPreviewUrl(null);
+    }
     setStatus("submitted");
     setError(null);
 
@@ -141,6 +153,7 @@ export function useAgentStream({
       type: "message",
       role: "user",
       content: text,
+      messageKind: isGuide ? "guide" : "default",
       images: userImages,
     };
 
@@ -166,7 +179,7 @@ export function useAgentStream({
 
     setItems((prev) => [...prev, userMessage, assistantMessage, optimisticThinking]);
 
-    if (threadId) {
+    if (threadId && !isGuide) {
       setRecentThreads((prev) =>
         mergeRecentThreads(
           {
@@ -225,6 +238,12 @@ export function useAgentStream({
           model,
           requestContext: {
             workspaceRoot,
+            ...(isGuide
+              ? {
+                  guideMode: "steer",
+                  guideText: text ?? "",
+                }
+              : {}),
           },
         }),
         signal: controller.signal,
@@ -256,6 +275,14 @@ export function useAgentStream({
             data = JSON.parse(parsed.data) as StreamPayload;
           } catch {
             // keep raw string
+          }
+          if (
+            typeof data !== "string" &&
+            data.type === "stream.event" &&
+            data.eventName === "guide.applied"
+          ) {
+            setGuideState("applied");
+            setGuideText(typeof data.text === "string" ? data.text : null);
           }
           streamBus.handlePayload(data);
         }
@@ -316,6 +343,7 @@ export function useAgentStream({
   ]);
 
   const handleSubmit = useCallback(async (message: PromptInputMessage) => {
+    await (async () => {
     const text = message.text?.trim();
     const attachments = message.files ?? [];
     if (!text && attachments.length === 0) return;
@@ -333,7 +361,72 @@ export function useAgentStream({
     }
 
     await processSubmission(message);
+    })();
   }, [createId, processSubmission, status]);
+
+  const handleGuideSubmit = useCallback(async (message: PromptInputMessage) => {
+    const text = message.text?.trim();
+    const attachments = message.files ?? [];
+    if (!text && attachments.length === 0) return;
+    const hasRunningSubmission = status === "submitted" || status === "streaming";
+
+    if (attachments.length > 0) {
+      setGuideState("error");
+      setGuideText("引导暂不支持直接附加文件，请先用 @ 文件引用或发送纯文本引导。");
+      return;
+    }
+
+    if (hasRunningSubmission) {
+      const rawId = "id" in (params ?? {}) ? (params as { id?: string | string[] }).id : undefined;
+      const routeId = Array.isArray(rawId) ? rawId[0] : rawId;
+      const effectiveThreadId =
+        threadId || (typeof routeId === "string" ? routeId : undefined);
+      if (!effectiveThreadId) {
+        setGuideState("error");
+        setGuideText("当前没有可用线程，无法挂起引导。");
+        return;
+      }
+
+      setGuideState("queued");
+      setGuideText(text ?? null);
+
+      try {
+        const response = await fetch(`/api/agents/${selectedAgent}/steer`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            threadId: effectiveThreadId,
+            text,
+          }),
+        });
+
+        if (!response.ok) {
+          const responseText = await response.text();
+          throw new Error(responseText || "Failed to queue guide");
+        }
+        return;
+      } catch (err) {
+        setGuideState("error");
+        setGuideText(err instanceof Error ? err.message : "Failed to queue guide");
+        return;
+      }
+    }
+
+    await processSubmission(message, { mode: "guide" });
+    setGuideState("idle");
+    setGuideText(null);
+  }, [params, processSubmission, selectedAgent, status, threadId]);
+
+  const promoteQueuedSubmissionToGuide = useCallback(async () => {
+    const nextSubmission = queuedSubmissions[0];
+    if (!nextSubmission) return;
+
+    setQueuedSubmissions((previous) => previous.slice(1));
+    await handleGuideSubmit({
+      text: nextSubmission.text,
+      files: nextSubmission.files,
+    });
+  }, [handleGuideSubmit, queuedSubmissions]);
 
   const drainSubmissionQueue = useCallback(async () => {
     if (status !== "ready") return;
@@ -377,9 +470,13 @@ export function useAgentStream({
     setStatus,
     error,
     setError,
+    guideState,
+    guideText,
     queuedSubmissions,
     queuedSubmissionPreview,
     handleSubmit,
+    handleGuideSubmit,
+    promoteQueuedSubmissionToGuide,
     handleStop,
     drainSubmissionQueue,
   };

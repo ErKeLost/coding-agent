@@ -61,7 +61,7 @@ export const MessageContent = ({
   <div
     className={cn(
       "is-user:dark flex min-w-0 max-w-full flex-col gap-2 overflow-hidden text-sm",
-      "group-[.is-user]:ml-auto group-[.is-user]:mr-1 group-[.is-user]:w-fit group-[.is-user]:max-w-[min(56%,460px)] group-[.is-user]:rounded-[14px] group-[.is-user]:border group-[.is-user]:border-black/8 group-[.is-user]:bg-white/[0.045] group-[.is-user]:px-4 group-[.is-user]:py-3 group-[.is-user]:text-[13px] group-[.is-user]:leading-6 group-[.is-user]:text-foreground/90 group-[.is-user]:shadow-none dark:group-[.is-user]:border-white/8 dark:group-[.is-user]:bg-white/[0.04]",
+      "group-[.is-user]:ml-auto group-[.is-user]:mr-1 group-[.is-user]:w-fit group-[.is-user]:max-w-[min(56%,460px)] group-[.is-user]:rounded-[14px] group-[.is-user]:border group-[.is-user]:border-black/8 group-[.is-user]:bg-white/[0.045] group-[.is-user]:px-3.5 group-[.is-user]:py-2.5 group-[.is-user]:text-[13px] group-[.is-user]:leading-5.5 group-[.is-user]:text-foreground/90 group-[.is-user]:shadow-none dark:group-[.is-user]:border-white/8 dark:group-[.is-user]:bg-white/[0.04]",
       "group-[.is-assistant]:w-full group-[.is-assistant]:max-w-[min(100%,840px)] group-[.is-assistant]:rounded-none group-[.is-assistant]:border group-[.is-assistant]:border-transparent group-[.is-assistant]:bg-transparent group-[.is-assistant]:px-0 group-[.is-assistant]:py-1 group-[.is-assistant]:text-foreground",
       className
     )}
@@ -343,7 +343,7 @@ export const MessageResponse = memo(
     return (
       <Streamdown
         className={cn(
-          "size-full text-[14px] leading-7 [&>*:first-child]:mt-0 [&>*:last-child]:mb-0 [&_[data-paragraph=true]]:my-0 [&_[data-paragraph=true]+*]:mt-3.5 [&_ul]:my-2.5 [&_ol]:my-2.5 [&_li]:leading-7 [&_code]:rounded-md [&_code]:bg-muted/60 [&_code]:px-1.5 [&_code]:py-0.5 [&_pre]:rounded-2xl [&_pre]:border [&_pre]:border-border/60 [&_pre]:bg-background/80 [&_pre]:shadow-sm [&_table]:overflow-hidden [&_table]:rounded-xl [&_table]:border [&_table]:border-border/60",
+          "size-full min-w-0 max-w-full break-words text-[14px] leading-7 [&>*:first-child]:mt-0 [&>*:last-child]:mb-0 [&_[data-paragraph=true]]:my-0 [&_[data-paragraph=true]+*]:mt-3.5 [&_ul]:my-2.5 [&_ol]:my-2.5 [&_li]:leading-7 [&_code]:break-all [&_code]:rounded-md [&_code]:bg-muted/60 [&_code]:px-1.5 [&_code]:py-0.5 [&_pre]:max-w-full [&_pre]:overflow-x-hidden [&_pre]:whitespace-pre-wrap [&_pre]:break-words [&_pre]:rounded-2xl [&_pre]:border [&_pre]:border-border/60 [&_pre]:bg-background/80 [&_pre]:shadow-sm [&_table]:block [&_table]:max-w-full [&_table]:overflow-x-hidden [&_table]:rounded-xl [&_table]:border [&_table]:border-border/60 [&_td]:break-words [&_th]:break-words",
           className
         )}
         components={mergedComponents}

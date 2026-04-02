@@ -34,6 +34,7 @@ export type ChatItem =
       type: "message";
       role: "user" | "assistant";
       content: string;
+      messageKind?: "default" | "guide";
       images?: Experimental_GeneratedImage[];
       usage?: LanguageModelUsage;
       modelId?: string;

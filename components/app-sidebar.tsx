@@ -21,6 +21,7 @@ import {
 import { cn } from "@/lib/utils";
 import {
   FolderIcon,
+  FolderOpenIcon,
   MessageSquareIcon,
   PlusIcon,
   Settings2Icon,
@@ -117,6 +118,14 @@ export function AppSidebar({
             </div>
           </div>
           <div className="flex items-center gap-1.5">
+            <button
+              type="button"
+              onClick={onOpenWorkspace}
+              className="app-control flex size-8 items-center justify-center rounded-lg border-0 text-sidebar-foreground/60 transition-colors hover:text-sidebar-foreground group-data-[collapsible=icon]:hidden"
+              aria-label="新开文件夹"
+            >
+              <FolderOpenIcon className="size-4" />
+            </button>
             <button
               type="button"
               onClick={() => onNewThread()}
@@ -219,7 +228,15 @@ export function AppSidebar({
           ) : null}
         </div>
 
-        <div className="hidden items-center justify-center py-3 group-data-[collapsible=icon]:flex">
+        <div className="hidden flex-col items-center justify-center gap-2 py-3 group-data-[collapsible=icon]:flex">
+          <button
+            type="button"
+            onClick={onOpenWorkspace}
+            className="app-control flex size-10 items-center justify-center rounded-lg border-0 text-sidebar-foreground transition-colors"
+            aria-label="新开文件夹"
+          >
+            <FolderOpenIcon className="size-4" />
+          </button>
           <button
             type="button"
             onClick={() => onNewThread()}
@@ -235,21 +252,19 @@ export function AppSidebar({
 
       <SidebarFooter className="bg-transparent px-3 py-3 group-data-[collapsible=icon]:px-2.5">
         <div className="space-y-2 group-data-[collapsible=icon]:hidden">
-          <div className="app-soft-card rounded-lg p-1">
-            <button
-              type="button"
-              onClick={onOpenSettings}
-              className={cn(
-                "flex h-8.5 w-full items-center gap-2 rounded-md px-3 text-[11px] transition-colors",
-                activeSection === "settings"
-                  ? "app-control border-primary/30 bg-primary/[0.12] text-sidebar-foreground"
-                  : "app-control-ghost text-sidebar-foreground/60 hover:text-sidebar-foreground",
-              )}
-            >
-              <Settings2Icon className="size-3.5 text-sidebar-foreground/50" />
-              <span className="flex-1 text-left">设置</span>
-            </button>
-          </div>
+          <button
+            type="button"
+            onClick={onOpenSettings}
+            className={cn(
+              "flex h-9 w-full items-center gap-2 rounded-lg px-3 text-[11px] transition-colors",
+              activeSection === "settings"
+                ? "app-soft-card border border-primary/25 bg-primary/[0.10] text-sidebar-foreground shadow-[0_10px_24px_rgba(15,23,42,0.05)]"
+                : "app-soft-hover text-sidebar-foreground/60 hover:text-sidebar-foreground",
+            )}
+          >
+            <Settings2Icon className="size-3.5 text-sidebar-foreground/50" />
+            <span className="flex-1 text-left">设置</span>
+          </button>
         </div>
 
         <SidebarMenu className="hidden gap-1 group-data-[collapsible=icon]:flex">
