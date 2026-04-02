@@ -1,0 +1,1254 @@
+import { NextResponse } from "next/server";
+import type { LanguageModelUsage } from "ai";
+import { RequestContext } from "@mastra/core/request-context";
+import { redactStreamChunk } from "@mastra/server/server-adapter";
+import { mastra } from "@/mastra";
+import { getModelTuning } from "@/lib/model-tuning";
+import {
+  bindWorkspaceRootToThread,
+  setActiveWorkspaceRoot,
+} from "@/mastra/workspace/local-workspace";
+import {
+  getThreadSession,
+  upsertThreadSession,
+} from "@/lib/server/thread-session-store";
+import {
+  createWorkflowGraphSnapshot,
+  inferWorkflowAgentLabel,
+  summarizeThreadTitle,
+  type WorkflowGraphSnapshot,
+  type WorkflowTraceStep,
+} from "@/lib/workflow-graph";
+import {
+  extractCurrentInputText,
+  inferContinuationContext,
+} from "@/lib/continuation";
+
+export const runtime = "nodejs";
+const BUILD_AGENT_ID = "build-agent";
+
+const GENERIC_TOOL_NAMES = new Set([
+  "tool",
+  "dynamic-tool",
+  "unknown",
+  "unnamed",
+  "unnamed tool",
+]);
+
+const normalizeToolName = (value?: string | null) => {
+  if (typeof value !== "string") return undefined;
+  const trimmed = value.trim();
+  return trimmed ? trimmed : undefined;
+};
+
+const isGenericToolName = (value?: string | null) => {
+  const normalized = normalizeToolName(value)?.toLowerCase();
+  return normalized ? GENERIC_TOOL_NAMES.has(normalized) : false;
+};
+
+const pickPreferredToolName = (...candidates: Array<string | undefined>) => {
+  const normalizedCandidates = candidates
+    .map((candidate) => normalizeToolName(candidate))
+    .filter((candidate): candidate is string => Boolean(candidate));
+
+  const specificCandidate = normalizedCandidates.find(
+    (candidate) => !isGenericToolName(candidate)
+  );
+  return specificCandidate ?? normalizedCandidates[0];
+};
+
+const summarizeWorkspaceRoot = (value: string) => {
+  const normalized = value.trim().replace(/\/+$/, "");
+  const segments = normalized.split("/").filter(Boolean);
+  return segments.at(-1) ?? normalized;
+};
+
+type StreamEvent =
+  | {
+      type: "stream.event";
+      eventName: "assistant.delta" | "assistant.reasoning.delta";
+      text: string;
+    }
+  | {
+      type: "stream.event";
+      eventName: "tool.call.started";
+      toolCallId: string;
+      toolName: string;
+      args?: unknown;
+      agentId?: string;
+      parentToolCallId?: string;
+      parentAgentId?: string;
+      depth?: number;
+    }
+  | {
+      type: "stream.event";
+      eventName: "tool.call.progress";
+      toolCallId?: string;
+      toolName?: string;
+      step?: string;
+      status?: string;
+      message?: string;
+      stdout?: string;
+      stderr?: string;
+      durationMs?: number;
+      runState?: string;
+      previewUrl?: string;
+      sessionId?: string;
+      agentId?: string;
+      parentToolCallId?: string;
+      parentAgentId?: string;
+      depth?: number;
+    }
+  | {
+      type: "stream.event";
+      eventName: "tool.call.completed";
+      toolCallId: string;
+      toolName: string;
+      result?: unknown;
+      agentId?: string;
+      parentToolCallId?: string;
+      parentAgentId?: string;
+      depth?: number;
+    }
+  | {
+      type: "stream.event";
+      eventName: "tool.call.failed";
+      toolCallId?: string;
+      toolName?: string;
+      error: string;
+      agentId?: string;
+      parentToolCallId?: string;
+      parentAgentId?: string;
+      depth?: number;
+    }
+  | {
+      type: "stream.event";
+      eventName: "usage.updated";
+      usage: LanguageModelUsage;
+      modelId?: string;
+      costUSD?: number;
+    }
+  | {
+      type: "stream.event";
+      eventName: "session.updated";
+      sandboxId?: string;
+      previewUrl?: string;
+    }
+  | {
+      type: "stream.event";
+      eventName: "workflow.graph.updated";
+      graph: WorkflowGraphSnapshot;
+    }
+  | {
+      type: "stream.event";
+      eventName: "agent.stream.delta";
+      agentId: string;
+      text: string;
+      streamType?: "text" | "reasoning";
+      parentToolCallId?: string;
+      parentAgentId?: string;
+      depth?: number;
+    }
+  | {
+      type: "stream.event";
+      eventName: "agent.handoff.started" | "agent.handoff.completed";
+      agentId?: string;
+      parentToolCallId?: string;
+      parentAgentId?: string;
+      depth?: number;
+      sourceAgentId?: string;
+      sourceAgentName?: string;
+      targetType: "agent" | "workflow" | "tool";
+      targetId: string;
+      targetName?: string;
+      iteration?: number;
+      selectionReason?: string;
+    };
+
+type AgentStreamRequest = {
+  message?: string;
+  messages?: unknown;
+  threadId?: string;
+  model?: string;
+  memory?: unknown;
+  requestContext?: Record<string, unknown>;
+};
+
+export async function POST(
+  req: Request,
+  { params }: { params: Promise<{ agentId: string }> }
+) {
+  let payload: AgentStreamRequest;
+
+  try {
+    payload = (await req.json()) as AgentStreamRequest;
+  } catch {
+    return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
+  }
+
+  const messageInput = payload.messages ?? payload.message;
+  if (!messageInput) {
+    return NextResponse.json({ error: "message is required" }, { status: 400 });
+  }
+
+  const requestContext = new RequestContext();
+  if (payload.requestContext && typeof payload.requestContext === "object") {
+    for (const [key, value] of Object.entries(payload.requestContext)) {
+      requestContext.set(key, value);
+    }
+  }
+  if (payload.model) {
+    requestContext.set("model", payload.model);
+  }
+  if (payload.threadId) {
+    requestContext.set("threadId", payload.threadId);
+    requestContext.set("resourceId", "web");
+  }
+  if (payload.threadId && !requestContext.get("workspaceRoot")) {
+    const existingThread = await getThreadSession(payload.threadId);
+    const persistedWorkspaceRoot =
+      typeof existingThread?.state.workspaceRoot === "string" &&
+      existingThread.state.workspaceRoot.trim()
+        ? existingThread.state.workspaceRoot.trim()
+        : undefined;
+    if (persistedWorkspaceRoot) {
+      requestContext.set("workspaceRoot", persistedWorkspaceRoot);
+    }
+  }
+  const effectiveWorkspaceRoot =
+    typeof requestContext.get("workspaceRoot") === "string"
+      ? requestContext.get("workspaceRoot")
+      : null;
+  if (payload.threadId && effectiveWorkspaceRoot) {
+    await upsertThreadSession({
+      threadId: payload.threadId,
+      subtitle: summarizeWorkspaceRoot(effectiveWorkspaceRoot),
+      state: {
+        workspaceRoot: effectiveWorkspaceRoot,
+      },
+    });
+    bindWorkspaceRootToThread(payload.threadId, effectiveWorkspaceRoot);
+    setActiveWorkspaceRoot(effectiveWorkspaceRoot);
+  }
+  console.info("[workspace-debug] stream-route", {
+    threadId: payload.threadId ?? null,
+    requestWorkspaceRoot:
+      typeof payload.requestContext?.workspaceRoot === "string"
+        ? payload.requestContext.workspaceRoot
+        : null,
+    effectiveWorkspaceRoot,
+  });
+  const tuning = getModelTuning(payload.model);
+
+  const { agentId } = await params;
+  if (agentId !== BUILD_AGENT_ID) {
+    return NextResponse.json({ error: `Agent not found: ${agentId}` }, { status: 404 });
+  }
+  const agent = mastra.getAgentById(agentId);
+  if (!agent) {
+    return NextResponse.json({ error: `Agent not found: ${agentId}` }, { status: 404 });
+  }
+  type AgentStreamInput = Parameters<typeof agent.stream>[0];
+  const currentMessageText = extractCurrentInputText(messageInput);
+  const continuationContext = inferContinuationContext(
+    payload.threadId ? await getThreadSession(payload.threadId) : null,
+    currentMessageText
+  );
+  if (continuationContext.isContinuation) {
+    requestContext.set("continuationMode", "resume");
+    if (continuationContext.lastUserGoal) {
+      requestContext.set("continuationLastUserGoal", continuationContext.lastUserGoal);
+    }
+    if (continuationContext.pendingPlanTitle) {
+      requestContext.set("continuationPlanTitle", continuationContext.pendingPlanTitle);
+    }
+    if (continuationContext.pendingPlanStep) {
+      requestContext.set("continuationPlanStep", continuationContext.pendingPlanStep);
+    }
+  }
+  type ActiveAgentContext = {
+    agentId: string;
+    agentName: string;
+    parentToolCallId: string;
+    parentAgentId?: string;
+    depth: number;
+  };
+  const activeAgentStack: ActiveAgentContext[] = [];
+  const getActiveAgentContext = () => activeAgentStack[activeAgentStack.length - 1];
+
+  const enqueueJson = (controller: ReadableStreamDefaultController<Uint8Array>, value: unknown) => {
+    controller.enqueue(encoder.encode(`data: ${JSON.stringify(value)}\n\n`));
+  };
+
+  const extractSessionUpdate = (value: unknown): StreamEvent | null => {
+    if (!value || typeof value !== "object") return null;
+    const source = value as {
+      result?: { sandboxId?: unknown; previewUrl?: unknown; deploymentUrl?: unknown; url?: unknown };
+      toolResult?: { result?: { sandboxId?: unknown; previewUrl?: unknown; deploymentUrl?: unknown; url?: unknown } };
+      sandboxId?: unknown;
+      previewUrl?: unknown;
+      deploymentUrl?: unknown;
+      url?: unknown;
+    };
+    const result = source.toolResult?.result ?? source.result ?? source;
+    const sandboxId =
+      typeof result.sandboxId === "string" && result.sandboxId.trim()
+        ? result.sandboxId.trim()
+        : undefined;
+    const previewUrl =
+      typeof result.previewUrl === "string"
+        ? result.previewUrl
+        : typeof result.deploymentUrl === "string"
+          ? result.deploymentUrl
+          : typeof result.url === "string"
+            ? result.url
+            : undefined;
+    if (!sandboxId && !previewUrl) return null;
+    return {
+      type: "stream.event",
+      eventName: "session.updated",
+      sandboxId,
+      previewUrl,
+    };
+  };
+
+  const mapChunkToStreamEvents = (value: unknown): StreamEvent[] => {
+    if (!value || typeof value !== "object") return [];
+    const rawRecord = value as {
+      type?: string;
+      payload?: Record<string, unknown>;
+      error?: unknown;
+      toolCallId?: string;
+      toolCall?: { id?: string; name?: string; args?: unknown };
+      toolResult?: { id?: string; name?: string; result?: unknown };
+      toolName?: string;
+      name?: string;
+      args?: unknown;
+      result?: unknown;
+      status?: string;
+      step?: string;
+      message?: string;
+      stdout?: string;
+      stderr?: string;
+      durationMs?: number;
+      runState?: string;
+      previewUrl?: string;
+      sessionId?: string;
+      text?: string;
+      textDelta?: string;
+    };
+    const record = {
+      ...rawRecord,
+      ...(rawRecord.payload && typeof rawRecord.payload === "object" ? rawRecord.payload : {}),
+    };
+    const events: StreamEvent[] = [];
+    const chunkType = record.type?.toLowerCase();
+
+    const emitStructuredToolEvents = ({
+      phase,
+      toolCallId,
+      toolName,
+      args,
+      result,
+      error,
+      status,
+      step,
+      message,
+      stdout,
+      stderr,
+      durationMs,
+      runState,
+      previewUrl,
+      sessionId,
+    }: {
+      phase: "start" | "progress" | "completed" | "failed";
+      toolCallId?: string;
+      toolName?: string;
+      args?: unknown;
+      result?: unknown;
+      error?: string;
+      status?: string;
+      step?: string;
+      message?: string;
+      stdout?: string;
+      stderr?: string;
+      durationMs?: number;
+      runState?: string;
+      previewUrl?: string;
+      sessionId?: string;
+    }) => {
+      if (!toolCallId || !toolName) return;
+      const isAgentWrapperTool =
+        typeof toolName === "string" && toolName.startsWith("agent-");
+
+      if (phase === "start") {
+        if (isAgentWrapperTool) {
+          const parentAgent = getActiveAgentContext();
+          const delegatedAgentId = toolName.slice("agent-".length);
+          const delegatedAgentName = delegatedAgentId
+            .replace(/([A-Z])/g, " $1")
+            .replace(/^./, (value) => value.toUpperCase())
+            .trim();
+          const context: ActiveAgentContext = {
+            agentId: delegatedAgentId,
+            agentName: delegatedAgentName,
+            parentToolCallId: toolCallId,
+            parentAgentId: parentAgent?.agentId,
+            depth: (parentAgent?.depth ?? 0) + 1,
+          };
+          activeAgentStack.push(context);
+          events.push({
+            type: "stream.event",
+            eventName: "agent.handoff.started",
+            agentId: context.agentId,
+            parentToolCallId: context.parentToolCallId,
+            parentAgentId: context.parentAgentId,
+            depth: context.depth,
+            sourceAgentId: parentAgent?.agentId ?? agentId,
+            sourceAgentName: parentAgent?.agentName ?? agent.name,
+            targetType: "agent",
+            targetId: context.agentId,
+            targetName: context.agentName,
+          });
+          return;
+        }
+
+        const activeAgent = getActiveAgentContext();
+        events.push({
+          type: "stream.event",
+          eventName: "tool.call.started",
+          toolCallId,
+          toolName,
+          args,
+          agentId: activeAgent?.agentId,
+          parentToolCallId: activeAgent?.parentToolCallId,
+          parentAgentId: activeAgent?.parentAgentId,
+          depth: activeAgent?.depth,
+        });
+        return;
+      }
+
+      if (phase === "progress") {
+        const activeAgent = getActiveAgentContext();
+        events.push({
+          type: "stream.event",
+          eventName: "tool.call.progress",
+          toolCallId,
+          toolName,
+          step,
+          status,
+          message,
+          stdout,
+          stderr,
+          durationMs,
+          runState,
+          previewUrl,
+          sessionId,
+          agentId: activeAgent?.agentId,
+          parentToolCallId: activeAgent?.parentToolCallId,
+          parentAgentId: activeAgent?.parentAgentId,
+          depth: activeAgent?.depth,
+        });
+        return;
+      }
+
+      if (phase === "completed") {
+        if (isAgentWrapperTool) {
+          const stackIndex = [...activeAgentStack]
+            .map((entry) => entry.parentToolCallId)
+            .lastIndexOf(toolCallId);
+          const context =
+            stackIndex >= 0 ? activeAgentStack.splice(stackIndex, 1)[0] : undefined;
+          if (context) {
+            events.push({
+              type: "stream.event",
+              eventName: "agent.handoff.completed",
+              agentId: context.agentId,
+              parentToolCallId: context.parentToolCallId,
+              parentAgentId: context.parentAgentId,
+              depth: context.depth,
+              sourceAgentId: context.parentAgentId ?? agentId,
+              sourceAgentName: context.parentAgentId ? context.parentAgentId : agent.name,
+              targetType: "agent",
+              targetId: context.agentId,
+              targetName: context.agentName,
+            });
+          }
+          return;
+        }
+
+        const activeAgent = getActiveAgentContext();
+        events.push({
+          type: "stream.event",
+          eventName: "tool.call.completed",
+          toolCallId,
+          toolName,
+          result,
+          agentId: activeAgent?.agentId,
+          parentToolCallId: activeAgent?.parentToolCallId,
+          parentAgentId: activeAgent?.parentAgentId,
+          depth: activeAgent?.depth,
+        });
+        return;
+      }
+
+      const activeAgent = getActiveAgentContext();
+      events.push({
+        type: "stream.event",
+        eventName: "tool.call.failed",
+        toolCallId,
+        toolName,
+        error: error ?? "Tool failed",
+        agentId: activeAgent?.agentId,
+        parentToolCallId: activeAgent?.parentToolCallId,
+        parentAgentId: activeAgent?.parentAgentId,
+        depth: activeAgent?.depth,
+      });
+    };
+
+    if (
+      chunkType?.startsWith("agent-execution-event-") ||
+      chunkType?.startsWith("workflow-execution-event-")
+    ) {
+      return mapChunkToStreamEvents(record.payload);
+    }
+
+    if (chunkType === "routing-agent-text-delta") {
+      const text =
+        typeof record.payload?.text === "string"
+          ? record.payload.text
+          : typeof record.text === "string"
+            ? record.text
+            : typeof record.textDelta === "string"
+              ? record.textDelta
+              : "";
+      if (text) {
+        const activeAgent = getActiveAgentContext();
+        if (activeAgent) {
+          events.push({
+            type: "stream.event",
+            eventName: "agent.stream.delta",
+            agentId: activeAgent.agentId,
+            text,
+            streamType: "reasoning",
+            parentToolCallId: activeAgent.parentToolCallId,
+            parentAgentId: activeAgent.parentAgentId,
+            depth: activeAgent.depth,
+          });
+        } else {
+          events.push({
+            type: "stream.event",
+            eventName: "assistant.reasoning.delta",
+            text,
+          });
+        }
+      }
+      return events;
+    }
+
+    if (chunkType === "text-delta" || chunkType === "reasoning-text-delta") {
+      const text =
+        typeof record.text === "string"
+          ? record.text
+          : typeof record.textDelta === "string"
+            ? record.textDelta
+            : "";
+      if (text) {
+        const activeAgent = getActiveAgentContext();
+        if (activeAgent) {
+          events.push({
+            type: "stream.event",
+            eventName: "agent.stream.delta",
+            agentId: activeAgent.agentId,
+            text,
+            streamType:
+              chunkType === "reasoning-text-delta" ? "reasoning" : "text",
+            parentToolCallId: activeAgent.parentToolCallId,
+            parentAgentId: activeAgent.parentAgentId,
+            depth: activeAgent.depth,
+          });
+        } else {
+          events.push({
+            type: "stream.event",
+            eventName:
+              chunkType === "reasoning-text-delta"
+                ? "assistant.reasoning.delta"
+                : "assistant.delta",
+            text,
+          });
+        }
+      }
+      return events;
+    }
+
+    if (chunkType === "routing-agent-end") {
+      const payload = record.payload as {
+        primitiveId?: unknown;
+        primitiveType?: unknown;
+        selectionReason?: unknown;
+        iteration?: unknown;
+      };
+      const primitiveType =
+        payload?.primitiveType === "agent" ||
+        payload?.primitiveType === "workflow" ||
+        payload?.primitiveType === "tool"
+          ? payload.primitiveType
+          : undefined;
+      const primitiveId =
+        typeof payload?.primitiveId === "string" && payload.primitiveId.trim()
+          ? payload.primitiveId.trim()
+          : undefined;
+      if (primitiveType && primitiveId) {
+        events.push({
+          type: "stream.event",
+          eventName: "agent.handoff.started",
+          sourceAgentId: agentId,
+          sourceAgentName: agent.name,
+          targetType: primitiveType,
+          targetId: primitiveId,
+          targetName: primitiveId,
+          iteration:
+            typeof payload.iteration === "number" ? payload.iteration : undefined,
+          selectionReason:
+            typeof payload.selectionReason === "string"
+              ? payload.selectionReason
+              : undefined,
+        });
+      }
+      return events;
+    }
+
+    if (chunkType === "agent-execution-start") {
+      const payload = record.payload as { agentId?: unknown };
+      const delegatedAgentId =
+        typeof payload?.agentId === "string" && payload.agentId.trim()
+          ? payload.agentId.trim()
+          : undefined;
+      if (delegatedAgentId) {
+        events.push({
+          type: "stream.event",
+          eventName: "agent.handoff.started",
+          sourceAgentId: agentId,
+          sourceAgentName: agent.name,
+          targetType: "agent",
+          targetId: delegatedAgentId,
+          targetName: delegatedAgentId,
+        });
+      }
+      return events;
+    }
+
+    if (chunkType === "agent-execution-end") {
+      const payload = record.payload as { agentId?: unknown };
+      const delegatedAgentId =
+        typeof payload?.agentId === "string" && payload.agentId.trim()
+          ? payload.agentId.trim()
+          : undefined;
+      if (delegatedAgentId) {
+        events.push({
+          type: "stream.event",
+          eventName: "agent.handoff.completed",
+          sourceAgentId: agentId,
+          sourceAgentName: agent.name,
+          targetType: "agent",
+          targetId: delegatedAgentId,
+          targetName: delegatedAgentId,
+        });
+      }
+      return events;
+    }
+
+    if (chunkType === "workflow-execution-start" || chunkType === "workflow-execution-end") {
+      const payload = record.payload as { workflowId?: unknown; name?: unknown };
+      const workflowId =
+        typeof payload?.workflowId === "string" && payload.workflowId.trim()
+          ? payload.workflowId.trim()
+          : typeof payload?.name === "string" && payload.name.trim()
+            ? payload.name.trim()
+            : undefined;
+      if (workflowId) {
+        events.push({
+          type: "stream.event",
+          eventName:
+            chunkType === "workflow-execution-start"
+              ? "agent.handoff.started"
+              : "agent.handoff.completed",
+          sourceAgentId: agentId,
+          sourceAgentName: agent.name,
+          targetType: "workflow",
+          targetId: workflowId,
+          targetName: typeof payload?.name === "string" ? payload.name : workflowId,
+        });
+      }
+      return events;
+    }
+
+    const toolCallsArray = Array.isArray((record as { toolCalls?: unknown }).toolCalls)
+      ? ((record as { toolCalls: Array<Record<string, unknown>> }).toolCalls ?? [])
+      : [];
+    for (const toolCall of toolCallsArray) {
+      emitStructuredToolEvents({
+        phase: "start",
+        toolCallId:
+          typeof toolCall.payload?.toolCallId === "string"
+            ? toolCall.payload.toolCallId
+            : typeof toolCall.toolCallId === "string"
+              ? toolCall.toolCallId
+              : undefined,
+        toolName:
+          typeof toolCall.payload?.toolName === "string"
+            ? toolCall.payload.toolName
+            : typeof toolCall.toolName === "string"
+              ? toolCall.toolName
+              : undefined,
+        args: toolCall.payload?.args ?? toolCall.args,
+      });
+    }
+
+    const toolResultsArray = Array.isArray((record as { toolResults?: unknown }).toolResults)
+      ? ((record as { toolResults: Array<Record<string, unknown>> }).toolResults ?? [])
+      : [];
+    for (const toolResult of toolResultsArray) {
+      const resultPayload =
+        toolResult.payload && typeof toolResult.payload === "object"
+          ? toolResult.payload
+          : toolResult;
+      const resultValue =
+        resultPayload && typeof resultPayload === "object" && "result" in resultPayload
+          ? (resultPayload as { result?: unknown }).result
+          : undefined;
+      const isFailedResult =
+        typeof resultValue === "object" &&
+        resultValue !== null &&
+        "state" in (resultValue as Record<string, unknown>) &&
+        (resultValue as { state?: unknown }).state === "failed";
+      emitStructuredToolEvents({
+        phase: isFailedResult ? "failed" : "completed",
+        toolCallId:
+          typeof resultPayload.toolCallId === "string" ? resultPayload.toolCallId : undefined,
+        toolName:
+          typeof resultPayload.toolName === "string" ? resultPayload.toolName : undefined,
+        result: resultValue,
+        error:
+          isFailedResult && typeof resultValue === "object" && resultValue !== null
+            ? typeof (resultValue as { error?: unknown }).error === "string"
+              ? (resultValue as { error: string }).error
+              : "Tool failed"
+            : undefined,
+      });
+    }
+
+    if (typeof record.error === "string" && record.error.trim()) {
+      const activeAgent = getActiveAgentContext();
+      events.push({
+        type: "stream.event",
+        eventName: "tool.call.failed",
+        toolCallId: record.toolCallId,
+        toolName: record.toolName ?? record.name ?? record.toolCall?.name,
+        error: record.error,
+        agentId: activeAgent?.agentId,
+        parentToolCallId: activeAgent?.parentToolCallId,
+        parentAgentId: activeAgent?.parentAgentId,
+        depth: activeAgent?.depth,
+      });
+    }
+
+    const toolCallId = record.toolCall?.id ?? record.toolCallId;
+    const toolName = record.toolCall?.name ?? record.toolName ?? record.name;
+    const isToolCall =
+      chunkType?.startsWith("tool-call") ||
+      chunkType?.startsWith("tool-call-input") ||
+      chunkType?.startsWith("tool-call-delta") ||
+      Boolean(record.toolCall);
+    if (isToolCall && toolCallId && toolName) {
+      emitStructuredToolEvents({
+        phase: "start",
+        toolCallId,
+        toolName,
+        args: record.toolCall?.args ?? record.args,
+      });
+    }
+
+    const isToolProgress = chunkType === "data-tool-progress" || chunkType === "tool-step";
+    if (isToolProgress) {
+      emitStructuredToolEvents({
+        phase: "progress",
+        toolCallId,
+        toolName,
+        step: record.step,
+        status: record.status,
+        message: record.message,
+        stdout: record.stdout,
+        stderr: record.stderr,
+        durationMs: record.durationMs,
+        runState: record.runState,
+        previewUrl: record.previewUrl,
+        sessionId: record.sessionId,
+      });
+    }
+
+    const isToolResult = chunkType?.includes("tool-result") || Boolean(record.toolResult);
+    if (isToolResult && toolCallId && toolName) {
+      const resultValue = record.toolResult?.result ?? record.result;
+      const isFailedResult =
+        typeof resultValue === "object" &&
+        resultValue !== null &&
+        "state" in (resultValue as Record<string, unknown>) &&
+        (resultValue as { state?: unknown }).state === "failed";
+      emitStructuredToolEvents({
+        phase: isFailedResult ? "failed" : "completed",
+        toolCallId,
+        toolName,
+        result: resultValue,
+        error:
+          isFailedResult &&
+          typeof resultValue === "object" &&
+          resultValue !== null &&
+          typeof (resultValue as { error?: unknown }).error === "string"
+            ? (resultValue as { error: string }).error
+            : undefined,
+      });
+    }
+
+    const sessionUpdate = extractSessionUpdate(record);
+    if (sessionUpdate) {
+      events.push(sessionUpdate);
+    }
+
+    return events;
+  };
+
+  const encoder = new TextEncoder();
+  const emittedToolStarts = new Set<string>();
+  const emittedToolCompletions = new Set<string>();
+  let lastSessionStateKey: string | undefined;
+  let lastUsageKey: string | undefined;
+  let latestSandboxId: string | undefined;
+  let latestPreviewUrl: string | undefined;
+  const executionSteps = new Map<string, WorkflowTraceStep>();
+  const executionOrder: string[] = [];
+  let latestGraph: WorkflowGraphSnapshot | null = null;
+  let streamOutcome: "idle" | "streaming" | "done" | "error" = "idle";
+  let activeAgentLabel: string | undefined = agent.name;
+  let activeAgentMeta: string | undefined;
+  const memory =
+    payload.memory ??
+    (payload.threadId
+      ? {
+          thread: { id: payload.threadId },
+          resource: "web",
+        }
+      : undefined);
+
+  const startAgentStream = async (requestContextForAttempt: RequestContext) => {
+    const streamResult = await agent.stream(messageInput as AgentStreamInput, {
+      requestContext: requestContextForAttempt,
+      modelSettings: tuning.modelSettings,
+      providerOptions: tuning.providerOptions,
+      memory,
+      abortSignal: req.signal,
+    });
+    return streamResult.fullStream.getReader();
+  };
+
+  const getThreadTitle = () =>
+    typeof payload.message === "string" && payload.message.trim()
+      ? summarizeThreadTitle(payload.message)
+      : payload.threadId
+        ? payload.threadId
+        : "Thread";
+
+  const buildGraphSnapshot = (streamStatus: "idle" | "streaming" | "done" | "error") =>
+    createWorkflowGraphSnapshot({
+      threadId: payload.threadId,
+      title: getThreadTitle(),
+      previewUrl: latestPreviewUrl,
+      status: streamStatus,
+      activeAgentLabel,
+      activeAgentMeta,
+      steps: executionOrder
+        .map((toolCallId) => executionSteps.get(toolCallId))
+        .filter((step): step is WorkflowTraceStep => Boolean(step)),
+    });
+
+  const syncGraph = (
+    controller: ReadableStreamDefaultController<Uint8Array>,
+    streamStatus: "idle" | "streaming" | "done" | "error"
+  ) => {
+    const graph = buildGraphSnapshot(streamStatus);
+    streamOutcome = streamStatus;
+    latestGraph = graph;
+    enqueueJson(controller, {
+      type: "stream.event",
+      eventName: "workflow.graph.updated",
+      graph,
+    } satisfies StreamEvent);
+  };
+
+  const upsertExecutionStep = (toolCallId: string, patch: Partial<WorkflowTraceStep>) => {
+    const existing = executionSteps.get(toolCallId);
+    const toolName =
+      pickPreferredToolName(patch.toolName, existing?.toolName) ?? "未命名工具";
+    if (!existing) {
+      executionOrder.push(toolCallId);
+    }
+    executionSteps.set(toolCallId, {
+      toolCallId,
+      toolName,
+      agentLabel:
+        patch.agentLabel ??
+        existing?.agentLabel ??
+        inferWorkflowAgentLabel(toolName),
+      status: patch.status ?? existing?.status ?? "pending",
+      meta: patch.meta ?? existing?.meta,
+    });
+  };
+
+  const extractUsage = (value: unknown): LanguageModelUsage | undefined => {
+    if (!value || typeof value !== "object") return undefined;
+    const obj = value as {
+      usage?: LanguageModelUsage;
+      stepResult?: { usage?: LanguageModelUsage };
+      payload?: {
+        usage?: LanguageModelUsage;
+        stepResult?: { usage?: LanguageModelUsage };
+        metadata?: {
+          providerMetadata?: {
+            openrouter?: {
+              usage?: {
+                promptTokens?: number;
+                completionTokens?: number;
+                totalTokens?: number;
+                promptTokensDetails?: { cachedTokens?: number };
+                completionTokensDetails?: { reasoningTokens?: number };
+                cost?: number;
+              };
+            };
+          };
+        };
+      };
+      providerMetadata?: {
+        openrouter?: {
+          usage?: {
+            promptTokens?: number;
+            completionTokens?: number;
+            totalTokens?: number;
+            promptTokensDetails?: { cachedTokens?: number };
+            completionTokensDetails?: { reasoningTokens?: number };
+            cost?: number;
+          };
+        };
+      };
+      response?: {
+        providerMetadata?: {
+          openrouter?: {
+            usage?: {
+              promptTokens?: number;
+              completionTokens?: number;
+              totalTokens?: number;
+              promptTokensDetails?: { cachedTokens?: number };
+              completionTokensDetails?: { reasoningTokens?: number };
+              cost?: number;
+            };
+          };
+        };
+      };
+    };
+
+    const openrouterUsage =
+      obj.providerMetadata?.openrouter?.usage ??
+      obj.response?.providerMetadata?.openrouter?.usage ??
+      obj.payload?.metadata?.providerMetadata?.openrouter?.usage;
+    if (openrouterUsage) {
+      return {
+        inputTokens: openrouterUsage.promptTokens ?? 0,
+        outputTokens: openrouterUsage.completionTokens ?? 0,
+        totalTokens:
+          openrouterUsage.totalTokens ??
+          (openrouterUsage.promptTokens ?? 0) +
+          (openrouterUsage.completionTokens ?? 0),
+        reasoningTokens: openrouterUsage.completionTokensDetails?.reasoningTokens,
+        cachedInputTokens: openrouterUsage.promptTokensDetails?.cachedTokens,
+      };
+    }
+
+    return (
+      obj.usage ??
+      obj.stepResult?.usage ??
+      obj.payload?.usage ??
+      obj.payload?.stepResult?.usage
+    );
+  };
+
+  const extractCostUSD = (value: unknown): number | undefined => {
+    if (!value || typeof value !== "object") return undefined;
+    const obj = value as {
+      providerMetadata?: {
+        openrouter?: { usage?: { cost?: number } };
+      };
+      response?: {
+        providerMetadata?: {
+          openrouter?: { usage?: { cost?: number } };
+        };
+      };
+      payload?: {
+        metadata?: {
+          providerMetadata?: {
+            openrouter?: { usage?: { cost?: number } };
+          };
+        };
+      };
+    };
+    return (
+      obj.providerMetadata?.openrouter?.usage?.cost ??
+      obj.response?.providerMetadata?.openrouter?.usage?.cost ??
+      obj.payload?.metadata?.providerMetadata?.openrouter?.usage?.cost
+    );
+  };
+
+  const applyStreamEvent = (
+    controller: ReadableStreamDefaultController<Uint8Array>,
+    event: StreamEvent
+  ) => {
+    if (event.eventName === "tool.call.started") {
+      if (emittedToolStarts.has(event.toolCallId)) return;
+      emittedToolStarts.add(event.toolCallId);
+      upsertExecutionStep(event.toolCallId, {
+        toolName: event.toolName,
+        agentLabel: activeAgentLabel,
+        status: "pending",
+        meta: "starting",
+      });
+    }
+    if (event.eventName === "tool.call.completed") {
+      if (emittedToolCompletions.has(event.toolCallId)) return;
+      emittedToolCompletions.add(event.toolCallId);
+      const result = event.result as
+        | {
+            previewUrl?: unknown;
+            deploymentUrl?: unknown;
+            url?: unknown;
+            sessionId?: unknown;
+          }
+        | undefined;
+      upsertExecutionStep(event.toolCallId, {
+        toolName: event.toolName,
+        agentLabel: activeAgentLabel,
+        status: "done",
+        meta:
+          typeof result?.previewUrl === "string" ||
+          typeof result?.deploymentUrl === "string" ||
+          typeof result?.url === "string"
+            ? "preview available"
+            : typeof result?.sessionId === "string"
+              ? `session ${String(result.sessionId).slice(0, 18)}`
+              : "completed",
+      });
+    }
+    if (event.eventName === "session.updated") {
+      const sessionStateKey = `${event.sandboxId ?? ""}|${event.previewUrl ?? ""}`;
+      if (sessionStateKey === lastSessionStateKey) return;
+      lastSessionStateKey = sessionStateKey;
+      latestSandboxId = event.sandboxId ?? latestSandboxId;
+      latestPreviewUrl = event.previewUrl ?? latestPreviewUrl;
+    }
+    if (event.eventName === "tool.call.progress" && event.toolCallId) {
+      upsertExecutionStep(event.toolCallId, {
+        toolName: event.toolName,
+        agentLabel: activeAgentLabel,
+        status:
+          event.runState === "failed" || event.runState === "timed_out"
+            ? "error"
+            : event.runState === "completed"
+              ? "done"
+              : "pending",
+        meta:
+          event.previewUrl
+            ? "preview available"
+            : event.stderr
+              ? "stderr emitted"
+              : event.stdout
+                ? "stdout emitted"
+                : event.message ?? event.step ?? event.status ?? "running",
+      });
+    }
+    if (event.eventName === "tool.call.failed") {
+      const failureId =
+        event.toolCallId ??
+        `${pickPreferredToolName(event.toolName) ?? "unnamed"}-${executionOrder.length + 1}`;
+      upsertExecutionStep(failureId, {
+        toolName: event.toolName,
+        agentLabel: activeAgentLabel,
+        status: "error",
+        meta: event.error,
+      });
+    }
+    if (event.eventName === "agent.handoff.started") {
+      activeAgentLabel =
+        event.targetType === "agent"
+          ? event.targetName ?? event.targetId
+          : activeAgentLabel;
+      activeAgentMeta =
+        event.selectionReason ??
+        (event.targetType === "workflow"
+          ? `executing workflow ${event.targetName ?? event.targetId}`
+          : event.targetType === "tool"
+            ? `delegating tool ${event.targetName ?? event.targetId}`
+            : "delegated by routing agent");
+    }
+    if (event.eventName === "agent.handoff.completed") {
+      activeAgentMeta = "handoff completed";
+    }
+
+    enqueueJson(controller, event);
+    if (
+      event.eventName === "agent.handoff.started" ||
+      event.eventName === "agent.handoff.completed" ||
+      event.eventName === "tool.call.started" ||
+      event.eventName === "tool.call.progress" ||
+      event.eventName === "tool.call.completed" ||
+      event.eventName === "tool.call.failed" ||
+      event.eventName === "session.updated"
+    ) {
+      syncGraph(
+        controller,
+        event.eventName === "tool.call.failed" ? "error" : "streaming"
+      );
+    }
+  };
+
+  const emitUsageIfNeeded = (
+    controller: ReadableStreamDefaultController<Uint8Array>,
+    chunk: unknown
+  ) => {
+    const usage = extractUsage(chunk);
+    const costUSD = extractCostUSD(chunk);
+    const usageKey = usage
+      ? JSON.stringify({
+          inputTokens: usage.inputTokens ?? 0,
+          outputTokens: usage.outputTokens ?? 0,
+          totalTokens: usage.totalTokens ?? 0,
+          reasoningTokens: usage.reasoningTokens ?? 0,
+          cachedInputTokens: usage.cachedInputTokens ?? 0,
+          costUSD: costUSD ?? null,
+        })
+      : undefined;
+    if (usage && usageKey && usageKey !== lastUsageKey) {
+      lastUsageKey = usageKey;
+      const usagePayload: StreamEvent = {
+        type: "stream.event",
+        eventName: "usage.updated",
+        usage,
+        modelId: payload.model,
+        costUSD,
+      };
+      enqueueJson(controller, usagePayload);
+    }
+  };
+
+  const cloneRequestContext = (source: RequestContext) => {
+    const clone = new RequestContext();
+    const sourceWithGet = source as RequestContext & {
+      get?: (name: string) => unknown;
+    };
+    const keys = [
+      "model",
+      "sandboxId",
+      "continuationMode",
+      "continuationLastUserGoal",
+      "continuationPlanTitle",
+      "continuationPlanStep",
+    ];
+    for (const key of keys) {
+      const value = sourceWithGet.get?.(key);
+      if (value !== undefined) clone.set(key, value);
+    }
+    return clone;
+  };
+
+  const stream = new ReadableStream({
+    async start(controller) {
+      try {
+        if (payload.threadId) {
+          await upsertThreadSession({
+            threadId: payload.threadId,
+            subtitle: payload.model,
+          });
+        }
+
+        syncGraph(controller, "idle");
+
+        const streamReader = await startAgentStream(cloneRequestContext(requestContext));
+
+        while (true) {
+          const { value, done } = await streamReader.read();
+          if (done) break;
+
+          const chunk = redactStreamChunk(value);
+          const streamEvents = mapChunkToStreamEvents(chunk);
+          const rawChunk =
+            streamEvents.length > 0
+              ? { ...chunk, streamCanonicalized: true }
+              : chunk;
+
+          enqueueJson(controller, rawChunk);
+          for (const event of streamEvents) {
+            applyStreamEvent(controller, event);
+          }
+          emitUsageIfNeeded(controller, chunk);
+        }
+      } catch (error) {
+        streamOutcome = "error";
+        const errorPayload = {
+          type: "stream.event",
+          eventName: "tool.call.failed",
+          error: error instanceof Error ? error.message : "Stream error",
+        };
+        enqueueJson(controller, errorPayload);
+        syncGraph(controller, "error");
+      } finally {
+        const finalStatus =
+          streamOutcome === "error" ||
+          executionOrder.some((toolCallId) => executionSteps.get(toolCallId)?.status === "error")
+            ? "error"
+            : executionOrder.length > 0
+              ? "done"
+              : latestPreviewUrl
+                ? "done"
+                : "idle";
+        const finalGraph = buildGraphSnapshot(finalStatus);
+        latestGraph = finalGraph;
+        enqueueJson(controller, {
+          type: "stream.event",
+          eventName: "workflow.graph.updated",
+          graph: finalGraph,
+        } satisfies StreamEvent);
+        if (payload.threadId) {
+          try {
+            await upsertThreadSession({
+              threadId: payload.threadId,
+              subtitle: payload.model,
+              state: {
+                sandboxId: latestSandboxId,
+                previewUrl: latestPreviewUrl,
+                graph: latestGraph ?? finalGraph,
+              },
+            });
+          } catch {
+            // Ignore thread session persistence failures at stream teardown.
+          }
+        }
+        controller.close();
+      }
+    },
+  });
+
+  return new Response(stream, {
+    status: 200,
+    headers: {
+      "Content-Type": "text/event-stream",
+      "Cache-Control": "no-cache, no-transform",
+      Connection: "keep-alive",
+    },
+  });
+}

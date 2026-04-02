@@ -1,0 +1,8 @@
+Ask the user for missing or ambiguous information.
+
+Use this when:
+- Key inputs are missing or unclear
+- You need a user choice between options
+- You must confirm a risky action
+
+Provide concise, specific questions. If choices exist, include them in the tool input.

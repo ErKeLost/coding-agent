@@ -1,0 +1,1 @@
+Use the base instructions as the primary behavior for Codex-family models. Favor direct execution, concise progress updates, and repository-first investigation over extra gating behavior.

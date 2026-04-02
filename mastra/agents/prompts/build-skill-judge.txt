@@ -1,0 +1,9 @@
+Before taking any action, run a quick "skill match" pass on the user's request.
+
+Rules:
+- If a `<available_skills>` list or a `skillsHint` block is present in context, you MUST evaluate it for matches before any other work.
+- If the request clearly matches a skill (by name or description), call the `skill` tool for each matched skill before doing anything else.
+- If no `<available_skills>` list is present and you have the required tool context for `skill`, call it once to fetch the list, then re-run the match.
+- Be conservative: only load skills with clear relevance; do not guess.
+- If no skill matches, proceed normally.
+- Skill matching does not authorize unrelated tool use by itself.

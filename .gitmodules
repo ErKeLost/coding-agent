@@ -1,0 +1,15 @@
+[submodule "opencode"]
+	path = opencode
+	url = https://github.com/sst/opencode.git
+[submodule "oh-my-opencode"]
+	path = oh-my-opencode
+	url = https://github.com/code-yeongyu/oh-my-opencode
+[submodule "zypher"]
+	path = zypher
+	url = https://github.com/corespeed-io/zypher-agent.git
+[submodule "codex"]
+	path = codex
+	url = https://github.com/openai/codex.git
+[submodule "opencode-learn"]
+	path = opencode-learn
+	url = https://github.com/sst/opencode.git

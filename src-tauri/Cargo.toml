@@ -1,0 +1,19 @@
+[package]
+name = "coding-agent-desktop"
+version = "0.1.0"
+description = "Desktop shell for the Coding Agent app"
+authors = ["Coding Agent"]
+edition = "2021"
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+rfd = "=0.15.4"
+serde = { version = "1", features = ["derive"] }
+tauri = { version = "2", features = [] }
+tauri-plugin-opener = "2"
+
+[lib]
+name = "coding_agent_desktop_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]

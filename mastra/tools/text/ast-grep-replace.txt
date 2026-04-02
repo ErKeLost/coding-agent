@@ -1,0 +1,5 @@
+- AST-aware pattern replacement using ast-grep (sg)
+- Use meta-variables in rewrite to preserve matched content
+- Dry-run by default; set dryRun=false to apply changes
+- Example: pattern "console.log($MSG)" rewrite "logger.info($MSG)"
+- Supports include/exclude globs via globs (prefix ! to exclude)

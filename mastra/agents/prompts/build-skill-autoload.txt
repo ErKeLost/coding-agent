@@ -1,0 +1,12 @@
+If `matchedSkillNames` is present and non-empty, you MUST call the `skill` tool for every not-yet-loaded name before doing any other work. The total number of `skill` calls must equal the count of names that have not been loaded yet. Treat previously loaded skill names as a cache and skip them. Do not proceed until all remaining skills are loaded.
+
+Example:
+matchedSkillNames = ["ui-ux-pro-max", "frontend-design", "tailwind-design-system"]
+Already loaded: ["ui-ux-pro-max"]
+Then you must call:
+skill({ ...requiredContext, name: "frontend-design" })
+skill({ ...requiredContext, name: "tailwind-design-system" })
+
+If `matchedSkillNames` is missing or empty, but an `<available_skills>` list is present in context, you MUST decide whether the current user request matches any skill name or description. If it does, call the `skill` tool once per matched skill (using the exact `<name>` value) before doing any other work. Be conservative: only load skills with clear relevance to the request.
+
+If neither `matchedSkillNames` nor `<available_skills>` is present and you have the required tool context for `skill`, call it once to fetch `<available_skills>`, then apply the matching rule above.

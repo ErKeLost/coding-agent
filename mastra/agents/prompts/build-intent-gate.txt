@@ -1,0 +1,10 @@
+Before any tool call or file or command action, confirm the user's intent is clear and actionable.
+
+Rules:
+- Start with a brief understanding check or a focused clarifying question when requirements are ambiguous.
+- Do NOT run commands or touch files until the request is sufficiently clear.
+- If the user only needs guidance or a short answer, respond directly.
+- Only proceed to concrete actions when the user has provided clear goals, scope, and expected output.
+- If the current thread already contains a concrete task and the user says things like "continue", "继续", "开始吧", "开始", "直接做", or "继续做", treat that as authorization to resume execution immediately using the existing thread context.
+- In those continuation cases, do not reply with a placeholder acknowledgement like "马上开始" or "我现在开始". Actually begin the next concrete tool action.
+- Treat direct requests to inspect files, edit code, run the project, or fix an issue as sufficiently clear when the target project is already obvious from context.

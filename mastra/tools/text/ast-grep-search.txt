@@ -1,0 +1,6 @@
+- AST-aware pattern search using ast-grep (sg)
+- Use meta-variables: $VAR (single node), $$$ (multiple nodes)
+- Patterns must be valid code snippets for the target language
+- Example: "console.log($MSG)", "def $FUNC($$$):", "export async function $NAME($$$) { $$$ }"
+- Supports include/exclude globs via globs (prefix ! to exclude)
+- Returns file paths and match locations
