@@ -26,20 +26,36 @@ export function DesktopUpdateCheck() {
         gooeyToast.info(`发现新版本 ${update.version}`, {
           description: update.body ?? "可以现在下载并安装更新。",
           icon: <RefreshCwIcon className="size-4" />,
-          duration: 12000,
+          duration: Infinity,
           action: {
             label: "安装更新",
             onClick: () => {
               void (async () => {
+                const toastId = gooeyToast.loading("正在下载更新…", {
+                  duration: Infinity,
+                });
                 try {
-                  await update.downloadAndInstall();
-                  gooeyToast.success("更新已安装，重启应用后生效。");
+                  let downloaded = 0;
+                  let total = 0;
+                  await update.downloadAndInstall((event) => {
+                    if (event.event === "Started") {
+                      total = event.data.contentLength ?? 0;
+                    } else if (event.event === "Progress") {
+                      downloaded += event.data.chunkLength;
+                      if (total > 0) {
+                        const pct = Math.round((downloaded / total) * 100);
+                        gooeyToast.loading(`正在下载更新… ${pct}%`, { id: toastId, duration: Infinity });
+                      }
+                    } else if (event.event === "Finished") {
+                      gooeyToast.loading("正在安装，即将重启…", { id: toastId, duration: Infinity });
+                    }
+                  });
+                  gooeyToast.success("更新已安装，重启应用后生效。", { id: toastId });
                 } catch (error) {
                   gooeyToast.error(
                     error instanceof Error ? error.message : "更新安装失败",
+                    { id: toastId },
                   );
-                } finally {
-                  await update.close();
                 }
               })();
             },
