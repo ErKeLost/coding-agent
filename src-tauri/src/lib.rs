@@ -664,6 +664,10 @@ pub fn run() {
       search_workspace_content
     ])
     .setup(|app| {
+      #[cfg(desktop)]
+      app.handle()
+        .plugin(tauri_plugin_updater::Builder::new().build())?;
+
       #[cfg(debug_assertions)]
       {
         let window = app.get_webview_window("main").unwrap();
