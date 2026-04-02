@@ -23,49 +23,63 @@ export function DesktopUpdateCheck() {
         const update = await check();
         if (!update) return;
 
-        gooeyToast.info(`发现新版本 ${update.version}`, {
-          description: update.body ?? "可以现在下载并安装更新。",
+        const toastId = gooeyToast.info(`发现新版本 ${update.version}`, {
+          description: update.body ?? "正在后台下载并安装更新。",
           icon: <RefreshCwIcon className="size-4" />,
           duration: Infinity,
-          action: {
-            label: "安装更新",
-            onClick: () => {
-              void (async () => {
-                const toastId = gooeyToast.info("正在下载更新… 0%", {
-                  duration: Infinity,
-                });
-                try {
-                  let downloaded = 0;
-                  let total = 0;
-                  await update.downloadAndInstall((event) => {
-                    if (event.event === "Started") {
-                      total = event.data.contentLength ?? 0;
-                    } else if (event.event === "Progress") {
-                      downloaded += event.data.chunkLength;
-                      const pct = total > 0 ? Math.round((downloaded / total) * 100) : 0;
-                      gooeyToast.update(toastId, {
-                        title: `正在下载更新… ${pct}%`,
-                        type: "info",
-                      });
-                    } else if (event.event === "Finished") {
-                      gooeyToast.update(toastId, {
-                        title: "正在安装，即将重启…",
-                        type: "info",
-                      });
-                    }
-                  });
-                  // 安装完成后自动重启应用
-                  const { relaunch } = await import("@tauri-apps/plugin-process");
-                  await relaunch();
-                } catch (error) {
-                  gooeyToast.error(
-                    error instanceof Error ? error.message : "更新安装失败",
-                  );
-                }
-              })();
-            },
-          },
         });
+
+        try {
+          let downloaded = 0;
+          let total = 0;
+
+          await update.downloadAndInstall((event) => {
+            if (event.event === "Started") {
+              total = event.data.contentLength ?? 0;
+              gooeyToast.update(toastId, {
+                title: `正在下载更新… 0%`,
+                description: "更新包已开始下载。",
+                type: "info",
+              });
+              return;
+            }
+
+            if (event.event === "Progress") {
+              downloaded += event.data.chunkLength;
+              const pct = total > 0 ? Math.round((downloaded / total) * 100) : 0;
+              gooeyToast.update(toastId, {
+                title: `正在下载更新… ${pct}%`,
+                description: "更新会在安装完成后等待你手动重启。",
+                type: "info",
+              });
+              return;
+            }
+
+            if (event.event === "Finished") {
+              gooeyToast.update(toastId, {
+                title: "更新已准备完成",
+                description: "新版本已经下载并安装完成，点击即可重启应用。",
+                type: "success",
+                action: {
+                  label: "立即重启",
+                  onClick: () => {
+                    void (async () => {
+                      const { relaunch } = await import("@tauri-apps/plugin-process");
+                      await relaunch();
+                    })();
+                  },
+                },
+              });
+            }
+          });
+        } catch (error) {
+          gooeyToast.update(toastId, {
+            title: "更新安装失败",
+            description:
+              error instanceof Error ? error.message : "更新安装失败，请稍后重试。",
+            type: "error",
+          });
+        }
       } catch (error) {
         if (process.env.NODE_ENV !== "production") {
           console.warn("[desktop-updater] check failed", error);

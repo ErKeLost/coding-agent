@@ -454,8 +454,22 @@ const extractPatchFiles = (patchText: string) => {
 };
 
 const getToolArgsRecord = (value: unknown) => {
+  if (typeof value === "string") {
+    try {
+      const parsed = JSON.parse(value) as unknown;
+      return getToolArgsRecord(parsed);
+    } catch {
+      return null;
+    }
+  }
   if (!isRecord(value)) return null;
-  return isRecord(value.input) ? value.input : value;
+  if (isRecord(value.input)) return value.input;
+  if (isRecord(value.payload)) {
+    const payload = value.payload;
+    if (isRecord(payload.input)) return payload.input;
+    return payload;
+  }
+  return value;
 };
 
 const getArgPathValue = (
@@ -812,9 +826,15 @@ const formatToolMeta = (item: Extract<ChatItem, { type: "tool" }>) => {
     return getComputerUseToolSummary(item);
   }
   const filePath = getArgPathValue(args, [
+    "file",
     "filePath",
     "filepath",
     "file_path",
+    "pathname",
+    "relativeFilePath",
+    "relative_file_path",
+    "relativePath",
+    "relative_path",
     "filename",
     "target_file",
     "targetFile",
@@ -962,9 +982,10 @@ const getToolDisplayTitle = (
   const toolMeta = formatToolMeta(item);
   const metaText = cleanMetaForActivity(toolMeta);
   const pathTail = getToolPathTail(item);
-  const detail = pathTail ?? metaText;
+  const detail = pathTail ?? extractPathishText(toolMeta) ?? metaText;
   const primary = visibleToolName;
-  const secondary = detail && detail !== visibleToolName ? detail : null;
+  const secondary =
+    detail && detail !== visibleToolName ? cleanMetaForActivity(detail) : null;
   return { primary, secondary };
 };
 
@@ -1051,6 +1072,20 @@ const cleanMetaForActivity = (meta: string | null) =>
     )
     .trim();
 
+const extractPathishText = (meta: string | null) => {
+  const value = cleanMetaForActivity(meta);
+  if (!value) return null;
+  if (
+    value.includes("/") ||
+    value.includes("\\") ||
+    value.includes(" -> ") ||
+    value.startsWith(".")
+  ) {
+    return value;
+  }
+  return null;
+};
+
 const getToolPathTail = (item: Extract<ChatItem, { type: "tool" }>) => {
   if (isComputerUseTool(item.name)) {
     return getComputerUseToolSummary(item);
@@ -1068,17 +1103,26 @@ const getToolPathTail = (item: Extract<ChatItem, { type: "tool" }>) => {
   const url = getString(args?.url);
 
   const argFilePath = getArgPathValue(args, [
+    "file",
     "filePath",
     "filepath",
     "file_path",
+    "pathname",
+    "relativeFilePath",
+    "relative_file_path",
+    "relativePath",
+    "relative_path",
     "filename",
     "target_file",
     "targetFile",
   ]);
   const argPath = getArgPathValue(args, [
     "path",
+    "pathname",
     "targetPath",
     "target_path",
+    "relativeFilePath",
+    "relative_file_path",
     "relative_path",
   ]);
   const argSource = getArgPathValue(args, ["source", "sourcePath", "source_path"]);
@@ -1104,10 +1148,29 @@ const getToolPathTail = (item: Extract<ChatItem, { type: "tool" }>) => {
     args && Array.isArray(args.paths)
       ? args.paths.filter((entry): entry is string => typeof entry === "string")
       : [];
-  const metaFilePath = resultMeta ? getString(resultMeta.filePath) : undefined;
-  const metaPath = resultMeta ? getString(resultMeta.path) : undefined;
+  const metaFilePath =
+    resultMeta
+      ? getString(resultMeta.filePath) ??
+        getString(resultMeta.file) ??
+        getString(resultMeta.relativeFilePath)
+      : undefined;
+  const metaRelativePath =
+    resultMeta
+      ? getString(resultMeta.relativePath) ??
+        getString(resultMeta.relative_file_path)
+      : undefined;
+  const metaPath =
+    resultMeta
+      ? getString(resultMeta.path) ?? getString(resultMeta.pathname)
+      : undefined;
 
-  const primary = argFilePath ?? argPath ?? metaFilePath ?? metaPath ?? resultTitle;
+  const primary =
+    argFilePath ??
+    argPath ??
+    metaFilePath ??
+    metaRelativePath ??
+    metaPath ??
+    resultTitle;
   if (primary) return toDisplayPath(primary);
   if (argSource && argDest) {
     return `${toDisplayPath(argSource)} -> ${toDisplayPath(argDest)}`;
@@ -2252,18 +2315,18 @@ export default function Home() {
                                     )}
                                   />
                                   <div className="min-w-0 pt-px">
-                                    <div className="flex min-w-0 flex-wrap items-center gap-x-1.5 text-[11px] leading-5">
+                                    <div className="flex min-w-0 items-center gap-x-1.5 text-[11px] leading-5">
                                       <span className="shrink-0 text-muted-foreground/80">
                                         {verb}
                                       </span>
+                                      <span className="shrink-0 font-mono text-foreground/86">
+                                        {displayTitle.primary}
+                                      </span>
                                       {displayTitle.secondary ? (
-                                        <span className="shrink-0 rounded-sm bg-muted/20 px-1.5 text-[10px] text-muted-foreground/75">
+                                        <span className="min-w-0 truncate font-mono text-foreground/62">
                                           {displayTitle.secondary}
                                         </span>
                                       ) : null}
-                                      <span className="min-w-0 truncate font-mono text-foreground/86">
-                                        {displayTitle.primary}
-                                      </span>
                                     </div>
                                     <div className="flex flex-wrap items-center gap-1.5 text-[10px] leading-4.5 text-muted-foreground/75">
                                       {resultCount !== undefined ? (
@@ -2431,44 +2494,51 @@ export default function Home() {
                           />
                         ) : null}
 
-                        {queuedSubmissionPreview ? (
+                        {queuedSubmissionPreview || guideBanner ? (
                           <div
                             className={cn(
-                              "app-soft-card flex w-full flex-wrap items-center justify-between gap-2 rounded-none border-x-0 border-t-0 px-4 py-3 text-[12px] text-muted-foreground shadow-none",
-                              activePlan ? "border-b border-border/40" : "",
+                              "w-full border-b border-border/40 bg-transparent",
+                              activePlan ? "" : "",
                             )}
                           >
-                            <div className="flex min-w-0 flex-1 items-center gap-2">
-                              <LoaderCircleIcon className="size-3.5 animate-spin" />
-                              <span className="truncate">
-                                {summarizeQueuedSubmission(queuedSubmissionPreview)}
-                              </span>
-                            </div>
-                            <PromptGuideButton
-                              disabled={!canStartConversation}
-                              onClick={() => void promoteQueuedSubmissionToGuide()}
-                            />
-                          </div>
-                        ) : null}
-
-                        {guideBanner ? (
-                          <div
-                            className="app-soft-card flex w-full flex-wrap items-center justify-between gap-2 rounded-none border-x-0 border-t-0 px-4 py-3 text-[12px] text-muted-foreground shadow-none"
-                          >
-                            <div className="flex min-w-0 flex-1 items-center gap-2">
-                              <SparklesIcon className="size-3.5 shrink-0 text-primary/80" />
-                              <span className="truncate">
-                                {guideBanner.text}
-                              </span>
-                            </div>
                             {queuedSubmissionPreview ? (
-                              <button
-                                type="button"
-                                onClick={() => void promoteQueuedSubmissionToGuide()}
-                                className="shrink-0 text-[11px] text-foreground/75 transition-colors hover:text-foreground"
+                              <div className="flex w-full flex-wrap items-center justify-between gap-2 px-4 py-3 text-[12px] text-muted-foreground">
+                                <div className="flex min-w-0 flex-1 items-center gap-2">
+                                  <LoaderCircleIcon className="size-3.5 animate-spin" />
+                                  <span className="truncate">
+                                    {summarizeQueuedSubmission(queuedSubmissionPreview)}
+                                  </span>
+                                </div>
+                                <PromptGuideButton
+                                  disabled={!canStartConversation}
+                                  onClick={() => void promoteQueuedSubmissionToGuide()}
+                                />
+                              </div>
+                            ) : null}
+
+                            {guideBanner ? (
+                              <div
+                                className={cn(
+                                  "flex w-full flex-wrap items-center justify-between gap-2 px-4 py-3 text-[12px] text-muted-foreground",
+                                  queuedSubmissionPreview ? "border-t border-border/35" : "",
+                                )}
                               >
-                                转为引导
-                              </button>
+                                <div className="flex min-w-0 flex-1 items-center gap-2">
+                                  <SparklesIcon className="size-3.5 shrink-0 text-primary/80" />
+                                  <span className="truncate">
+                                    {guideBanner.text}
+                                  </span>
+                                </div>
+                                {queuedSubmissionPreview ? (
+                                  <button
+                                    type="button"
+                                    onClick={() => void promoteQueuedSubmissionToGuide()}
+                                    className="shrink-0 text-[11px] text-foreground/75 transition-colors hover:text-foreground"
+                                  >
+                                    转为引导
+                                  </button>
+                                ) : null}
+                              </div>
                             ) : null}
                           </div>
                         ) : null}
@@ -2476,7 +2546,7 @@ export default function Home() {
                         <PromptInput
                           className={cn(
                             "border-0 bg-transparent p-0 shadow-none",
-                            activePlan || queuedSubmissionPreview
+                            activePlan || queuedSubmissionPreview || guideBanner
                               ? "rounded-none"
                               : "rounded-[16px]",
                           )}
