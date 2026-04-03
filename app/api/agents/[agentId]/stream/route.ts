@@ -203,6 +203,7 @@ export async function POST(
   if (!agent) {
     return NextResponse.json({ error: `Agent not found: ${agentId}` }, { status: 404 });
   }
+  const logger = mastra.getLogger();
   type AgentStreamInput = Parameters<typeof agent.stream>[0];
   type ActiveAgentContext = {
     agentId: string;
@@ -1111,9 +1112,101 @@ export async function POST(
     return clone;
   };
 
+  const getToolEventSummary = (event: StreamEvent) => {
+    switch (event.eventName) {
+      case "tool.call.started":
+        return {
+          toolCallId: event.toolCallId,
+          toolName: event.toolName,
+          agentId: event.agentId,
+          depth: event.depth,
+        };
+      case "tool.call.progress":
+        return {
+          toolCallId: event.toolCallId,
+          toolName: event.toolName,
+          status: event.status,
+          step: event.step,
+          message: event.message,
+          runState: event.runState,
+          hasStdout: Boolean(event.stdout),
+          hasStderr: Boolean(event.stderr),
+          durationMs: event.durationMs,
+          agentId: event.agentId,
+          depth: event.depth,
+        };
+      case "tool.call.completed": {
+        const resultRecord =
+          typeof event.result === "object" && event.result !== null
+            ? (event.result as Record<string, unknown>)
+            : null;
+        return {
+          toolCallId: event.toolCallId,
+          toolName: event.toolName,
+          agentId: event.agentId,
+          depth: event.depth,
+          previewUrl:
+            typeof resultRecord?.previewUrl === "string"
+              ? resultRecord.previewUrl
+              : typeof resultRecord?.deploymentUrl === "string"
+                ? resultRecord.deploymentUrl
+                : typeof resultRecord?.url === "string"
+                  ? resultRecord.url
+                  : undefined,
+        };
+      }
+      case "tool.call.failed":
+        return {
+          toolCallId: event.toolCallId,
+          toolName: event.toolName,
+          error: event.error,
+          agentId: event.agentId,
+          depth: event.depth,
+        };
+      default:
+        return null;
+    }
+  };
+
+  const logStreamEvent = (event: StreamEvent) => {
+    if (!logger) return;
+
+    if (event.eventName === "tool.call.started") {
+      logger.info("Mastra tool started", getToolEventSummary(event) ?? {});
+      return;
+    }
+
+    if (event.eventName === "tool.call.completed") {
+      logger.info("Mastra tool completed", getToolEventSummary(event) ?? {});
+      return;
+    }
+
+    if (event.eventName === "tool.call.failed") {
+      logger.error("Mastra tool failed", getToolEventSummary(event) ?? {});
+      return;
+    }
+
+    if (event.eventName === "tool.call.progress") {
+      if (event.stderr) {
+        logger.warn("Mastra tool progress", getToolEventSummary(event) ?? {});
+        return;
+      }
+      if (event.stdout || event.message || event.status === "running") {
+        logger.info("Mastra tool progress", getToolEventSummary(event) ?? {});
+      }
+    }
+  };
+
   const stream = new ReadableStream({
     async start(controller) {
       try {
+        logger?.info("Mastra stream started", {
+          routeAgentId: agentId,
+          threadId: payload.threadId ?? null,
+          model: payload.model ?? null,
+          workspaceRoot: effectiveWorkspaceRoot ?? null,
+        });
+
         if (payload.threadId) {
           await upsertThreadSession({
             threadId: payload.threadId,
@@ -1132,6 +1225,7 @@ export async function POST(
           const chunk = redactStreamChunk(value);
           const streamEvents = mapChunkToStreamEvents(chunk);
           for (const event of streamEvents) {
+            logStreamEvent(event);
             applyStreamEvent(controller, event);
           }
           while (pendingAppliedSteers.length > 0) {
@@ -1147,6 +1241,13 @@ export async function POST(
         }
       } catch (error) {
         streamOutcome = "error";
+        logger?.error("Mastra stream failed", {
+          routeAgentId: agentId,
+          threadId: payload.threadId ?? null,
+          model: payload.model ?? null,
+          workspaceRoot: effectiveWorkspaceRoot ?? null,
+          error: error instanceof Error ? error.message : "Stream error",
+        });
         const errorPayload = {
           type: "stream.event",
           eventName: "tool.call.failed",
@@ -1164,6 +1265,15 @@ export async function POST(
               : latestPreviewUrl
                 ? "done"
                 : "idle";
+        logger?.info("Mastra stream finished", {
+          routeAgentId: agentId,
+          threadId: payload.threadId ?? null,
+          model: payload.model ?? null,
+          workspaceRoot: effectiveWorkspaceRoot ?? null,
+          status: finalStatus,
+          toolCalls: executionOrder.length,
+          previewUrl: latestPreviewUrl ?? null,
+        });
         const finalGraph = buildGraphSnapshot(finalStatus);
         latestGraph = finalGraph;
         enqueueJson(controller, {

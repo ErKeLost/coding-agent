@@ -9,6 +9,7 @@ type ShikiFilePreviewProps = {
   code: string;
   filename: string;
   language: string;
+  targetLine?: number | null;
 };
 
 const normalizeLanguage = (language: string) => {
@@ -37,8 +38,10 @@ export function ShikiFilePreview({
   code,
   filename,
   language,
+  targetLine,
 }: ShikiFilePreviewProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
+  const instanceRef = useRef<File | null>(null);
   const { resolvedTheme } = useTheme();
   const themeType = resolvedTheme === "dark" ? "dark" : "light";
   const previewStyle = useMemo(
@@ -79,6 +82,7 @@ export function ShikiFilePreview({
       lineHoverHighlight: "line",
       overflow: "scroll",
     });
+    instanceRef.current = instance;
 
     instance.render({
       containerWrapper: containerRef.current,
@@ -90,9 +94,46 @@ export function ShikiFilePreview({
     });
 
     return () => {
+      instanceRef.current = null;
       instance.cleanUp();
     };
   }, [code, filename, language, themeType]);
+
+  useEffect(() => {
+    const instance = instanceRef.current;
+    const container = containerRef.current;
+    if (!instance || !container) return;
+
+    if (!targetLine || targetLine < 1) {
+      instance.setSelectedLines(null);
+      return;
+    }
+
+    const rafId = window.requestAnimationFrame(() => {
+      const lineNode = container.shadowRoot?.querySelector<HTMLElement>(
+        `[data-line="${targetLine}"]`
+      );
+
+      if (!lineNode) {
+        instance.setSelectedLines(null);
+        return;
+      }
+
+      instance.setSelectedLines({
+        start: targetLine,
+        end: targetLine,
+      });
+
+      lineNode.scrollIntoView({
+        block: "center",
+        inline: "nearest",
+      });
+    });
+
+    return () => {
+      window.cancelAnimationFrame(rafId);
+    };
+  }, [targetLine, code, filename]);
 
   return (
     <div
@@ -113,15 +154,6 @@ export function ShikiFilePreview({
           <div className="mt-0.5 text-[10px] text-muted-foreground/72">
             Syntax-highlighted snapshot
           </div>
-        </div>
-        <div
-          className="rounded-full border px-2.5 py-1 text-[10px] uppercase tracking-[0.12em] text-muted-foreground/78"
-          style={{
-            borderColor: "var(--app-hairline)",
-            background: "var(--app-soft-fill)",
-          }}
-        >
-          {language}
         </div>
       </div>
       <div

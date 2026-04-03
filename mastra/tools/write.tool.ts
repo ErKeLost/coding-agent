@@ -20,9 +20,12 @@ export const writeTool = createTool({
   id: 'write',
   description: WRITE_DESCRIPTION,
   inputSchema: z.object({
-    sandboxId: z.string().min(1).optional(),
-    content: z.string(),
-    filePath: z.string().min(1),
+    sandboxId: z.string().min(1).optional().describe('Optional legacy sandbox identifier.'),
+    content: z.string().describe('Full file contents to write.'),
+    filePath: z
+      .string()
+      .min(1)
+      .describe('Workspace-relative file path to write. Required.'),
   }),
   outputSchema: HowOneResultSchema,
   execute: async (inputData, context) => {

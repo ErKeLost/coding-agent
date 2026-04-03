@@ -399,6 +399,29 @@ const pickPreferredToolName = (...candidates: Array<string | undefined>) => {
   return specificCandidate ?? normalizedCandidates[0];
 };
 
+const getToolFailureMessage = (result: unknown) => {
+  if (!result || typeof result !== "object") return undefined;
+  const record = result as {
+    message?: unknown;
+    error?: unknown;
+    validationErrors?: unknown;
+  };
+  if (
+    record.validationErrors &&
+    typeof record.message === "string" &&
+    record.message.trim()
+  ) {
+    return record.message.trim();
+  }
+  if (typeof record.error === "string" && record.error.trim()) {
+    return record.error.trim();
+  }
+  if (typeof record.message === "string" && /validation failed|invalid input/i.test(record.message)) {
+    return record.message.trim();
+  }
+  return undefined;
+};
+
 export const createStreamEventBus = ({
   setItems,
   setError,
@@ -937,11 +960,13 @@ export const createStreamEventBus = ({
           postToolPendingRef.current = true;
           return;
         }
+        const failureMessage = getToolFailureMessage(codexEvent.result);
         upsertTool({
           id: codexEvent.toolCallId,
           name: codexEvent.toolName,
-          status: "done",
+          status: failureMessage ? "error" : "done",
           result: codexEvent.result,
+          errorText: failureMessage,
           costUSD: extractCostUSD(codexEvent),
           agentId: codexEvent.agentId,
           parentToolCallId: codexEvent.parentToolCallId,

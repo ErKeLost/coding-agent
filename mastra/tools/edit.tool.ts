@@ -19,11 +19,22 @@ export const editTool = createTool({
   id: 'edit',
   description: EDIT_DESCRIPTION,
   inputSchema: z.object({
-    sandboxId: z.string().min(1).optional(),
-    filePath: z.string().min(1),
-    oldString: z.string().min(1),
-    newString: z.string(),
-    replaceAll: z.boolean().optional(),
+    sandboxId: z.string().min(1).optional().describe('Optional legacy sandbox identifier.'),
+    filePath: z
+      .string()
+      .min(1)
+      .describe('Workspace-relative file path to modify. Required.'),
+    oldString: z
+      .string()
+      .min(1)
+      .describe('Exact existing text to replace. Include enough surrounding context to make the match unique.'),
+    newString: z
+      .string()
+      .describe('Replacement text to write in place of oldString. Must be different from oldString.'),
+    replaceAll: z
+      .boolean()
+      .optional()
+      .describe('When true, replace every occurrence of oldString in the file.'),
   }),
   outputSchema: HowOneResultSchema,
   execute: async (inputData, context) => {

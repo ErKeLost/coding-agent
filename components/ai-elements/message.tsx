@@ -61,7 +61,7 @@ export const MessageContent = ({
   <div
     className={cn(
       "is-user:dark flex min-w-0 max-w-full flex-col gap-2 overflow-hidden text-sm",
-      "group-[.is-user]:ml-auto group-[.is-user]:mr-1 group-[.is-user]:w-fit group-[.is-user]:max-w-[min(56%,460px)] group-[.is-user]:rounded-[14px] group-[.is-user]:border group-[.is-user]:border-black/8 group-[.is-user]:bg-white/[0.045] group-[.is-user]:px-3.5 group-[.is-user]:py-2.5 group-[.is-user]:text-[13px] group-[.is-user]:leading-5.5 group-[.is-user]:text-foreground/90 group-[.is-user]:shadow-none dark:group-[.is-user]:border-white/8 dark:group-[.is-user]:bg-white/[0.04]",
+      "group-[.is-user]:ml-auto group-[.is-user]:mr-0 group-[.is-user]:w-fit group-[.is-user]:max-w-[min(56%,460px)] group-[.is-user]:rounded-[14px] group-[.is-user]:border group-[.is-user]:border-black/8 group-[.is-user]:bg-white/[0.045] group-[.is-user]:px-3.5 group-[.is-user]:py-2.5 group-[.is-user]:text-[13px] group-[.is-user]:leading-5.5 group-[.is-user]:text-foreground/90 group-[.is-user]:shadow-none dark:group-[.is-user]:border-white/8 dark:group-[.is-user]:bg-white/[0.04]",
       "group-[.is-assistant]:w-full group-[.is-assistant]:max-w-[min(100%,840px)] group-[.is-assistant]:rounded-none group-[.is-assistant]:border group-[.is-assistant]:border-transparent group-[.is-assistant]:bg-transparent group-[.is-assistant]:px-0 group-[.is-assistant]:py-1 group-[.is-assistant]:text-foreground",
       className
     )}

@@ -81,10 +81,18 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuLabel,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Button } from "@/components/ui/button";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import {
   SidebarInset,
   SidebarProvider,
@@ -109,6 +117,7 @@ import {
   MonitorIcon,
   MousePointer2Icon,
   SearchIcon,
+  Settings2Icon,
   SparklesIcon,
   UploadIcon,
 } from "lucide-react";
@@ -177,45 +186,10 @@ const isPlanRecord = (
 
 const models = [
   {
-    id: "kwaipilot/kat-coder-pro-v2",
-    name: "KAT Coder Pro V2",
-    chef: "KwaiPilot",
-    chefSlug: "kwaipilot",
-    providers: ["kwaipilot"],
-  },
-  {
-    id: "openrouter/z-ai/glm-4.7",
-    name: "GLM-4.7",
-    chef: "Z.AI",
-    chefSlug: "zai",
-    providers: ["openrouter"],
-  },
-  {
-    id: "openrouter/z-ai/glm-5",
-    name: "GLM-5",
-    chef: "Z.AI",
-    chefSlug: "zai",
-    providers: ["openrouter"],
-  },
-  {
     id: "openrouter/z-ai/glm-5v-turbo",
     name: "GLM-5V Turbo",
     chef: "Z.AI",
     chefSlug: "zai",
-    providers: ["openrouter"],
-  },
-  {
-    id: "openrouter/moonshotai/kimi-k2.5",
-    name: "Kimi K2.5",
-    chef: "Moonshot AI",
-    chefSlug: "moonshotai",
-    providers: ["openrouter"],
-  },
-  {
-    id: "openrouter/x-ai/grok-code-fast-1",
-    name: "grok",
-    chef: "grok",
-    chefSlug: "grok",
     providers: ["openrouter"],
   },
   {
@@ -226,34 +200,6 @@ const models = [
     providers: ["openrouter"],
   },
   {
-    id: "openrouter/anthropic/claude-sonnet-4.6",
-    name: "Claude Sonnet 4.6",
-    chef: "Anthropic",
-    chefSlug: "anthropic",
-    providers: ["openrouter"],
-  },
-  {
-    id: "openrouter/anthropic/claude-sonnet-4.5",
-    name: "Claude Sonnet 4.5",
-    chef: "Anthropic",
-    chefSlug: "anthropic",
-    providers: ["openrouter"],
-  },
-  {
-    id: "openrouter/minimax/minimax-m2.1",
-    name: "minimax 2.1",
-    chef: "MiniMax",
-    chefSlug: "minimax",
-    providers: ["openrouter"],
-  },
-  {
-    id: "openrouter/minimax/minimax-m2.5",
-    name: "minimax 2.5",
-    chef: "MiniMax",
-    chefSlug: "minimax",
-    providers: ["openrouter"],
-  },
-  {
     id: "openrouter/minimax/minimax-m2.7",
     name: "minimax 2.7",
     chef: "MiniMax",
@@ -261,24 +207,10 @@ const models = [
     providers: ["openrouter"],
   },
   {
-    id: "openrouter/google/gemini-3-pro-preview",
-    name: "Gemini 3 Pro (Preview)",
+    id: "openrouter/google/gemini-3.1-flash-lite-preview",
+    name: "Gemini 3.1 flash (Preview)",
     chef: "Google",
     chefSlug: "google",
-    providers: ["openrouter"],
-  },
-  {
-    id: "openrouter/google/gemini-3.1-pro-preview",
-    name: "Gemini 3.1 Pro (Preview)",
-    chef: "Google",
-    chefSlug: "google",
-    providers: ["openrouter"],
-  },
-  {
-    id: "openrouter/pony-alpha",
-    name: "Pony Alpha",
-    chef: "Pony",
-    chefSlug: "pony",
     providers: ["openrouter"],
   },
 ];
@@ -287,12 +219,6 @@ const createId = () => `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
 const createThreadId = () =>
   `thread-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 const DEFAULT_AGENT_ID = "build-agent";
-const AGENTS = [
-  { id: "network-agent", name: "Network Agent" },
-  { id: "build-agent", name: "Build Agent" },
-  { id: "explore-agent", name: "Explore Agent" },
-  { id: "plan-agent", name: "Plan Agent" },
-];
 
 type ParsedEvent = {
   event?: string;
@@ -1496,18 +1422,19 @@ const FileTreeNodeItem = ({
   if (node.isDir) {
     return (
       <div>
-        <button
+        <Button
           type="button"
+          variant="ghost"
           onClick={() => setExpanded((v) => !v)}
           style={{ paddingLeft: `${indent}px` }}
-          className="flex w-full items-center gap-1.5 rounded py-1 pr-2 text-[11.5px] text-[#56657d] hover:text-white hover:bg-[#111c2e] transition-colors"
+          className="h-auto w-full justify-start gap-1.5 rounded px-0 py-1 pr-2 text-[11.5px] font-normal text-[#56657d] shadow-none transition-colors hover:bg-[#111c2e] hover:text-white"
         >
           <ChevronRightIcon
             className={cn("size-2.5 shrink-0 transition-transform", expanded && "rotate-90")}
           />
           <FolderIcon className="size-3 shrink-0 text-amber-500/70" />
           {node.name}
-        </button>
+        </Button>
         {expanded &&
           node.children.map((child: DesktopWorkspaceNode) => (
             <FileTreeNodeItem
@@ -1523,12 +1450,13 @@ const FileTreeNodeItem = ({
   }
 
   return (
-    <button
+    <Button
       type="button"
+      variant="ghost"
       onClick={() => onSelectFile(node.path)}
       style={{ paddingLeft: `${indent + 14}px` }}
       className={cn(
-        "flex w-full items-center gap-1.5 rounded py-1 pr-2 text-[11.5px] transition-colors text-left",
+        "h-auto w-full justify-start gap-1.5 rounded px-0 py-1 pr-2 text-left text-[11.5px] font-normal shadow-none transition-colors",
         selectedPath === node.path
           ? "bg-[#1a2540] text-white"
           : "text-[#56657d] hover:text-white hover:bg-[#111c2e]"
@@ -1536,7 +1464,7 @@ const FileTreeNodeItem = ({
     >
       <FileCode2Icon className="size-3 shrink-0 text-indigo-400/70" />
       <span className="truncate">{node.name}</span>
-    </button>
+    </Button>
   );
 };
 
@@ -1575,15 +1503,16 @@ const PromptGuideButton = ({
   onClick: () => void;
 }) => {
   return (
-    <button
+    <Button
       type="button"
+      variant="ghost"
       disabled={disabled}
       onClick={onClick}
-      className="app-control inline-flex h-9 items-center gap-2 rounded-full border-0 px-3 text-[12px] font-medium text-foreground/88 shadow-none disabled:cursor-not-allowed disabled:opacity-50"
+      className="app-control h-9 rounded-full border-0 px-3 text-[12px] font-medium text-foreground/88 shadow-none disabled:cursor-not-allowed"
     >
       <SparklesIcon className="size-3.5 text-primary/80" />
       引导
-    </button>
+    </Button>
   );
 };
 
@@ -1911,6 +1840,7 @@ export default function Home() {
 
   const canStartConversation = Boolean(threadId) && !isHydratingThread;
   const canSubmitChat = canStartConversation && Boolean(model);
+  const shouldShowEmptyThreadHint = !canStartConversation && recentThreads.length === 0;
   const chatDisabledReason = canStartConversation
     ? null
     : "请先创建或选择一个线程，然后再开始对话。";
@@ -2057,20 +1987,20 @@ export default function Home() {
             </ModelSelectorList>
           </ModelSelectorContent>
         </ModelSelector>
-        <div className="app-shell flex h-screen flex-col overflow-hidden bg-transparent text-foreground">
+        <div className="app-shell flex h-screen min-w-0 w-full flex-col overflow-hidden bg-transparent text-foreground">
           <main className="min-h-0 flex-1 overflow-hidden">
             <section className="flex h-full min-h-0 min-w-0 flex-col border-l border-border/50 bg-transparent">
-              <Card className="flex min-h-0 flex-1 flex-col gap-2 rounded-none border-0 bg-transparent pt-0 shadow-none">
+              <Card className="flex min-h-0 flex-1 flex-col gap-0 rounded-none border-0 bg-transparent pt-0 shadow-none">
                 <CardHeader className="border-border/50 border-b px-0 py-3">
                   <div
                     className={cn(
                       CHAT_COLUMN_CLASS,
-                      "flex items-center justify-between gap-6"
+                      "flex min-w-0 flex-wrap items-start justify-between gap-x-4 gap-y-3 xl:flex-nowrap xl:items-center"
                     )}
                   >
-                    <div className="flex min-w-0 max-w-[320px] items-center gap-3 md:max-w-[380px] lg:max-w-[440px] xl:max-w-[500px]">
+                    <div className="flex min-w-0 flex-1 items-center gap-3 max-md:w-full md:max-w-[380px] lg:max-w-[440px] xl:max-w-[500px]">
                       <SidebarTrigger className="md:hidden" />
-                      <div className="min-w-0">
+                      <div className="min-w-0 flex-1">
                         <div className="flex items-center gap-2">
                           <span className="truncate text-[15px] font-medium tracking-tight text-foreground/92">
                             {activeThreadRecord?.title ?? "Untitled thread"}
@@ -2091,84 +2021,102 @@ export default function Home() {
                         </div>
                       </div>
                     </div>
-                    <div className="hidden items-center gap-2 md:flex">
-                      <button
+                    <div className="hidden min-w-0 flex-wrap items-center justify-end gap-2 md:flex xl:flex-nowrap">
+                      <Button
                         type="button"
+                        variant="ghost"
                         onClick={() => setWorkspaceSearchOpen(true)}
-                        className="app-control flex h-9 items-center gap-2 rounded-lg border-0 px-3 text-[12px] text-foreground/78 transition-colors hover:text-foreground"
+                        className="app-control h-9 rounded-lg border-0 px-3 text-[12px] font-normal text-foreground/78 shadow-none transition-colors hover:text-foreground"
                       >
                         <SearchIcon className="size-4" />
                         搜索
-                      </button>
+                      </Button>
                       {workspaceBranches?.hasGit ? (
                         <>
-                          <div className="relative">
-                            <select
-                              value={workspaceBranches.currentBranch ?? ""}
-                              onChange={(event) =>
-                                void handleHeaderBranchChange(event.target.value)
-                              }
-                              disabled={workspaceBranchLoading}
-                              className="h-9 min-w-[148px] appearance-none rounded-lg border border-border/60 bg-background/70 px-9 pr-9 text-[12px] text-foreground shadow-none outline-none"
-                            >
-                              {workspaceBranches.branches.map((branch) => (
-                                <option key={branch} value={branch}>
-                                  {branch}
-                                </option>
-                              ))}
-                            </select>
-                            <GitBranchIcon className="pointer-events-none absolute left-3 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
-                            <ChevronDownIcon className="pointer-events-none absolute right-3 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
+                          <div className="flex h-9 max-w-full items-center overflow-hidden rounded-[14px] border border-border/60 bg-background/75 p-1 shadow-[0_8px_20px_rgba(0,0,0,0.07)] backdrop-blur-xl dark:bg-background/55">
+                            <div className="relative">
+                              <GitBranchIcon className="pointer-events-none absolute left-2.5 top-1/2 z-10 size-3 -translate-y-1/2 text-muted-foreground/80" />
+                              <Select
+                                value={workspaceBranches.currentBranch ?? ""}
+                                onValueChange={(value) => {
+                                  void handleHeaderBranchChange(value);
+                                }}
+                                disabled={workspaceBranchLoading}
+                              >
+                                <SelectTrigger
+                                  size="sm"
+                                  className="h-7 min-w-[112px] max-w-[180px] rounded-[10px] border-0 bg-transparent pl-8 pr-2 text-[11px] font-medium text-foreground/86 shadow-none outline-none ring-0 focus-visible:ring-0 dark:bg-transparent dark:hover:bg-transparent lg:min-w-[132px]"
+                                >
+                                  <SelectValue placeholder="选择分支" />
+                                </SelectTrigger>
+                                <SelectContent align="start" className="min-w-[180px]">
+                                  {workspaceBranches.branches.map((branch) => (
+                                    <SelectItem key={branch} value={branch} className="text-[12px]">
+                                      {branch}
+                                    </SelectItem>
+                                  ))}
+                                </SelectContent>
+                              </Select>
+                            </div>
+                            <div className="mx-1 h-4 w-px bg-border/55" />
+                            <DropdownMenu>
+                              <DropdownMenuTrigger asChild>
+                                <Button
+                                  type="button"
+                                  variant="ghost"
+                                  className="h-7 rounded-[10px] bg-[color:var(--app-soft-fill)] px-3 text-[11px] font-medium text-foreground/92 shadow-none transition-colors hover:bg-[color:var(--app-control-hover)]"
+                                >
+                                  <Settings2Icon className="size-3 text-foreground/72" />
+                                  提交
+                                  <ChevronDownIcon className="size-3 text-muted-foreground/75" />
+                                </Button>
+                              </DropdownMenuTrigger>
+                              <DropdownMenuContent
+                                align="end"
+                                sideOffset={6}
+                                className="min-w-[168px] rounded-[12px] p-1 text-popover-foreground shadow-[0_18px_48px_rgba(0,0,0,0.18)]"
+                              >
+                                <DropdownMenuLabel className="px-2 py-1 text-[10px] font-medium tracking-[0.01em] text-muted-foreground/78">
+                                  Git 操作
+                                </DropdownMenuLabel>
+                                <DropdownMenuItem
+                                  onClick={() => void handleCommitWorkspace()}
+                                  disabled={workspaceBranchLoading || !workspaceBranches.hasChanges}
+                                  className="rounded-[8px] px-2 py-1.5 text-[11px] font-medium"
+                                >
+                                  <Settings2Icon className="size-3.5 text-foreground/72" />
+                                  提交
+                                </DropdownMenuItem>
+                                <DropdownMenuItem
+                                  onClick={() => void handlePushWorkspace()}
+                                  disabled={workspaceBranchLoading || !workspaceBranches.hasRemote}
+                                  className="rounded-[8px] px-2 py-1.5 text-[11px] font-medium"
+                                >
+                                  <UploadIcon className="size-3.5" />
+                                  推送
+                                </DropdownMenuItem>
+                                <DropdownMenuSeparator className="my-0.75" />
+                                <DropdownMenuItem
+                                  onClick={() => void handleCreateBranch()}
+                                  className="rounded-[8px] px-2 py-1.5 text-[11px] font-medium"
+                                >
+                                  <GitBranchIcon className="size-3.5" />
+                                  Create branch
+                                </DropdownMenuItem>
+                              </DropdownMenuContent>
+                            </DropdownMenu>
                           </div>
-                          <DropdownMenu>
-                            <DropdownMenuTrigger asChild>
-                              <button
-                                type="button"
-                                className="app-control flex h-9 items-center gap-2 rounded-lg border-0 px-3 text-[12px] text-foreground transition-colors"
-                              >
-                                提交
-                                <ChevronDownIcon className="size-3.5 text-muted-foreground" />
-                              </button>
-                            </DropdownMenuTrigger>
-                            <DropdownMenuContent
-                              align="end"
-                              className="min-w-[220px] rounded-lg border border-border/70 bg-popover p-1.5 text-popover-foreground shadow-lg"
-                            >
-                              <DropdownMenuItem
-                                onClick={() => void handleCommitWorkspace()}
-                                disabled={workspaceBranchLoading || !workspaceBranches.hasChanges}
-                                className="rounded-md px-3 py-2.5 text-[13px]"
-                              >
-                                提交
-                              </DropdownMenuItem>
-                              <DropdownMenuItem
-                                onClick={() => void handlePushWorkspace()}
-                                disabled={workspaceBranchLoading || !workspaceBranches.hasRemote}
-                                className="rounded-md px-3 py-2.5 text-[13px]"
-                              >
-                                <UploadIcon className="size-4" />
-                                推送
-                              </DropdownMenuItem>
-                              <DropdownMenuSeparator className="my-1" />
-                              <DropdownMenuItem
-                                onClick={() => void handleCreateBranch()}
-                                className="rounded-md px-3 py-2.5 text-[13px]"
-                              >
-                                <GitBranchIcon className="size-4" />
-                                Create branch
-                              </DropdownMenuItem>
-                            </DropdownMenuContent>
-                          </DropdownMenu>
                         </>
                       ) : (
-                        <button
+                        <Button
                           type="button"
+                          variant="ghost"
                           onClick={() => void handleHeaderBranchChange("main")}
-                          className="app-control flex h-9 items-center gap-2 rounded-lg border-0 px-3 text-[12px] text-foreground/78 transition-colors hover:text-foreground"
+                          className="app-control h-9 rounded-lg border-0 px-3 text-[12px] font-normal text-foreground/78 shadow-none transition-colors hover:text-foreground"
                         >
                           <GitBranchIcon className="size-4" />
                           初始化分支
-                        </button>
+                        </Button>
                       )}
                     </div>
                   </div>
@@ -2179,7 +2127,7 @@ export default function Home() {
                     <ConversationContent
                       className={cn(
                         CHAT_COLUMN_CLASS,
-                        "min-h-0 flex-1 overflow-y-auto"
+                        "min-h-0 flex-1 gap-4 overflow-y-auto pt-5 pb-4 sm:pt-6 sm:pb-5"
                       )}
                     >
                       {isHydratingThread ? (
@@ -2213,7 +2161,7 @@ export default function Home() {
                               return null;
                             }
                             return (
-                              <div key={item.id} className="mt-2 pl-2">
+                              <div key={item.id} className="pl-0.5">
                                 <Reasoning
                                   isStreaming={item.status === "pending"}
                                   open={reasoningOpenState[item.id] ?? false}
@@ -2223,7 +2171,7 @@ export default function Home() {
                                       [item.id]: open,
                                     }))
                                   }
-                                  className="mt-1"
+                                  className="mt-0"
                                 >
                                   <ReasoningTrigger
                                     className="min-h-0 border-0 bg-transparent px-0 py-0 text-[11px] font-normal text-muted-foreground shadow-none hover:bg-transparent hover:text-foreground/80"
@@ -2273,8 +2221,9 @@ export default function Home() {
                                     {summaryText}
                                   </div>
                                 ) : null}
-                                <button
+                                <Button
                                   type="button"
+                                  variant="ghost"
                                   onClick={() =>
                                     setToolOpenState((previous) => ({
                                       ...previous,
@@ -2282,7 +2231,7 @@ export default function Home() {
                                     }))
                                   }
                                   className={cn(
-                                    "flex w-full items-start gap-2 rounded-md px-0 py-1 text-left text-foreground/78 transition-colors hover:bg-transparent hover:text-foreground",
+                                    "h-auto w-full justify-start gap-2 rounded-md px-0 py-1 text-left font-normal text-foreground/78 shadow-none transition-colors hover:bg-transparent hover:text-foreground",
                                     item.status === "error" &&
                                       "text-destructive/80 hover:text-destructive"
                                   )}
@@ -2316,7 +2265,7 @@ export default function Home() {
                                       ) : null}
                                     </div>
                                   </div>
-                                </button>
+                                </Button>
                                 {open ? (
                                   <div className="ml-3 space-y-1 border-l border-border/35 pl-2.5 text-[10px] leading-4.5 text-muted-foreground">
                                     {item.content ? (
@@ -2357,8 +2306,9 @@ export default function Home() {
                                     {summaryText}
                                   </div>
                                 ) : null}
-                                <button
+                                <Button
                                   type="button"
+                                  variant="ghost"
                                   onClick={() =>
                                     setToolOpenState((previous) => ({
                                       ...previous,
@@ -2366,7 +2316,7 @@ export default function Home() {
                                     }))
                                   }
                                   className={cn(
-                                    "group flex w-full items-start gap-2 rounded-md border border-transparent px-2 py-1.5 text-left text-foreground/78 transition-colors hover:border-border/50 hover:bg-background/30 hover:text-foreground",
+                                    "group h-auto w-full justify-start gap-2 rounded-md border border-transparent px-0 py-1 text-left font-normal text-foreground/78 shadow-none transition-colors hover:border-border/50 hover:bg-background/30 hover:text-foreground",
                                     item.status === "error" &&
                                       "text-destructive/80 hover:text-destructive"
                                   )}
@@ -2411,9 +2361,9 @@ export default function Home() {
                                       ) : null}
                                     </div>
                                   </div>
-                                </button>
+                                </Button>
                                 {open ? (
-                                  <div className="ml-5 space-y-1.5 border-l border-border/30 pl-3 text-[10px]">
+                                  <div className="ml-3 space-y-1.5 border-l border-border/30 pl-2.5 text-[10px]">
                                     {!hideRawToolPayload ? (
                                       <div className="space-y-0.5">
                                         <div className="text-[9px] tracking-[0.08em] text-muted-foreground/60">
@@ -2484,11 +2434,7 @@ export default function Home() {
                           }
 
                           return (
-                            <Message
-                              key={item.id}
-                              from={item.role}
-                              className={item.role === "assistant" ? "mt-3" : "mt-1.5"}
-                            >
+                            <Message key={item.id} from={item.role}>
                               <MessageContent>
                                 <MessageResponse>{item.content}</MessageResponse>
                                 {item.images?.length ? (
@@ -2542,7 +2488,7 @@ export default function Home() {
                   </Conversation>
                 </CardContent>
 
-                <CardFooter className="px-4 py-3">
+                <CardFooter className="px-0 py-3">
                   <PromptInputProvider initialInput="">
                     <div className={cn(CHAT_COLUMN_CLASS)}>
                       <div
@@ -2568,7 +2514,7 @@ export default function Home() {
                             )}
                           >
                             {queuedSubmissionPreview ? (
-                              <div className="flex w-full flex-wrap items-center justify-between gap-2 px-4 py-3 text-[12px] text-muted-foreground">
+                              <div className="flex w-full flex-wrap items-center justify-between gap-2 px-5 py-3 text-[12px] text-muted-foreground">
                                 <div className="flex min-w-0 flex-1 items-center gap-2">
                                   <LoaderCircleIcon className="size-3.5 animate-spin" />
                                   <span className="truncate">
@@ -2585,7 +2531,7 @@ export default function Home() {
                             {guideBanner ? (
                               <div
                                 className={cn(
-                                  "flex w-full flex-wrap items-center justify-between gap-2 px-4 py-3 text-[12px] text-muted-foreground",
+                                  "flex w-full flex-wrap items-center justify-between gap-2 px-5 py-3 text-[12px] text-muted-foreground",
                                   queuedSubmissionPreview ? "border-t border-border/35" : "",
                                 )}
                               >
@@ -2596,13 +2542,15 @@ export default function Home() {
                                   </span>
                                 </div>
                                 {queuedSubmissionPreview ? (
-                                  <button
+                                  <Button
                                     type="button"
+                                    variant="ghost"
+                                    size="sm"
                                     onClick={() => void promoteQueuedSubmissionToGuide()}
-                                    className="shrink-0 text-[11px] text-foreground/75 transition-colors hover:text-foreground"
+                                    className="h-auto shrink-0 px-0 py-0 text-[11px] text-foreground/75 shadow-none transition-colors hover:bg-transparent hover:text-foreground"
                                   >
                                     转为引导
-                                  </button>
+                                  </Button>
                                 ) : null}
                               </div>
                             ) : null}
@@ -2626,14 +2574,14 @@ export default function Home() {
                               workspaceTree={desktopWorkspace?.tree ?? []}
                               className="min-h-[60px] rounded-none border-0 bg-transparent px-5 py-3 text-[14px] leading-6 shadow-none focus-visible:ring-0"
                               placeholder={
-                                canStartConversation
+                                canStartConversation || !shouldShowEmptyThreadHint
                                   ? "输入 @ 选择文件，然后继续描述你的需求"
                                   : "请先创建或选择一个线程"
                               }
                               readOnly={!canStartConversation}
                             />
                           </PromptInputBody>
-                          {!canStartConversation ? (
+                          {shouldShowEmptyThreadHint ? (
                             <div className="border-border/35 border-t px-5 py-2.5 text-[12px] text-muted-foreground">
                               {chatDisabledReason}
                             </div>
@@ -2642,7 +2590,7 @@ export default function Home() {
                               请先选择模型，然后再发送消息。
                             </div>
                           ) : null}
-                          <PromptInputFooter className="flex-wrap border-border/40 border-t bg-transparent px-4 py-2.5">
+                          <PromptInputFooter className="flex-wrap border-border/40 border-t bg-transparent px-5 py-2.5">
                             <div className="flex min-w-0 flex-1 items-center gap-2 max-sm:w-full">
                               <ModelSelector open={modelDialogOpen} onOpenChange={setModelDialogOpen}>
                                 <ModelSelectorTrigger asChild>

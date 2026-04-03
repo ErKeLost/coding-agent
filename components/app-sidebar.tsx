@@ -1,6 +1,7 @@
 "use client";
 
 import { useTheme } from "@/components/theme-provider";
+import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -131,29 +132,29 @@ export function AppSidebar({
     <DropdownMenuContent
       align="start"
       side="top"
-      sideOffset={10}
-      className="w-[276px] rounded-[14px] p-1.5 text-foreground"
+      sideOffset={6}
+      className="w-[248px] rounded-[12px] p-1 text-foreground"
     >
-      <DropdownMenuLabel className="px-2.5 py-1.5 text-[10px] font-medium tracking-[0.02em] text-muted-foreground">
+      <DropdownMenuLabel className="px-2 py-1 text-[10px] font-medium tracking-[0.02em] text-muted-foreground">
         设置
       </DropdownMenuLabel>
-      <DropdownMenuSeparator className="mx-1.5 my-1 bg-border/70" />
+      <DropdownMenuSeparator className="mx-1 my-0.5 bg-border/70" />
       <DropdownMenuSub>
-        <DropdownMenuSubTrigger className="rounded-[10px] px-3 py-2.5 text-[13px] font-medium text-foreground [&_svg]:text-muted-foreground">
-          <div className="flex min-w-0 flex-1 items-center gap-3">
-            <PaletteIcon className="size-4" />
+        <DropdownMenuSubTrigger className="rounded-[8px] px-2 py-1.5 text-[12px] font-medium text-foreground [&_svg]:text-muted-foreground">
+          <div className="flex min-w-0 flex-1 items-center gap-2">
+            <PaletteIcon className="size-3.5" />
             <span>主题</span>
           </div>
-          <span className="ml-auto text-[11px] text-muted-foreground">
+          <span className="ml-auto text-[10px] text-muted-foreground">
             {activeColorThemeLabel}
           </span>
         </DropdownMenuSubTrigger>
-        <DropdownMenuSubContent className="w-[208px] rounded-[12px] p-1 text-foreground">
+        <DropdownMenuSubContent className="w-[184px] rounded-[10px] p-0.75 text-foreground">
           {colorThemes.map(({ value }) => (
             <DropdownMenuItem
               key={value}
               onClick={() => setColorTheme(value)}
-              className="rounded-[10px] px-2.5 py-2 text-[12px] text-foreground"
+              className="rounded-[8px] px-2 py-1.5 text-[11px] text-foreground"
             >
               <div className="flex items-center gap-1.5">
                 {colorThemeSwatches[value].map((swatch) => (
@@ -170,13 +171,13 @@ export function AppSidebar({
           ))}
         </DropdownMenuSubContent>
       </DropdownMenuSub>
-      <div className="mt-1 flex items-center gap-3 rounded-[10px] px-3 py-2.5 text-foreground">
-        <span className="flex size-7 items-center justify-center rounded-full bg-accent/70 text-muted-foreground">
-          <MoonIcon className="size-4" />
+      <div className="mt-0.5 flex items-center gap-2 rounded-[8px] px-2 py-1.5 text-foreground">
+        <span className="flex size-6 items-center justify-center rounded-full bg-accent/70 text-muted-foreground">
+          <MoonIcon className="size-3.5" />
         </span>
         <div className="min-w-0 flex-1">
-          <div className="text-[13px] font-medium">暗黑模式</div>
-          <div className="text-[11px] text-muted-foreground">
+          <div className="text-[12px] font-medium">暗黑模式</div>
+          <div className="text-[10px] text-muted-foreground">
             {darkModeEnabled ? "当前为深色界面" : "当前为浅色界面"}
           </div>
         </div>
@@ -210,22 +211,26 @@ export function AppSidebar({
             </div>
           </div>
           <div className="flex items-center gap-1.5">
-            <button
+            <Button
               type="button"
+              variant="ghost"
+              size="icon-sm"
               onClick={onOpenWorkspace}
-              className="app-control flex size-8 items-center justify-center rounded-lg border-0 text-sidebar-foreground/72 transition-colors hover:text-sidebar-foreground group-data-[collapsible=icon]:hidden"
+              className="app-control rounded-lg border-0 text-sidebar-foreground/72 shadow-none transition-colors hover:text-sidebar-foreground group-data-[collapsible=icon]:hidden"
               aria-label="新开文件夹"
             >
               <FolderOpenIcon className="size-4" />
-            </button>
-            <button
+            </Button>
+            <Button
               type="button"
+              variant="ghost"
+              size="icon-sm"
               onClick={() => onNewThread()}
-              className="app-control flex size-8 items-center justify-center rounded-lg border-0 text-sidebar-foreground/72 transition-colors hover:text-sidebar-foreground group-data-[collapsible=icon]:hidden"
+              className="app-control rounded-lg border-0 text-sidebar-foreground/72 shadow-none transition-colors hover:text-sidebar-foreground group-data-[collapsible=icon]:hidden"
               aria-label="新建对话"
             >
               <PlusIcon className="size-4" />
-            </button>
+            </Button>
             <SidebarTrigger className="app-control size-8 rounded-lg border-0 text-sidebar-foreground/72 shadow-none hover:text-sidebar-foreground" />
           </div>
         </div>
@@ -299,10 +304,11 @@ export function AppSidebar({
                   {getWorkspaceLabel(workspaceRoot)}
                 </div>
               ) : null}
-              <button
+              <Button
                 type="button"
+                variant="ghost"
                 onClick={onOpenWorkspace}
-                className="app-sidebar-item flex w-full flex-col items-center justify-center gap-3 rounded-xl border-dashed px-4 py-8 text-center transition-colors"
+                className="app-sidebar-item h-auto w-full flex-col items-center justify-center gap-3 rounded-xl border-dashed px-4 py-8 text-center shadow-none transition-colors"
               >
                 <span className="app-control flex size-11 items-center justify-center rounded-xl border-0 text-sidebar-foreground/50">
                   <MessageSquareIcon className="size-5" />
@@ -315,28 +321,30 @@ export function AppSidebar({
                     选择目录后创建新的对话。
                   </div>
                 </div>
-              </button>
+              </Button>
             </section>
           ) : null}
         </div>
 
         <div className="hidden flex-col items-center justify-center gap-2 py-3 group-data-[collapsible=icon]:flex">
-          <button
+          <Button
             type="button"
+            variant="ghost"
             onClick={onOpenWorkspace}
-            className="app-control flex size-10 items-center justify-center rounded-lg border-0 text-sidebar-foreground transition-colors"
+            className="app-control size-10 rounded-lg border-0 text-sidebar-foreground shadow-none transition-colors"
             aria-label="新开文件夹"
           >
             <FolderOpenIcon className="size-4" />
-          </button>
-          <button
+          </Button>
+          <Button
             type="button"
+            variant="ghost"
             onClick={() => onNewThread()}
-            className="app-control flex size-10 items-center justify-center rounded-lg border-0 text-sidebar-foreground transition-colors"
+            className="app-control size-10 rounded-lg border-0 text-sidebar-foreground shadow-none transition-colors"
             aria-label="新建对话"
           >
             <PlusIcon className="size-4" />
-          </button>
+          </Button>
         </div>
       </SidebarContent>
 
@@ -346,15 +354,16 @@ export function AppSidebar({
         <div className="space-y-2 group-data-[collapsible=icon]:hidden">
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
-              <button
+              <Button
                 type="button"
-                className="app-sidebar-item flex h-10 w-full items-center gap-3 rounded-[16px] px-3 text-sidebar-foreground/78 transition-colors hover:text-sidebar-foreground"
+                variant="ghost"
+                className="app-sidebar-item h-10 w-full justify-start gap-3 rounded-[16px] px-3 text-sidebar-foreground/78 shadow-none transition-colors hover:text-sidebar-foreground"
               >
                 <span className="flex size-8 items-center justify-center rounded-[12px] bg-sidebar-foreground/[0.06] text-sidebar-foreground/72">
                   <Settings2Icon className="size-4" />
                 </span>
                 <span className="min-w-0 flex-1 text-left text-[12px] font-medium">设置</span>
-              </button>
+              </Button>
             </DropdownMenuTrigger>
             {renderSettingsMenu()}
           </DropdownMenu>

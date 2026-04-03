@@ -1,5 +1,6 @@
 "use client";
 
+import { Button } from "@/components/ui/button";
 import { PromptInputTextarea, usePromptInputController } from "@/components/ai-elements/prompt-input";
 import type { DesktopWorkspaceNode } from "@/lib/desktop-workspace";
 import { cn } from "@/lib/utils";
@@ -156,15 +157,16 @@ export function FileMentionTextarea({
             <div className="max-h-56 space-y-0.5 overflow-y-auto px-1 py-1">
               {mentionResults.length > 0 ? (
                 mentionResults.map((candidate, index) => (
-                  <button
+                  <Button
                     key={candidate.path}
                     type="button"
+                    variant="ghost"
                     onMouseDown={(event) => {
                       event.preventDefault();
                       insertMention(candidate);
                     }}
                     className={cn(
-                      "flex w-full items-center gap-2 rounded-[9px] px-2 py-1.5 text-left transition-colors",
+                      "h-auto w-full justify-start gap-2 rounded-[9px] px-2 py-1.5 text-left shadow-none transition-colors",
                       index === selectedIndex ? "bg-primary/10" : "hover:bg-primary/[0.06]"
                     )}
                   >
@@ -174,7 +176,7 @@ export function FileMentionTextarea({
                     <span className="min-w-0 flex-1 truncate text-[11.5px] font-medium leading-5 text-foreground">
                         {candidate.name}
                     </span>
-                  </button>
+                  </Button>
                 ))
               ) : (
                 <div className="px-3 py-7 text-center text-[12px] text-muted-foreground">

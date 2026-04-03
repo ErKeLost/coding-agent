@@ -7,14 +7,27 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { ShikiFilePreview } from "@/components/rovix/shiki-file-preview";
 import type {
+  DesktopWorkspaceFile,
   DesktopWorkspaceNode,
   WorkspaceContentSearchFile,
 } from "@/lib/desktop-workspace";
-import { isTauriDesktop, searchWorkspaceContent } from "@/lib/desktop-workspace";
+import {
+  isTauriDesktop,
+  readDesktopWorkspaceFile,
+  searchWorkspaceContent,
+} from "@/lib/desktop-workspace";
 import { cn } from "@/lib/utils";
-import { FileCode2Icon, SearchIcon } from "lucide-react";
+import {
+  ArrowUpRightIcon,
+  FileCode2Icon,
+  LoaderCircleIcon,
+  SearchIcon,
+  SparklesIcon,
+} from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 
 type WorkspaceSearchDialogProps = {
@@ -57,6 +70,10 @@ export function WorkspaceSearchDialog({
   const [query, setQuery] = useState("");
   const [loading, setLoading] = useState(false);
   const [results, setResults] = useState<WorkspaceContentSearchFile[]>([]);
+  const [selectedPath, setSelectedPath] = useState<string | null>(null);
+  const [selectedLine, setSelectedLine] = useState<number | null>(null);
+  const [previewFile, setPreviewFile] = useState<DesktopWorkspaceFile | null>(null);
+  const [previewLoading, setPreviewLoading] = useState(false);
 
   const fallbackResults = useMemo(() => {
     const normalizedQuery = query.trim().toLowerCase();
@@ -103,33 +120,127 @@ export function WorkspaceSearchDialog({
   }, [open, query, workspaceRoot]);
 
   const visibleResults = isTauriDesktop() && workspaceRoot ? results : fallbackResults;
+
+  useEffect(() => {
+    if (!open) return;
+    const firstPath = visibleResults[0]?.path ?? null;
+    setSelectedPath((current) => {
+      const nextPath =
+        current && visibleResults.some((entry) => entry.path === current)
+          ? current
+          : firstPath;
+      const nextResult = visibleResults.find((entry) => entry.path === nextPath);
+      setSelectedLine(nextResult?.matches[0]?.line ?? null);
+      return nextPath;
+    });
+  }, [open, visibleResults]);
+
+  useEffect(() => {
+    if (!open || !selectedPath) {
+      setPreviewFile(null);
+      setPreviewLoading(false);
+      return;
+    }
+
+    const fallback = visibleResults.find((entry) => entry.path === selectedPath);
+    if (!isTauriDesktop()) {
+      if (!fallback) {
+        setPreviewFile(null);
+        setPreviewLoading(false);
+        return;
+      }
+      setPreviewFile({
+        name: fallback.name,
+        path: fallback.path,
+        language: "text",
+        content: fallback.matches.map((match) => match.text).join("\n") || fallback.path,
+      });
+      setPreviewLoading(false);
+      return;
+    }
+
+    let cancelled = false;
+    setPreviewLoading(true);
+    void readDesktopWorkspaceFile(selectedPath)
+      .then((file) => {
+        if (cancelled) return;
+        setPreviewFile(file);
+      })
+      .catch(() => {
+        if (cancelled) return;
+        if (!fallback) {
+          setPreviewFile(null);
+          return;
+        }
+        setPreviewFile({
+          name: fallback.name,
+          path: fallback.path,
+          language: "text",
+          content: fallback.matches.map((match) => match.text).join("\n") || fallback.path,
+        });
+      })
+      .finally(() => {
+        if (cancelled) return;
+        setPreviewLoading(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [open, selectedPath, visibleResults]);
+
   const handleDialogOpenChange = (nextOpen: boolean) => {
     if (!nextOpen) {
       setQuery("");
       setResults([]);
       setLoading(false);
+      setSelectedPath(null);
+      setSelectedLine(null);
+      setPreviewFile(null);
+      setPreviewLoading(false);
     }
     onOpenChange(nextOpen);
   };
+
+  const selectedResult =
+    visibleResults.find((entry) => entry.path === selectedPath) ?? visibleResults[0] ?? null;
 
   return (
     <Dialog open={open} onOpenChange={handleDialogOpenChange}>
       <DialogContent
         showCloseButton={false}
-        className="max-w-3xl overflow-hidden rounded-3xl border border-border/60 bg-background/96 p-0 text-foreground shadow-2xl backdrop-blur-2xl"
+        className="app-popup-surface overflow-hidden rounded-[22px] p-0 text-foreground"
+        style={{
+          width: "min(88vw, 1080px)",
+          maxWidth: "1080px",
+          maxHeight: "82vh",
+        }}
       >
-        <DialogHeader className="gap-1 border-b border-border/60 px-5 py-4 text-left">
-          <DialogTitle className="text-[15px] font-semibold text-foreground">
+        <DialogHeader
+          className="gap-0.5 border-b px-4 py-3 text-left"
+          style={{
+            borderColor: "color-mix(in srgb, var(--app-panel-border) 82%, transparent)",
+            background:
+              "linear-gradient(180deg, color-mix(in srgb, var(--app-soft-fill-strong) 78%, transparent), color-mix(in srgb, var(--app-panel-bg) 94%, transparent))",
+          }}
+        >
+          <DialogTitle className="flex items-center gap-1.5 text-[13px] font-semibold text-foreground">
+            <span className="app-control inline-flex size-7 items-center justify-center rounded-lg text-foreground/78">
+              <SearchIcon className="size-3.5" />
+            </span>
             搜索
           </DialogTitle>
-          <DialogDescription className="text-[12px] text-muted-foreground/80">
-            搜索当前目录中的文件内容并打开文件。
+          <DialogDescription className="text-[11px] text-muted-foreground/78">
+            搜索当前目录中的文件内容，左侧筛选，右侧直接预览代码。
           </DialogDescription>
         </DialogHeader>
 
-        <div className="px-5 py-4">
-          <div className="relative">
-            <SearchIcon className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground/70" />
+        <div
+          className="border-b px-4 py-2.5"
+          style={{ borderColor: "color-mix(in srgb, var(--app-panel-border) 76%, transparent)" }}
+        >
+          <div className="app-control relative rounded-[12px] px-0.5 py-0.5">
+            <SearchIcon className="pointer-events-none absolute left-2.5 top-1/2 size-3 -translate-y-1/2 text-muted-foreground/70" />
             <Input
               autoFocus
               value={query}
@@ -139,88 +250,184 @@ export function WorkspaceSearchDialog({
                 if (!nextValue.trim()) {
                   setResults([]);
                   setLoading(false);
+                  setSelectedPath(null);
+                  setSelectedLine(null);
+                  setPreviewFile(null);
                 } else if (isTauriDesktop() && workspaceRoot) {
                   setLoading(true);
                 }
               }}
               placeholder="搜索当前目录文件内容..."
-              className="h-11 rounded-2xl border-border/60 bg-muted/30 pl-10 text-[14px] text-foreground shadow-none placeholder:text-muted-foreground/60 focus-visible:ring-0"
+              className="h-8 rounded-[10px] border-0 bg-transparent pl-8 text-[11px] text-foreground shadow-none placeholder:text-muted-foreground/60 focus-visible:ring-0"
             />
           </div>
         </div>
 
-        <div className="max-h-[70vh] overflow-y-auto border-t border-border/60 px-3 py-3">
-          {!query.trim() ? (
-            <div className="px-3 py-10 text-center text-[13px] text-muted-foreground/70">
-              输入关键词搜索当前目录文件内容
+        <div className="grid h-[min(62vh,560px)] min-h-0 grid-cols-1 overflow-hidden lg:grid-cols-[minmax(280px,0.8fr)_minmax(0,1.2fr)]">
+          <div
+            className="flex min-h-0 flex-col border-b lg:border-b-0 lg:border-r"
+            style={{
+              borderColor: "color-mix(in srgb, var(--app-panel-border) 76%, transparent)",
+              background:
+                "linear-gradient(180deg, color-mix(in srgb, var(--app-soft-fill) 50%, transparent), color-mix(in srgb, var(--app-panel-bg) 88%, transparent))",
+            }}
+          >
+            <div className="flex items-center justify-between px-3 py-2">
+              <div>
+                <div className="mt-0.5 text-[11px] text-muted-foreground/72">
+                  {query.trim()
+                    ? loading
+                      ? "正在扫描当前目录..."
+                      : `${visibleResults.length} 个文件命中`
+                    : "输入关键词开始搜索"}
+                </div>
+              </div>
+              {query.trim() && !loading ? (
+                <div className="app-control rounded-full px-2 py-0.5 text-[10px] text-muted-foreground/75">
+                  {visibleResults.reduce((sum, file) => sum + file.totalMatches, 0)} matches
+                </div>
+              ) : null}
             </div>
-          ) : loading ? (
-            <div className="px-3 py-10 text-center text-[13px] text-muted-foreground/70">
-              正在搜索...
-            </div>
-          ) : visibleResults.length === 0 ? (
-            <div className="px-3 py-10 text-center text-[13px] text-muted-foreground/70">
-              没有匹配结果
-            </div>
-          ) : (
-            <div className="space-y-3">
-              {visibleResults.map((file) => (
-                <section
-                  key={file.path}
-                  className="overflow-hidden rounded-2xl border border-border/60 bg-card/50"
-                >
-                  <button
-                    type="button"
-                    onClick={() => {
-                      onSelectFile(file.path);
-                      onOpenChange(false);
-                    }}
-                    className="flex w-full items-center gap-3 px-4 py-3 text-left transition-colors hover:bg-muted/60"
-                  >
-                    <span className="flex size-8 items-center justify-center rounded-lg border border-border/60 bg-muted/40 text-muted-foreground">
-                      <FileCode2Icon className="size-4" />
-                    </span>
-                    <div className="min-w-0 flex-1">
-                      <div className="truncate text-[14px] font-medium text-foreground/92">
-                        {file.name}
-                      </div>
-                      <div className="truncate text-[12px] text-muted-foreground/70">
-                        {file.path}
-                      </div>
-                    </div>
-                    <div className="rounded-full bg-muted/70 px-2 py-1 text-[11px] text-muted-foreground">
-                      {file.totalMatches}
-                    </div>
-                  </button>
 
-                  {file.matches.length > 0 ? (
-                    <div className="space-y-1 border-t border-border/60 px-2 py-2">
-                      {file.matches.map((match) => (
-                        <button
-                          key={`${file.path}-${match.line}`}
+            <div className="scrollbar-frost min-h-0 flex-1 overflow-y-auto px-2.5 pb-2.5">
+              {!query.trim() ? (
+                <div className="flex h-full min-h-[240px] flex-col items-center justify-center gap-2 px-5 text-center">
+                  <span className="app-control inline-flex size-10 items-center justify-center rounded-xl text-muted-foreground/80">
+                    <SparklesIcon className="size-4" />
+                  </span>
+                  <div className="text-[12px] font-medium text-foreground/86">
+                    搜索当前目录里的代码与配置
+                  </div>
+                  <div className="max-w-[22rem] text-[11px] leading-5 text-muted-foreground/72">
+                    结果会按文件分组展示，右侧会直接显示代码预览，方便你在打开前先看内容。
+                  </div>
+                </div>
+              ) : loading ? (
+                <div className="flex h-full min-h-[240px] flex-col items-center justify-center gap-2 px-5 text-center text-muted-foreground/72">
+                  <LoaderCircleIcon className="size-4 animate-spin" />
+                  <div className="text-[11px]">正在搜索...</div>
+                </div>
+              ) : visibleResults.length === 0 ? (
+                <div className="flex h-full min-h-[240px] flex-col items-center justify-center gap-2 px-5 text-center">
+                  <div className="text-[12px] font-medium text-foreground/86">没有匹配结果</div>
+                  <div className="text-[11px] leading-5 text-muted-foreground/72">
+                    试试更短的关键词，或者换一个文件名、函数名、配置项。
+                  </div>
+                </div>
+              ) : (
+                <div className="overflow-hidden rounded-[18px] border"
+                  style={{ borderColor: "color-mix(in srgb, var(--app-panel-border) 72%, transparent)" }}
+                >
+                  {visibleResults.map((file) => {
+                    const selected = file.path === selectedPath;
+                    return (
+                      <section
+                        key={file.path}
+                        className={cn(
+                          "overflow-hidden border-b last:border-b-0 transition-colors",
+                          selected
+                            ? "bg-black/[0.035] dark:bg-white/[0.035]"
+                            : "bg-transparent hover:bg-black/[0.02] dark:hover:bg-white/[0.02]"
+                        )}
+                        style={{ borderColor: "color-mix(in srgb, var(--app-panel-border) 68%, transparent)" }}
+                      >
+                        <Button
                           type="button"
+                          variant="ghost"
                           onClick={() => {
-                            onSelectFile(file.path);
-                            onOpenChange(false);
+                            setSelectedPath(file.path);
+                            setSelectedLine(file.matches[0]?.line ?? null);
                           }}
-                          className={cn(
-                            "flex w-full items-start gap-3 rounded-xl px-3 py-2 text-left transition-colors hover:bg-muted/60"
-                          )}
+                          className="h-auto w-full justify-start items-start gap-2 px-2.5 py-2 text-left shadow-none transition-colors hover:bg-transparent"
                         >
-                          <span className="shrink-0 pt-0.5 font-mono text-[11px] text-muted-foreground/55">
-                            {match.line}
+                          <span className="mt-0.5 flex size-7 items-center justify-center rounded-lg text-muted-foreground/72">
+                            <FileCode2Icon className="size-3.5" />
                           </span>
-                          <span className="truncate text-[12px] text-foreground/72">
-                            {match.text}
-                          </span>
-                        </button>
-                      ))}
-                    </div>
-                  ) : null}
-                </section>
-              ))}
+                          <div className="min-w-0 flex-1">
+                            <div className="flex items-center gap-2">
+                              <div className="truncate text-[12px] font-medium text-foreground/90">
+                                {file.name}
+                              </div>
+                              <div className="rounded-full px-1 py-0 text-[9px] text-muted-foreground/72">
+                                {file.totalMatches}
+                              </div>
+                            </div>
+                            <div className="mt-0.5 truncate font-mono text-[10px] text-muted-foreground/68">
+                              {file.path}
+                            </div>
+                          </div>
+                        </Button>
+
+                        {file.matches.length > 0 ? (
+                          <div
+                            className="space-y-0.5 border-t px-2.5 pb-2 pt-1"
+                            style={{
+                              borderColor:
+                                "color-mix(in srgb, var(--app-panel-border) 72%, transparent)",
+                            }}
+                          >
+                            {file.matches.slice(0, 4).map((match) => (
+                              <Button
+                                key={`${file.path}-${match.line}`}
+                                type="button"
+                                variant="ghost"
+                                onClick={() => {
+                                  setSelectedPath(file.path);
+                                  setSelectedLine(match.line);
+                                }}
+                                className={cn(
+                                  "h-auto w-full justify-start items-start gap-1.5 rounded-md px-2 py-1 text-left shadow-none transition-colors",
+                                  selected ? "bg-black/[0.04] dark:bg-white/[0.04]" : "hover:bg-black/[0.03] dark:hover:bg-white/[0.03]"
+                                )}
+                              >
+                                <span className="shrink-0 rounded-md px-1.5 py-0.5 font-mono text-[9px] text-muted-foreground/60">
+                                  L{match.line}
+                                </span>
+                                <span className="line-clamp-2 text-[11px] leading-4.5 text-foreground/76">
+                                  {match.text}
+                                </span>
+                              </Button>
+                            ))}
+                          </div>
+                        ) : null}
+                      </section>
+                    );
+                  })}
+                </div>
+              )}
             </div>
-          )}
+          </div>
+
+          <div
+            className="flex min-h-0 flex-col"
+            style={{
+              background:
+                "linear-gradient(180deg, color-mix(in srgb, var(--app-panel-bg) 92%, transparent), color-mix(in srgb, var(--background) 42%, transparent))",
+            }}
+          >
+            <div className="scrollbar-frost min-h-0 flex-1 overflow-auto p-2.5">
+              {!query.trim() ? (
+                <div className="flex h-full min-h-[240px] items-center justify-center px-5 text-center text-[11px] leading-5 text-muted-foreground/72">
+                  搜索后会在这里显示代码预览。
+                </div>
+              ) : previewLoading ? (
+                <div className="flex h-full min-h-[240px] items-center justify-center text-muted-foreground/72">
+                  <LoaderCircleIcon className="size-4 animate-spin" />
+                </div>
+              ) : previewFile ? (
+                <ShikiFilePreview
+                  code={previewFile.content}
+                  filename={previewFile.path}
+                  language={previewFile.language}
+                  targetLine={selectedLine}
+                />
+              ) : (
+                <div className="flex h-full min-h-[240px] items-center justify-center px-5 text-center text-[11px] leading-5 text-muted-foreground/72">
+                  暂时没有可展示的代码预览。
+                </div>
+              )}
+            </div>
+          </div>
         </div>
       </DialogContent>
     </Dialog>

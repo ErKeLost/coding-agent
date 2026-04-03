@@ -2,6 +2,7 @@
 
 import type { ReactNode } from "react";
 
+import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { cn } from "@/lib/utils";
 import type { ThreadRecord } from "@/lib/thread-session";
@@ -104,11 +105,12 @@ export function WorkspaceSidebar({
             <ZapIcon className="size-4 text-white" />
           </div>
         )}
-        <button
+        <Button
           type="button"
+          variant="ghost"
           onClick={onToggleCollapsed}
           className={cn(
-            "flex size-9 items-center justify-center rounded-xl border border-white/[0.06] bg-white/[0.03] text-[#7f8ca3] transition-colors hover:bg-white/[0.07] hover:text-white",
+            "size-9 rounded-xl border border-white/[0.06] bg-white/[0.03] text-[#7f8ca3] shadow-none transition-colors hover:bg-white/[0.07] hover:text-white",
             collapsed && "absolute left-1/2 top-16 -translate-x-1/2"
           )}
           aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
@@ -117,20 +119,21 @@ export function WorkspaceSidebar({
           <PanelLeftIcon
             className={cn("size-4 transition-transform", collapsed && "rotate-180")}
           />
-        </button>
+        </Button>
       </div>
 
       {!collapsed ? (
         <div className="px-3 pb-3 pt-3">
-          <button
+          <Button
             type="button"
+            variant="default"
             onClick={onNewThread}
-            className="flex h-11 w-full items-center justify-center gap-2 rounded-2xl bg-[#4b5ef3] px-4 text-[14px] font-semibold text-white shadow-[0_12px_30px_rgba(75,94,243,0.26)] transition-colors hover:bg-[#5a6cff]"
+            className="h-11 w-full rounded-2xl bg-[#4b5ef3] px-4 text-[14px] font-semibold text-white shadow-[0_12px_30px_rgba(75,94,243,0.26)] transition-colors hover:bg-[#5a6cff]"
             title="New Session"
           >
             <PlusIcon className="size-4" />
             <span>New Session</span>
-          </button>
+          </Button>
         </div>
       ) : null}
 
@@ -138,12 +141,13 @@ export function WorkspaceSidebar({
         {navItems.map(({ key, label, icon: Icon }) => {
           const selected = activeView === key;
           return (
-            <button
+            <Button
               key={key}
               type="button"
+              variant="ghost"
               onClick={() => onSelectView(key)}
               className={cn(
-                "flex w-full items-center rounded-xl transition-colors",
+                "h-auto w-full rounded-xl shadow-none transition-colors",
                 collapsed
                   ? "justify-center px-0 py-2.5"
                   : "gap-2.5 px-3 py-2.5 text-left",
@@ -155,22 +159,23 @@ export function WorkspaceSidebar({
             >
               <Icon className="size-[15px] shrink-0" />
               {!collapsed ? <span className="text-[13px] font-medium">{label}</span> : null}
-            </button>
+            </Button>
           );
         })}
 
         {!collapsed ? (
-          <button
+          <Button
             type="button"
+            variant="ghost"
             onClick={onChangeWorkspaceRoot}
-            className="flex w-full items-center gap-2.5 rounded-xl px-3 py-2.5 text-left text-[#6d7a92] transition-colors hover:bg-[#111c2e] hover:text-white"
+            className="h-auto w-full justify-start gap-2.5 rounded-xl px-3 py-2.5 text-left text-[#6d7a92] shadow-none transition-colors hover:bg-[#111c2e] hover:text-white"
             title={isDesktopRuntime ? "Pick folder..." : "Set directory"}
           >
             <FolderIcon className="size-[15px] shrink-0" />
             <span className="truncate text-[13px] font-medium">
               {currentWorkspaceName}
             </span>
-          </button>
+          </Button>
         ) : null}
       </div>
 
@@ -194,12 +199,13 @@ export function WorkspaceSidebar({
                 {group.threads.slice(0, 10).map((thread) => {
                   const selected = thread.id === currentThreadId;
                   return (
-                    <button
+                    <Button
                       key={thread.id}
                       type="button"
+                      variant="ghost"
                       onClick={() => onSelectThread(thread.id)}
                       className={cn(
-                        "flex w-full rounded-2xl border transition-colors",
+                        "h-auto w-full rounded-2xl border shadow-none transition-colors",
                         collapsed
                           ? "justify-center px-0 py-2.5"
                           : "flex-col items-start gap-1 px-3 py-3 text-left",
@@ -223,7 +229,7 @@ export function WorkspaceSidebar({
                           </span>
                         </>
                       )}
-                    </button>
+                    </Button>
                   );
                 })}
               </div>
@@ -234,9 +240,10 @@ export function WorkspaceSidebar({
 
       {!collapsed ? (
         <div className="border-t border-white/[0.05] p-3">
-        <button
+        <Button
           type="button"
-          className="flex w-full items-center gap-3 rounded-2xl border border-white/[0.05] bg-white/[0.02] px-3 py-2.5 transition-colors hover:bg-white/[0.05]"
+          variant="ghost"
+          className="h-auto w-full justify-start gap-3 rounded-2xl border border-white/[0.05] bg-white/[0.02] px-3 py-2.5 shadow-none transition-colors hover:bg-white/[0.05]"
         >
           <div className="flex size-9 shrink-0 items-center justify-center rounded-full bg-[#11182a] text-[15px] font-semibold text-white">
             N
@@ -248,7 +255,7 @@ export function WorkspaceSidebar({
             <div className="text-[11px] text-[#52617b]">Pro Plan</div>
           </div>
           <ChevronDownIcon className="size-4 shrink-0 text-[#52617b]" />
-        </button>
+        </Button>
         </div>
       ) : null}
     </aside>

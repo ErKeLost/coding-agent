@@ -1,5 +1,6 @@
 "use client";
 
+import { Button } from "@/components/ui/button";
 import {
   Collapsible,
   CollapsibleContent,
@@ -121,9 +122,10 @@ export const FileTreeFolder = ({
           {...props}
         >
           <CollapsibleTrigger asChild>
-            <button
+            <Button
+              variant="ghost"
               className={cn(
-                "flex w-full items-center gap-1 rounded px-2 py-1 text-left transition-colors hover:bg-muted/50",
+                "h-auto w-full justify-start gap-1 rounded px-2 py-1 text-left shadow-none transition-colors hover:bg-muted/50",
                 isSelected && "bg-muted"
               )}
               onClick={() => onSelect?.(path)}
@@ -135,7 +137,7 @@ export const FileTreeFolder = ({
                   isExpanded && "rotate-90"
                 )}
               />
-              <FileTreeIcon>
+              </Button>
                 {isExpanded ? (
                   <FolderOpenIcon className="size-4 text-blue-500" />
                 ) : (

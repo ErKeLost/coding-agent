@@ -9,6 +9,22 @@ type ToolRuntimeContext = unknown;
 export const DEFAULT_READ_LIMIT = 2_000;
 export const DEFAULT_TIMEOUT_MS = 120_000;
 
+export function modelSupportsImageInput(modelId?: string) {
+  const id = (modelId ?? '').toLowerCase();
+  if (!id) return false;
+
+  return (
+    id.includes('gpt-4o') ||
+    id.includes('gpt-4.1') ||
+    id.includes('gpt-5') ||
+    id.includes('claude') ||
+    id.includes('gemini') ||
+    id.includes('glm-5v') ||
+    id.includes('glm-4.7') ||
+    id.includes('glm-5')
+  );
+}
+
 export function getRequestContextFromToolContext(
   context: ToolRuntimeContext | undefined,
   toolName: string,

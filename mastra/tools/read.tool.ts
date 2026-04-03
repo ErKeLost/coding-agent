@@ -9,6 +9,7 @@ import {
   DEFAULT_READ_LIMIT,
   formatLineNumberedOutput,
   getWorkspaceFromToolContext,
+  modelSupportsImageInput,
   normalizeWorkspacePath,
   readPreviewAttachment,
   resolveWorkspaceFsPath,
@@ -28,15 +29,34 @@ export const readTool = createTool({
   }),
   outputSchema: HowOneResultSchema,
   execute: async (inputData, context) => {
-    const { workspaceRoot } = getWorkspaceFromToolContext(context, 'read');
+    const { requestContext, workspaceRoot } = getWorkspaceFromToolContext(context, 'read');
     const filePath = resolveWorkspaceFsPath(inputData.filePath);
     const { relativePath } = normalizeWorkspacePath(inputData.filePath);
 
     const attachment = await readPreviewAttachment(workspaceRoot, inputData.filePath);
     if (attachment) {
+      const activeModel = requestContext.get('model');
+      const supportsImage = modelSupportsImageInput(
+        typeof activeModel === 'string' ? activeModel : undefined,
+      );
       const message = attachment.mime.startsWith('image/')
         ? 'Image read successfully'
         : 'PDF read successfully';
+
+      if (attachment.mime.startsWith('image/') && !supportsImage) {
+        return {
+          title: relativePath,
+          output: 'Image file detected, but the current model does not support image input. Preview attachment was skipped.',
+          metadata: {
+            preview: message,
+            filePath: relativePath,
+            relativePath,
+            mime: attachment.mime,
+            skippedAttachment: true,
+          },
+        };
+      }
+
       return {
         title: relativePath,
         output: message,

@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   commitWorkspaceChanges,
   getStoredWorkspaceRoot,
@@ -47,6 +47,7 @@ export function useDesktopWorkspace({
   const [editorSelectedFile, setEditorSelectedFile] = useState<DesktopWorkspaceFile | null>(null);
   const [workspaceBranches, setWorkspaceBranches] = useState<WorkspaceBranchPayload | null>(null);
   const [workspaceBranchLoading, setWorkspaceBranchLoading] = useState(false);
+  const requestedWorkspaceRootRef = useRef<string | null>(null);
 
   const isDesktopRuntime = hasMounted && isTauriDesktop();
 
@@ -82,9 +83,14 @@ export function useDesktopWorkspace({
 
   const loadDesktopWorkspaceFromPath = useCallback(
     async (targetPath: string) => {
+      const normalizedTargetPath = targetPath.trim();
+      requestedWorkspaceRootRef.current = normalizedTargetPath;
       setDesktopWorkspaceLoading(true);
       try {
-        const payload = await loadDesktopWorkspace(targetPath);
+        const payload = await loadDesktopWorkspace(normalizedTargetPath);
+        if (requestedWorkspaceRootRef.current !== normalizedTargetPath) {
+          return;
+        }
         applyDesktopWorkspace(payload);
         await loadWorkspaceBranches(payload.rootPath);
       } catch (err) {
@@ -98,7 +104,7 @@ export function useDesktopWorkspace({
   );
 
   useEffect(() => {
-    if (!isDesktopRuntime || recentThreadCount === 0) return;
+    if (!isDesktopRuntime || recentThreadCount === 0 || workspaceRoot?.trim()) return;
     const storedRoot = getStoredWorkspaceRoot();
     if (!storedRoot) return;
     logWorkspaceDebug("restoreStoredWorkspaceRoot", {
@@ -106,7 +112,49 @@ export function useDesktopWorkspace({
       recentThreads: recentThreadCount,
     });
     void loadDesktopWorkspaceFromPath(storedRoot);
-  }, [isDesktopRuntime, loadDesktopWorkspaceFromPath, logWorkspaceDebug, recentThreadCount]);
+  }, [
+    isDesktopRuntime,
+    loadDesktopWorkspaceFromPath,
+    logWorkspaceDebug,
+    recentThreadCount,
+    workspaceRoot,
+  ]);
+
+  useEffect(() => {
+    if (!isDesktopRuntime) return;
+
+    const normalizedWorkspaceRoot =
+      typeof workspaceRoot === "string" && workspaceRoot.trim()
+        ? workspaceRoot.trim()
+        : null;
+
+    if (!normalizedWorkspaceRoot) {
+      requestedWorkspaceRootRef.current = null;
+      setDesktopWorkspace(null);
+      setDesktopWorkspaceError(null);
+      setWorkspaceBranches(null);
+      setEditorSelectedFile(null);
+      return;
+    }
+
+    if (desktopWorkspace?.rootPath === normalizedWorkspaceRoot) {
+      return;
+    }
+
+    logWorkspaceDebug("syncDesktopWorkspaceToThread", {
+      currentThreadId,
+      workspaceRoot: normalizedWorkspaceRoot,
+      desktopWorkspaceRoot: desktopWorkspace?.rootPath ?? null,
+    });
+    void loadDesktopWorkspaceFromPath(normalizedWorkspaceRoot);
+  }, [
+    currentThreadId,
+    desktopWorkspace?.rootPath,
+    isDesktopRuntime,
+    loadDesktopWorkspaceFromPath,
+    logWorkspaceDebug,
+    workspaceRoot,
+  ]);
 
   const handleOpenWorkspaceFile = useCallback(async (relativePath: string) => {
     if (!workspaceRoot) return;

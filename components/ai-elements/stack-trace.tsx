@@ -433,9 +433,9 @@ export const StackTraceFrames = memo(
             {frame.filePath && (
               <>
                 <span className="text-muted-foreground">(</span>
-                <button
+                <Button
                   className={cn(
-                    "underline decoration-dotted hover:text-primary",
+                    "h-auto px-0 py-0 text-xs underline decoration-dotted shadow-none hover:bg-transparent hover:text-primary",
                     onFilePathClick && "cursor-pointer"
                   )}
                   disabled={!onFilePathClick}
@@ -449,11 +449,13 @@ export const StackTraceFrames = memo(
                     }
                   }}
                   type="button"
+                  variant="ghost"
+                  size="sm"
                 >
                   {frame.filePath}
                   {frame.lineNumber !== null && `:${frame.lineNumber}`}
                   {frame.columnNumber !== null && `:${frame.columnNumber}`}
-                </button>
+                </Button>
                 <span className="text-muted-foreground">)</span>
               </>
             )}
