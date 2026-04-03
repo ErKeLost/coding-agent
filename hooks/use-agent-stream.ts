@@ -179,21 +179,6 @@ export function useAgentStream({
 
     setItems((prev) => [...prev, userMessage, assistantMessage, optimisticThinking]);
 
-    if (threadId && !isGuide) {
-      setRecentThreads((prev) =>
-        mergeRecentThreads(
-          {
-            id: threadId,
-            title: summarizeThreadTitle(threadTitleInput),
-            subtitle: summarizeWorkspaceRoot(workspaceRoot),
-            workspaceRoot,
-            updatedAt: Date.now(),
-          },
-          prev,
-        ),
-      );
-    }
-
     const controller = new AbortController();
     abortRef.current = controller;
     setStreamingMessageId(assistantId);
@@ -323,7 +308,6 @@ export function useAgentStream({
     }
   }, [
     createId,
-    mergeRecentThreads,
     model,
     modelSupportsImageInput,
     params,
@@ -334,10 +318,7 @@ export function useAgentStream({
     setItems,
     setPlan,
     setPreviewUrl,
-    setRecentThreads,
     streamBus,
-    summarizeThreadTitle,
-    summarizeWorkspaceRoot,
     threadId,
     workspaceRoot,
   ]);

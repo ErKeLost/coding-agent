@@ -67,7 +67,6 @@ import { Plan } from "@/components/tool-ui/plan";
 import { AppSidebar } from "@/components/app-sidebar";
 import { FileMentionTextarea } from "@/components/rovix/file-mention-textarea";
 import { WorkspaceSearchDialog } from "@/components/rovix/workspace-search-dialog";
-import { ThemeSettingsPanel } from "@/components/rovix/theme-settings-panel";
 
 import { Badge } from "@/components/ui/badge";
 import {
@@ -203,7 +202,7 @@ const models = [
     chefSlug: "zai",
     providers: ["openrouter"],
   },
-   {
+  {
     id: "openrouter/moonshotai/kimi-k2.5",
     name: "Kimi K2.5",
     chef: "Moonshot AI",
@@ -218,87 +217,10 @@ const models = [
     providers: ["openrouter"],
   },
   {
-    id: "openrouter/qwen/qwen3-max",
-    name: "qwen3-max",
-    chef: "qwen",
-    chefSlug: "qwen",
-    providers: ["openrouter"],
-  },
-  {
-    id: "openrouter/qwen/qwen3-max-thinking",
-    name: "qwen3-max-thinking",
-    chef: "qwen",
-    chefSlug: "qwen",
-    providers: ["openrouter"],
-  },
-  {
-    id: "openrouter/qwen/qwen3-coder-next",
-    name: "qwen3-coder-next",
-    chef: "qwen",
-    chefSlug: "qwen",
-    providers: ["openrouter"],
-  },
-  {
-    id: "openrouter/qwen/qwen3.6-plus-preview:free",
-    name: "qwen3.6-plus-preview:free",
-    chef: "qwen",
-    chefSlug: "qwen",
-    providers: ["openrouter"],
-  },
-  {
-    id: "openrouter/xiaomi/mimo-v2-pro",
-    name: "Mimo V2 Pro",
-    chef: "Xiaomi",
-    chefSlug: "xiaomi",
-    providers: ["openrouter"],
-  },
-  {
-    id: "openrouter/z-ai/glm-4.7-flash",
-    name: "GLM-4.7 Flash",
-    chef: "Z.AI",
-    chefSlug: "zai",
-    providers: ["openrouter"],
-  },
-  {
-    id: "openrouter/openai/gpt-5.2-codex",
-    name: "GPT-5.2 Codex",
-    chef: "OpenAI",
-    chefSlug: "openai",
-    providers: ["openrouter"],
-  },
-  {
-    id: "openrouter/openai/gpt-5.3-codex",
-    name: "GPT-5.3 Codex",
-    chef: "OpenAI",
-    chefSlug: "openai",
-    providers: ["openrouter"],
-  },
-  {
     id: "openrouter/openai/gpt-5.4-mini",
-    name: "GPT-5.4 Mini",
+    name: "GPT-5.4 mini",
     chef: "OpenAI",
     chefSlug: "openai",
-    providers: ["openrouter"],
-  },
-  {
-    id: "openrouter/bytedance-seed/seed-2.0-mini",
-    name: "Seed 2.0 Mini",
-    chef: "ByteDance",
-    chefSlug: "bytedance",
-    providers: ["openrouter"],
-  },
-  {
-    id: "openrouter/anthropic/claude-opus-4.6",
-    name: "Claude Opus 4.6",
-    chef: "Anthropic",
-    chefSlug: "anthropic",
-    providers: ["openrouter"],
-  },
-  {
-    id: "openrouter/anthropic/claude-opus-4.5",
-    name: "Claude Opus 4.5",
-    chef: "Anthropic",
-    chefSlug: "anthropic",
     providers: ["openrouter"],
   },
   {
@@ -357,7 +279,6 @@ const models = [
     chefSlug: "pony",
     providers: ["openrouter"],
   },
-
 ];
 
 const createId = () => `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
@@ -487,6 +408,29 @@ const getArgPathValue = (
 const isComputerUseTool = (toolName: string) =>
   toolName.toLowerCase().startsWith("computer_use_");
 
+const TOOL_LABELS: Record<string, string> = {
+  read: "read",
+  list: "list",
+  edit: "edit",
+  write: "write",
+  writefiles: "writeFiles",
+  patch: "patch",
+  replace: "replace",
+  grep: "grep",
+  glob: "glob",
+  bash: "bash",
+  runcommand: "runCommand",
+  webfetch: "webFetch",
+  websearch: "webSearch",
+  codesearch: "codeSearch",
+  todoread: "todoRead",
+  todowrite: "todoWrite",
+  startlocaldevserver: "startLocalDevServer",
+  readlocalprocesslogs: "readLocalProcessLogs",
+  stoplocalprocess: "stopLocalProcess",
+  listlocalprocesses: "listLocalProcesses",
+};
+
 const GENERIC_TOOL_LABELS = new Set([
   "tool",
   "dynamic-tool",
@@ -498,6 +442,44 @@ const GENERIC_TOOL_LABELS = new Set([
 const isGenericToolLabel = (toolName: string) =>
   GENERIC_TOOL_LABELS.has(toolName.trim().toLowerCase());
 
+const inferGenericToolName = (
+  item: Extract<ChatItem, { type: "tool" }>,
+  args: Record<string, unknown> | null
+) => {
+  if (isComputerUseTool(item.name)) return item.name;
+  if (getString(args?.command)) return "runCommand";
+  if (getString(args?.query)) return "webSearch";
+  if (getString(args?.url)) return "webFetch";
+
+  const filePath = getArgPathValue(args, [
+    "file",
+    "filePath",
+    "filepath",
+    "file_path",
+    "pathname",
+    "relativeFilePath",
+    "relative_file_path",
+    "relativePath",
+    "relative_path",
+    "filename",
+    "target_file",
+    "targetFile",
+  ]);
+  const path = getArgPathValue(args, [
+    "path",
+    "targetPath",
+    "target_path",
+    "relative_path",
+  ]);
+
+  if (getString(args?.patchText)) return "patch";
+  if (filePath && typeof args?.oldString === "string") return "edit";
+  if (filePath && typeof args?.content === "string") return "write";
+  if (filePath) return "read";
+  if (path) return "list";
+  return "tool";
+};
+
 const getToolResultRecord = (item: Extract<ChatItem, { type: "tool" }>) =>
   isRecord(item.result) ? item.result : null;
 
@@ -507,7 +489,17 @@ const getToolResultMetadata = (item: Extract<ChatItem, { type: "tool" }>) => {
 };
 
 const getVisibleToolName = (item: Extract<ChatItem, { type: "tool" }>) => {
+  const args = getToolArgsRecord(item.args);
+  const normalizedToolName = item.name.trim().toLowerCase();
+  const explicitLabel = TOOL_LABELS[normalizedToolName];
+  if (explicitLabel) return explicitLabel;
+
   if (!isGenericToolLabel(item.name)) return item.name;
+
+  const inferredToolName = inferGenericToolName(item, args);
+  if (inferredToolName !== "tool") {
+    return TOOL_LABELS[inferredToolName.toLowerCase()] ?? inferredToolName;
+  }
 
   const stepLabel = [...(item.steps ?? [])]
     .reverse()
@@ -528,13 +520,12 @@ const getVisibleToolName = (item: Extract<ChatItem, { type: "tool" }>) => {
   const metadata = getToolResultMetadata(item);
   const metadataToolName =
     getString(metadata?.toolName) ??
-    getString(metadata?.name) ??
-    getString(metadata?.title);
+    getString(metadata?.name);
   if (metadataToolName && !isGenericToolLabel(metadataToolName)) {
     return metadataToolName;
   }
 
-  return "未命名工具";
+  return "tool";
 };
 
 const formatCoordinatePair = (x?: number, y?: number) =>
@@ -592,23 +583,23 @@ const getComputerUseToolSummary = (
         width !== undefined &&
         height !== undefined
       ) {
-        return `区域截图 ${x},${y} ${width}x${height}`;
+        return `region ${x},${y} ${width}x${height}`;
       }
     }
-    return "桌面截图";
+    return "desktop screenshot";
   }
 
   if (name === "computer_use_get_windows") {
     const count = getNumber(metadata?.count);
-    return count !== undefined ? `窗口 ${count} 个` : "窗口列表";
+    return count !== undefined ? `${count} windows` : "window list";
   }
 
   if (name === "computer_use_display_info") {
     const displays = metadata?.displays;
     if (Array.isArray(displays)) {
-      return `显示器 ${displays.length} 个`;
+      return `${displays.length} displays`;
     }
-    return "显示器信息";
+    return "display info";
   }
 
   if (name === "computer_use_mouse_click") {
@@ -900,12 +891,12 @@ const formatToolMeta = (item: Extract<ChatItem, { type: "tool" }>) => {
     return files.length ? `patch: ${formatList(files)}` : "patch";
   }
   if (name === "runCommand" || name === "bash") {
-    return command ? `cmd: ${truncateText(command, 80)}` : null;
+    return command ? `command: ${command}` : null;
   }
   if (name === "startLocalDevServer") {
     const port = typeof args.port === "number" ? args.port : null;
     const workingDirectory = getArgPathValue(args, ["workingDirectory"]);
-    return `${command ? `cmd: ${truncateText(command, 60)}` : "start dev server"}${workingDirectory ? ` | in ${toDisplayPath(workingDirectory)}` : ""}${port ? ` | port ${port}` : ""}`;
+    return `${command ? `command: ${command}` : "start dev server"}${workingDirectory ? ` | in ${toDisplayPath(workingDirectory)}` : ""}${port ? ` | port ${port}` : ""}`;
   }
   if (name === "readLocalProcessLogs") {
     const processId = getString(args.processId);
@@ -971,7 +962,7 @@ const formatToolMeta = (item: Extract<ChatItem, { type: "tool" }>) => {
   if (path) return `path: ${toDisplayPath(path)}`;
   if (query) return `query: ${truncateText(query, 80)}`;
   if (pattern) return `pattern: ${truncateText(pattern, 60)}`;
-  if (command) return `cmd: ${truncateText(command, 80)}`;
+  if (command) return `command: ${command}`;
   return null;
 };
 
@@ -980,12 +971,10 @@ const getToolDisplayTitle = (
   visibleToolName: string
 ) => {
   const toolMeta = formatToolMeta(item);
-  const metaText = cleanMetaForActivity(toolMeta);
   const pathTail = getToolPathTail(item);
-  const detail = pathTail ?? extractPathishText(toolMeta) ?? metaText;
+  const detail = toolMeta ?? pathTail ?? null;
   const primary = visibleToolName;
-  const secondary =
-    detail && detail !== visibleToolName ? cleanMetaForActivity(detail) : null;
+  const secondary = detail && detail !== visibleToolName ? detail : null;
   return { primary, secondary };
 };
 
@@ -1045,29 +1034,29 @@ const getActivityVerb = (
 ) => {
   const verb =
     action === "browse"
-      ? "浏览"
+      ? "Browsing"
       : action === "edit"
-        ? "编辑"
+        ? "Editing"
           : action === "run"
-            ? "运行"
+            ? "Running"
             : action === "desktop"
-              ? "操作桌面"
+              ? "Using desktop"
             : action === "search"
-              ? "搜索"
+              ? "Searching"
             : action === "plan"
-              ? "计划"
+              ? "Planning"
               : action === "delegate"
-                ? "委托"
-                : "处理";
-  if (status === "pending") return `正在${verb}`;
-  if (status === "done") return `已${verb}`;
-  return `${verb}失败`;
+                ? "Delegating"
+                : "Processing";
+  if (status === "pending") return verb;
+  if (status === "done") return verb.replace(/ing$/, "ed");
+  return `${verb} failed`;
 };
 
 const cleanMetaForActivity = (meta: string | null) =>
   (meta ?? "")
     .replace(
-      /^(file|files|path|pattern|query|cmd|url|patch|from)\s*:\s*/i,
+      /^(file|files|path|pattern|query|command|cmd|url|patch|from)\s*:\s*/i,
       ""
     )
     .trim();
@@ -1518,6 +1507,7 @@ const CHAT_COLUMN_CLASS =
 
 const MODEL_STORAGE_KEY = "chat-selected-model";
 const DEFAULT_MODEL_ID = "openrouter/openai/gpt-5.4-mini";
+const PREVIOUS_DEFAULT_MODEL_ID = "openrouter/z-ai/glm-5v-turbo";
 
 const logWorkspaceDebug = (label: string, payload?: Record<string, unknown>) => {
   console.info(`[workspace-debug] ${label}`, payload ?? {});
@@ -1529,7 +1519,6 @@ export default function Home() {
     () => true,
     () => false,
   );
-  const [activeSection, setActiveSection] = useState<"chat" | "settings">("chat");
   const [model, setModel] = useState(DEFAULT_MODEL_ID);
   const [modelDialogOpen, setModelDialogOpen] = useState(false);
   const [selectedAgent] = useState(DEFAULT_AGENT_ID);
@@ -1544,7 +1533,6 @@ export default function Home() {
     () => [...new Set(models.map((entry) => entry.chef))],
     [],
   );
-  const selectedAgentData = AGENTS.find((agent) => agent.id === selectedAgent);
   const [threadSessionError, setThreadSessionError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -1552,6 +1540,10 @@ export default function Home() {
     try {
       const savedModel = window.localStorage.getItem(MODEL_STORAGE_KEY)?.trim();
       if (savedModel && models.some((entry) => entry.id === savedModel)) {
+        if (savedModel === PREVIOUS_DEFAULT_MODEL_ID) {
+          setModel(DEFAULT_MODEL_ID);
+          return;
+        }
         setModel(savedModel);
         return;
       }
@@ -1844,14 +1836,12 @@ export default function Home() {
 
   const handleNewThread = useCallback((initialWorkspaceRoot?: string | null) => {
     resetThreadUiChrome();
-    setActiveSection("chat");
     createThreadSession(initialWorkspaceRoot);
   }, [createThreadSession, resetThreadUiChrome]);
 
   const handleSelectThread = useCallback((nextThreadId: string) => {
     if (!nextThreadId || nextThreadId === threadId) return;
     resetThreadUiChrome();
-    setActiveSection("chat");
     selectThreadSession(nextThreadId);
   }, [resetThreadUiChrome, selectThreadSession, threadId]);
 
@@ -1924,8 +1914,6 @@ export default function Home() {
         onSelectThread={handleSelectThread}
         onDeleteThread={handleDeleteThread}
         onOpenWorkspace={handleChangeWorkspaceRoot}
-        onOpenSettings={() => setActiveSection("settings")}
-        activeSection={activeSection}
         recentThreads={recentThreads}
         workspaceRoot={workspaceRoot}
       />
@@ -1959,77 +1947,41 @@ export default function Home() {
           <main className="min-h-0 flex-1 overflow-hidden">
             <section className="flex h-full min-h-0 min-w-0 flex-col border-l border-border/50 bg-transparent">
               <Card className="flex min-h-0 flex-1 flex-col gap-2 rounded-none border-0 bg-transparent pt-0 shadow-none">
-                <CardHeader className="border-border/50 border-b px-0 py-2.5">
+                <CardHeader className="border-border/50 border-b px-0 py-3">
                   <div
                     className={cn(
                       CHAT_COLUMN_CLASS,
                       "flex items-center justify-between gap-6"
                     )}
                   >
-                    <div className="flex min-w-0 items-center gap-3">
+                    <div className="flex min-w-0 max-w-[320px] items-center gap-3 md:max-w-[380px] lg:max-w-[440px] xl:max-w-[500px]">
                       <SidebarTrigger className="md:hidden" />
                       <div className="min-w-0">
                         <div className="flex items-center gap-2">
-                          <span className="truncate text-[14px] font-medium tracking-tight text-foreground/92">
-                            {activeSection === "settings"
-                              ? "设置"
-                              : activeThreadRecord?.title ?? "Untitled thread"}
+                          <span className="truncate text-[15px] font-medium tracking-tight text-foreground/92">
+                            {activeThreadRecord?.title ?? "Untitled thread"}
                           </span>
-                          {activeSection === "chat" ? (
-                            <Badge
-                              variant="secondary"
-                              className="rounded-full border border-border/45 bg-background px-2 py-0.5 text-[9px] font-medium uppercase tracking-wide text-muted-foreground/85"
-                            >
-                              {status === "streaming"
-                                ? "Running"
-                                : status === "error"
-                                  ? "Attention"
-                                  : "Ready"}
-                            </Badge>
-                          ) : null}
                         </div>
-                        <div className="mt-1 flex items-center gap-2 overflow-hidden text-[10px] text-muted-foreground/80">
-                          {activeSection === "settings" ? (
-                            <>
-                              <span className="truncate">Rovix</span>
-                              <span className="text-border">•</span>
-                              <span className="truncate">外观与偏好设置</span>
-                            </>
-                          ) : (
-                            <>
-                              <span className="truncate">
-                                {activeWorkspaceLabel}
-                              </span>
-                              <span className="text-border">•</span>
-                              <span className="truncate">
-                                {selectedAgentData?.name ?? "Build Agent"}
-                              </span>
-                              <span className="text-border">•</span>
-                              <span className="truncate">
-                                {activeThreadRecord?.updatedAt
-                                  ? formatRelativeUpdatedAt(activeThreadRecord.updatedAt)
-                                  : "just now"}
-                              </span>
-                            </>
-                          )}
+                        <div className="mt-1 flex items-center gap-2 overflow-hidden text-[11px] text-muted-foreground/72">
+                          <>
+                            <span className="truncate">
+                              {activeWorkspaceLabel}
+                            </span>
+                            <span className="text-border">•</span>
+                            <span className="truncate">
+                              {activeThreadRecord?.updatedAt
+                                ? formatRelativeUpdatedAt(activeThreadRecord.updatedAt)
+                                : "just now"}
+                            </span>
+                          </>
                         </div>
                       </div>
                     </div>
                     <div className="hidden items-center gap-2 md:flex">
-                      {activeSection === "settings" ? (
-                        <button
-                          type="button"
-                          onClick={() => setActiveSection("chat")}
-                          className="flex h-9 items-center gap-2 rounded-xl border border-border/60 bg-background px-3 text-[12px] text-muted-foreground transition-colors hover:text-foreground"
-                        >
-                          返回对话
-                        </button>
-                      ) : (
-                        <>
                       <button
                         type="button"
                         onClick={() => setWorkspaceSearchOpen(true)}
-                        className="flex h-9 items-center gap-2 rounded-xl border border-border/60 bg-background px-3 text-[12px] text-muted-foreground transition-colors hover:text-foreground"
+                        className="app-control flex h-9 items-center gap-2 rounded-lg border-0 px-3 text-[12px] text-foreground/78 transition-colors hover:text-foreground"
                       >
                         <SearchIcon className="size-4" />
                         搜索
@@ -2043,7 +1995,7 @@ export default function Home() {
                                 void handleHeaderBranchChange(event.target.value)
                               }
                               disabled={workspaceBranchLoading}
-                              className="h-9 min-w-[148px] appearance-none rounded-xl border border-border/60 bg-background px-9 pr-9 text-[12px] text-foreground shadow-none outline-none"
+                              className="h-9 min-w-[148px] appearance-none rounded-lg border border-border/60 bg-background/70 px-9 pr-9 text-[12px] text-foreground shadow-none outline-none"
                             >
                               {workspaceBranches.branches.map((branch) => (
                                 <option key={branch} value={branch}>
@@ -2058,7 +2010,7 @@ export default function Home() {
                             <DropdownMenuTrigger asChild>
                               <button
                                 type="button"
-                                className="flex h-9 items-center gap-2 rounded-xl border border-border/60 bg-background px-3 text-[12px] text-foreground transition-colors hover:bg-muted"
+                                className="app-control flex h-9 items-center gap-2 rounded-lg border-0 px-3 text-[12px] text-foreground transition-colors"
                               >
                                 提交
                                 <ChevronDownIcon className="size-3.5 text-muted-foreground" />
@@ -2066,27 +2018,27 @@ export default function Home() {
                             </DropdownMenuTrigger>
                             <DropdownMenuContent
                               align="end"
-                              className="min-w-[220px] rounded-xl border border-white/10 bg-[#242321] p-1.5 text-white shadow-[0_16px_36px_rgba(0,0,0,0.24)]"
+                              className="min-w-[220px] rounded-lg border border-border/70 bg-popover p-1.5 text-popover-foreground shadow-lg"
                             >
                               <DropdownMenuItem
                                 onClick={() => void handleCommitWorkspace()}
                                 disabled={workspaceBranchLoading || !workspaceBranches.hasChanges}
-                                className="rounded-xl px-3 py-2.5 text-[14px] text-white/92 focus:bg-white/10 focus:text-white"
+                                className="rounded-md px-3 py-2.5 text-[13px]"
                               >
                                 提交
                               </DropdownMenuItem>
                               <DropdownMenuItem
                                 onClick={() => void handlePushWorkspace()}
                                 disabled={workspaceBranchLoading || !workspaceBranches.hasRemote}
-                                className="rounded-xl px-3 py-2.5 text-[14px] text-white/92 focus:bg-white/10 focus:text-white"
+                                className="rounded-md px-3 py-2.5 text-[13px]"
                               >
                                 <UploadIcon className="size-4" />
                                 推送
                               </DropdownMenuItem>
-                              <DropdownMenuSeparator className="my-1 bg-white/8" />
+                              <DropdownMenuSeparator className="my-1" />
                               <DropdownMenuItem
                                 onClick={() => void handleCreateBranch()}
-                                className="rounded-xl px-3 py-2.5 text-[14px] text-white/92 focus:bg-white/10 focus:text-white"
+                                className="rounded-md px-3 py-2.5 text-[13px]"
                               >
                                 <GitBranchIcon className="size-4" />
                                 Create branch
@@ -2098,22 +2050,17 @@ export default function Home() {
                         <button
                           type="button"
                           onClick={() => void handleHeaderBranchChange("main")}
-                          className="flex h-9 items-center gap-2 rounded-xl border border-border/60 bg-background px-3 text-[12px] text-muted-foreground transition-colors hover:text-foreground"
+                          className="app-control flex h-9 items-center gap-2 rounded-lg border-0 px-3 text-[12px] text-foreground/78 transition-colors hover:text-foreground"
                         >
                           <GitBranchIcon className="size-4" />
                           初始化分支
                         </button>
-                      )}
-                        </>
                       )}
                     </div>
                   </div>
                 </CardHeader>
 
                 <CardContent className="flex min-h-0 flex-1 flex-col overflow-hidden px-0">
-                  {activeSection === "settings" ? (
-                    <ThemeSettingsPanel onBack={() => setActiveSection("chat")} />
-                  ) : (
                   <Conversation className="flex min-h-0 flex-1 overflow-hidden">
                     <ConversationContent
                       className={cn(
@@ -2127,7 +2074,7 @@ export default function Home() {
                         <ConversationEmptyState>
                           <div className="h-full w-full p-6">
                             <div className="flex h-full w-full flex-col items-center justify-center gap-4 px-6 text-center">
-                              <div className="flex size-16 items-center justify-center rounded-2xl border border-border/45 bg-muted/20">
+                              <div className="flex size-16 items-center justify-center rounded-xl border border-border/45 bg-muted/20">
                                 <SparklesIcon className="size-7 text-primary/80" />
                               </div>
                               <div className="space-y-2">
@@ -2221,7 +2168,7 @@ export default function Home() {
                                     }))
                                   }
                                   className={cn(
-                                    "flex w-full items-start gap-2 rounded-md px-0 py-0.5 text-left text-foreground/78 transition-colors hover:bg-transparent hover:text-foreground",
+                                    "flex w-full items-start gap-2 rounded-md px-0 py-1 text-left text-foreground/78 transition-colors hover:bg-transparent hover:text-foreground",
                                     item.status === "error" &&
                                       "text-destructive/80 hover:text-destructive"
                                   )}
@@ -2233,23 +2180,23 @@ export default function Home() {
                                     )}
                                   />
                                   <div className="min-w-0 pt-px">
-                                    <div className="flex items-center gap-1.5 text-[11px] leading-5">
+                                    <div className="flex items-center gap-1.5 text-[12px] leading-5">
                                       <span className="truncate font-normal">
                                         {getActivityVerb("delegate", item.status)}{" "}
                                         {item.name}
                                       </span>
                                     </div>
                                     <div className="flex items-center gap-1.5 text-[10px] text-muted-foreground/75">
-                                      <span>子工具 {childTools.length} 个</span>
+                                      <span>{childTools.length} child tools</span>
                                       <span>·</span>
-                                      <span>运行中 {runningCount}</span>
+                                      <span>{runningCount} running</span>
                                       <span>·</span>
-                                      <span>完成 {doneCount}</span>
+                                      <span>{doneCount} completed</span>
                                       {errorCount ? (
                                         <>
                                           <span>·</span>
                                           <span className="text-destructive">
-                                            失败 {errorCount}
+                                            {errorCount} failed
                                           </span>
                                         </>
                                       ) : null}
@@ -2280,7 +2227,7 @@ export default function Home() {
                               item,
                               visibleToolName
                             );
-                            const action = getToolAction(item.name);
+                            const action = getToolAction(visibleToolName);
                             const verb = getActivityVerb(action, item.status);
                             const resultCount = getResultCount(item.result);
                             const runInfo = getRunInfo(item);
@@ -2303,7 +2250,7 @@ export default function Home() {
                                     }))
                                   }
                                   className={cn(
-                                    "flex w-full items-start gap-2 rounded-md px-0 py-0.5 text-left text-foreground/78 transition-colors hover:bg-transparent hover:text-foreground",
+                                    "group flex w-full items-start gap-2 rounded-md border border-transparent px-2 py-1.5 text-left text-foreground/78 transition-colors hover:border-border/50 hover:bg-background/30 hover:text-foreground",
                                     item.status === "error" &&
                                       "text-destructive/80 hover:text-destructive"
                                   )}
@@ -2315,7 +2262,7 @@ export default function Home() {
                                     )}
                                   />
                                   <div className="min-w-0 pt-px">
-                                    <div className="flex min-w-0 items-center gap-x-1.5 text-[11px] leading-5">
+                                    <div className="flex min-w-0 items-center gap-x-1.5 text-[12px] leading-5">
                                       <span className="shrink-0 text-muted-foreground/80">
                                         {verb}
                                       </span>
@@ -2323,14 +2270,14 @@ export default function Home() {
                                         {displayTitle.primary}
                                       </span>
                                       {displayTitle.secondary ? (
-                                        <span className="min-w-0 truncate font-mono text-foreground/62">
+                                        <span className="min-w-0 truncate font-mono text-foreground/58">
                                           {displayTitle.secondary}
                                         </span>
                                       ) : null}
                                     </div>
-                                    <div className="flex flex-wrap items-center gap-1.5 text-[10px] leading-4.5 text-muted-foreground/75">
+                                    <div className="mt-0.5 flex flex-wrap items-center gap-1.5 text-[10px] leading-4.5 text-muted-foreground/72">
                                       {resultCount !== undefined ? (
-                                        <span>{resultCount} 个结果</span>
+                                        <span>{resultCount} results</span>
                                       ) : null}
                                       {runInfo.durationMs !== undefined ? (
                                         <span>
@@ -2350,7 +2297,7 @@ export default function Home() {
                                   </div>
                                 </button>
                                 {open ? (
-                                  <div className="ml-3 space-y-1.5 border-l border-border/30 pl-2.5 text-[10px]">
+                                  <div className="ml-5 space-y-1.5 border-l border-border/30 pl-3 text-[10px]">
                                     <div className="space-y-0.5">
                                       <div className="text-[9px] tracking-[0.08em] text-muted-foreground/60">
                                         Args
@@ -2472,10 +2419,8 @@ export default function Home() {
                     </ConversationContent>
                     <ConversationScrollButton />
                   </Conversation>
-                  )}
                 </CardContent>
 
-                {activeSection === "chat" ? (
                 <CardFooter className="px-4 py-3">
                   <PromptInputProvider initialInput="">
                     <div className={cn(CHAT_COLUMN_CLASS)}>
@@ -2620,7 +2565,6 @@ export default function Home() {
                     </div>
                   </PromptInputProvider>
                 </CardFooter>
-                ) : null}
               </Card>
             </section>
           </main>

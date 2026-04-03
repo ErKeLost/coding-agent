@@ -35,15 +35,9 @@ export function resolveWorkspaceRootFromRequest(requestContext: RequestContext) 
     threadId && threadWorkspaceRootCache.has(threadId)
       ? threadWorkspaceRootCache.get(threadId)
       : undefined;
-  const resolvedRoot = resolveWorkspaceRoot(requestedRoot ?? cachedThreadRoot ?? lastActiveWorkspaceRoot ?? undefined);
-  console.info('[workspace-debug] local-workspace:resolve', {
-    requestedRoot: requestedRoot ?? null,
-    threadId: threadId ?? null,
-    cachedThreadRoot: cachedThreadRoot ?? null,
-    lastActiveWorkspaceRoot,
-    resolvedRoot,
-  });
-  return resolvedRoot;
+  return resolveWorkspaceRoot(
+    requestedRoot ?? cachedThreadRoot ?? lastActiveWorkspaceRoot ?? undefined,
+  );
 }
 
 export function bindWorkspaceRootToThread(threadId: string, workspaceRoot: string) {
@@ -52,28 +46,16 @@ export function bindWorkspaceRootToThread(threadId: string, workspaceRoot: strin
   if (!normalizedThreadId || !normalizedWorkspaceRoot) return;
   threadWorkspaceRootCache.set(normalizedThreadId, normalizedWorkspaceRoot);
   lastActiveWorkspaceRoot = normalizedWorkspaceRoot;
-  console.info('[workspace-debug] local-workspace:bind-thread-root', {
-    threadId: normalizedThreadId,
-    workspaceRoot: normalizedWorkspaceRoot,
-  });
 }
 
 export function setActiveWorkspaceRoot(workspaceRoot: string) {
   const normalizedWorkspaceRoot = workspaceRoot.trim();
   if (!normalizedWorkspaceRoot) return;
   lastActiveWorkspaceRoot = normalizedWorkspaceRoot;
-  console.info('[workspace-debug] local-workspace:set-active-root', {
-    workspaceRoot: normalizedWorkspaceRoot,
-  });
 }
 
 export function getWorkspaceForRoot(workspaceRoot: string) {
   const normalizedRoot = resolveWorkspaceRoot(workspaceRoot);
-  console.info('[workspace-debug] local-workspace:getWorkspaceForRoot', {
-    workspaceRoot,
-    normalizedRoot,
-    cached: workspaceCache.has(normalizedRoot),
-  });
   const cached = workspaceCache.get(normalizedRoot);
   if (cached) return cached;
 
@@ -107,15 +89,18 @@ export function getWorkspaceForRoot(workspaceRoot: string) {
     tools: {
       enabled: true,
       [WORKSPACE_TOOLS.FILESYSTEM.READ_FILE]: {
+        enabled: false,
         name: 'read',
         maxOutputTokens: 4_000,
       },
       [WORKSPACE_TOOLS.FILESYSTEM.WRITE_FILE]: {
+        enabled: false,
         name: 'write',
         requireReadBeforeWrite: true,
         maxOutputTokens: 4_000,
       },
       [WORKSPACE_TOOLS.FILESYSTEM.EDIT_FILE]: {
+        enabled: false,
         name: 'edit',
         requireReadBeforeWrite: true,
         maxOutputTokens: 4_000,

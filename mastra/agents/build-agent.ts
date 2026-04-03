@@ -4,16 +4,27 @@ import type { InputProcessorOrWorkflow } from '@mastra/core/processors';
 import { SkillSearchProcessor, TokenLimiterProcessor } from '@mastra/core/processors';
 import { buildAgentMemory } from '../memory';
 import {
+  applyPatchTool,
+  bashTool,
+  editTool,
   imageGenerateTool,
+  listDirTool,
+  listTool,
   listLocalProcessesTool,
+  readTool,
   readLocalProcessLogsTool,
-  runWorkspaceCommandTool,
+  shellTool,
+  skillTool,
   startLocalDevServerTool,
   stopLocalProcessTool,
   todoReadTool,
   todoWriteTool,
+  toolSearchTool,
+  toolSuggestTool,
+  unifiedExecTool,
   webFetchTool,
   webSearchTool,
+  writeTool,
 } from '../tools';
 import { selectBuildInstructions } from './prompts/build-prompts';
 import {
@@ -23,19 +34,30 @@ import {
 import { ContinuationProcessor } from './processors/continuation-processor';
 
 const staticTools = {
+  apply_patch: applyPatchTool,
+  bash: bashTool,
+  edit: editTool,
   imageGenerate: imageGenerateTool,
+  list: listTool,
+  list_dir: listDirTool,
   listLocalProcesses: listLocalProcessesTool,
+  read: readTool,
   readLocalProcessLogs: readLocalProcessLogsTool,
-  runCommand: runWorkspaceCommandTool,
+  shell: shellTool,
+  skill: skillTool,
   startLocalDevServer: startLocalDevServerTool,
   stopLocalProcess: stopLocalProcessTool,
   todoread: todoReadTool,
   todowrite: todoWriteTool,
+  tool_search: toolSearchTool,
+  tool_suggest: toolSuggestTool,
+  unified_exec: unifiedExecTool,
   webfetch: webFetchTool,
   websearch: webSearchTool,
+  write: writeTool,
 };
 
-const modelEnv = process.env.MODEL ?? 'openrouter/qwen/qwen3.6-plus-preview:free';
+const modelEnv = process.env.MODEL ?? 'z-ai/glm-5v-turbo';
 function getRequestContextString(requestContext: RequestContext, key: string) {
   const value = (requestContext as { get: (name: string) => unknown }).get(key);
   return typeof value === 'string' && value.trim() ? value.trim() : undefined;
@@ -55,13 +77,9 @@ const tokenLimiterProcessor = new TokenLimiterProcessor(CONTEXT_LIMIT_TOKENS);
 const continuationProcessor = new ContinuationProcessor();
 
 const buildInstructions = ({ requestContext }: { requestContext: RequestContext }) => {
-  const baseInstructions = selectBuildInstructions(resolveModel({ requestContext }));
+  const model = resolveModel({ requestContext });
+  const baseInstructions = selectBuildInstructions(model);
   const workspaceRoot = resolveWorkspaceRootFromRequest(requestContext);
-  console.info('[workspace-debug] build-agent:instructions', {
-    workspaceRoot,
-    model: resolveModel({ requestContext }),
-    threadId: getRequestContextString(requestContext, 'threadId') ?? null,
-  });
   const continuationMode = getRequestContextString(requestContext, 'continuationMode');
   const continuationLastUserGoal = getRequestContextString(
     requestContext,
@@ -78,7 +96,10 @@ const buildInstructions = ({ requestContext }: { requestContext: RequestContext 
 - For coding work, prefer concrete tool actions before explanatory prose.
 - Start by reading or locating the relevant files with read/list/grep/lsp_inspect when context is incomplete.
 - Use write/edit/ast_edit only after you understand the target files.
-- Use runCommand for validation or project commands.
+- Use bash for validation or project commands.
+- Use shell or unified_exec when a Codex-style command execution surface is more appropriate.
+- Use list_dir for Codex-style directory listing and apply_patch for unified diff patch application.
+- Use tool_search or tool_suggest when you need to discover the right tool quickly.
 - Use startLocalDevServer for long-running dev servers such as bun dev, npm run dev, pnpm dev, or yarn dev.
 - Use listLocalProcesses, readLocalProcessLogs, and stopLocalProcess to manage long-running services after they start.
 - Do not use getProcessOutput with wait=true to watch a long-running dev server.
@@ -127,13 +148,14 @@ export const buildAgent = new Agent({
   memory: buildAgentMemory,
   workspace: ({ requestContext }) => getWorkspaceForRequest(requestContext),
   inputProcessors: ({ requestContext }) => {
+    const workspace = getWorkspaceForRequest(requestContext);
     const processors: InputProcessorOrWorkflow[] = [
       tokenLimiterProcessor,
       continuationProcessor,
     ];
     processors.push(
       new SkillSearchProcessor({
-        workspace: getWorkspaceForRequest(requestContext)!,
+        workspace,
         search: {
           topK: 5,
           minScore: 0.1,

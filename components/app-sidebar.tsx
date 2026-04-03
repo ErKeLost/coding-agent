@@ -1,5 +1,18 @@
 "use client";
 
+import { useTheme } from "@/components/theme-provider";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuSub,
+  DropdownMenuSubContent,
+  DropdownMenuSubTrigger,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import { Switch } from "@/components/ui/switch";
 import {
   ContextMenu,
   ContextMenuContent,
@@ -20,9 +33,12 @@ import {
 } from "@/components/ui/sidebar";
 import { cn } from "@/lib/utils";
 import {
+  CheckIcon,
   FolderIcon,
   FolderOpenIcon,
+  PaletteIcon,
   MessageSquareIcon,
+  MoonIcon,
   PlusIcon,
   Settings2Icon,
   Trash2Icon,
@@ -42,11 +58,25 @@ type AppSidebarProps = {
   onSelectThread: (threadId: string) => void;
   onDeleteThread?: (threadId: string) => void;
   onOpenWorkspace?: () => void;
-  onOpenSettings?: () => void;
-  activeSection?: "chat" | "settings";
   recentThreads: ThreadEntry[];
   workspaceRoot?: string | null;
 };
+
+const colorThemeLabels = {
+  sand: "沙丘",
+  graphite: "石墨",
+  ocean: "海洋",
+  forest: "森林",
+  rose: "玫瑰",
+} as const;
+
+const colorThemeSwatches = {
+  sand: ["#b68252", "#d4b27d", "#f3e7d1"],
+  graphite: ["#67748f", "#9ca8be", "#d6dce7"],
+  ocean: ["#2777c8", "#4bb4d8", "#d8edf5"],
+  forest: ["#3f8e68", "#78b28a", "#d9ebdc"],
+  rose: ["#b04a62", "#d27a8d", "#f3d9df"],
+} as const;
 
 const formatRelativeTime = (updatedAt: number) => {
   if (!updatedAt) return "";
@@ -74,11 +104,10 @@ export function AppSidebar({
   onSelectThread,
   onDeleteThread,
   onOpenWorkspace,
-  onOpenSettings,
-  activeSection = "chat",
   recentThreads,
   workspaceRoot,
 }: AppSidebarProps) {
+  const { colorTheme, colorThemes, resolvedTheme, setColorTheme, setTheme } = useTheme();
   const groupedThreads = recentThreads.reduce<Array<{ name: string; threads: ThreadEntry[] }>>(
     (groups, thread) => {
       const name = thread.workspaceRoot ? getWorkspaceLabel(thread.workspaceRoot) : null;
@@ -97,6 +126,71 @@ export function AppSidebar({
   );
   const hasWorkspace = Boolean(workspaceRoot);
   const hasGroupedThreads = groupedThreads.length > 0;
+  const darkModeEnabled = resolvedTheme === "dark";
+  const activeColorThemeLabel = colorThemeLabels[colorTheme];
+
+  const renderSettingsMenu = () => (
+    <DropdownMenuContent
+      align="start"
+      side="top"
+      sideOffset={10}
+      className="w-[276px] rounded-[14px] p-1.5 text-foreground"
+    >
+      <DropdownMenuLabel className="px-2.5 py-1.5 text-[10px] font-medium tracking-[0.02em] text-muted-foreground">
+        设置
+      </DropdownMenuLabel>
+      <DropdownMenuSeparator className="mx-1.5 my-1 bg-border/70" />
+      <DropdownMenuSub>
+        <DropdownMenuSubTrigger className="rounded-[10px] px-3 py-2.5 text-[13px] font-medium text-foreground [&_svg]:text-muted-foreground">
+          <div className="flex min-w-0 flex-1 items-center gap-3">
+            <PaletteIcon className="size-4" />
+            <span>主题</span>
+          </div>
+          <span className="ml-auto text-[11px] text-muted-foreground">
+            {activeColorThemeLabel}
+          </span>
+        </DropdownMenuSubTrigger>
+        <DropdownMenuSubContent className="w-[208px] rounded-[12px] p-1 text-foreground">
+          {colorThemes.map(({ value }) => (
+            <DropdownMenuItem
+              key={value}
+              onClick={() => setColorTheme(value)}
+              className="rounded-[10px] px-2.5 py-2 text-[12px] text-foreground"
+            >
+              <div className="flex items-center gap-1.5">
+                {colorThemeSwatches[value].map((swatch) => (
+                  <span
+                    key={swatch}
+                    className="size-3 rounded-full border border-border/70"
+                    style={{ backgroundColor: swatch }}
+                  />
+                ))}
+              </div>
+              <span>{colorThemeLabels[value]}</span>
+              {colorTheme === value ? <CheckIcon className="ml-auto size-4 text-foreground" /> : null}
+            </DropdownMenuItem>
+          ))}
+        </DropdownMenuSubContent>
+      </DropdownMenuSub>
+      <div className="mt-1 flex items-center gap-3 rounded-[10px] px-3 py-2.5 text-foreground">
+        <span className="flex size-7 items-center justify-center rounded-full bg-accent/70 text-muted-foreground">
+          <MoonIcon className="size-4" />
+        </span>
+        <div className="min-w-0 flex-1">
+          <div className="text-[13px] font-medium">暗黑模式</div>
+          <div className="text-[11px] text-muted-foreground">
+            {darkModeEnabled ? "当前为深色界面" : "当前为浅色界面"}
+          </div>
+        </div>
+        <Switch
+          checked={darkModeEnabled}
+          onCheckedChange={(checked) => setTheme(checked ? "dark" : "light")}
+          aria-label="切换暗黑模式"
+          className="data-[state=checked]:bg-primary data-[state=unchecked]:bg-input"
+        />
+      </div>
+    </DropdownMenuContent>
+  );
 
   return (
     <Sidebar
@@ -121,7 +215,7 @@ export function AppSidebar({
             <button
               type="button"
               onClick={onOpenWorkspace}
-              className="app-control flex size-8 items-center justify-center rounded-lg border-0 text-sidebar-foreground/60 transition-colors hover:text-sidebar-foreground group-data-[collapsible=icon]:hidden"
+              className="app-control flex size-8 items-center justify-center rounded-lg border-0 text-sidebar-foreground/72 transition-colors hover:text-sidebar-foreground group-data-[collapsible=icon]:hidden"
               aria-label="新开文件夹"
             >
               <FolderOpenIcon className="size-4" />
@@ -129,12 +223,12 @@ export function AppSidebar({
             <button
               type="button"
               onClick={() => onNewThread()}
-              className="app-control flex size-8 items-center justify-center rounded-lg border-0 text-sidebar-foreground/60 transition-colors hover:text-sidebar-foreground group-data-[collapsible=icon]:hidden"
+              className="app-control flex size-8 items-center justify-center rounded-lg border-0 text-sidebar-foreground/72 transition-colors hover:text-sidebar-foreground group-data-[collapsible=icon]:hidden"
               aria-label="新建对话"
             >
               <PlusIcon className="size-4" />
             </button>
-            <SidebarTrigger className="app-control size-8 rounded-lg border-0 text-sidebar-foreground/60 shadow-none hover:text-sidebar-foreground" />
+            <SidebarTrigger className="app-control size-8 rounded-lg border-0 text-sidebar-foreground/72 shadow-none hover:text-sidebar-foreground" />
           </div>
         </div>
       </SidebarHeader>
@@ -163,8 +257,8 @@ export function AppSidebar({
                             className={cn(
                               "h-auto items-start rounded-lg px-3 py-2.5",
                               isActive
-                                ? "app-soft-card border border-primary/25 bg-primary/[0.10] text-sidebar-foreground shadow-[0_10px_24px_rgba(15,23,42,0.05)]"
-                                : "app-soft-hover text-sidebar-foreground/80 hover:text-sidebar-foreground"
+                                ? "app-sidebar-item-active"
+                                : "app-sidebar-item"
                             )}
                           >
                             <div className="flex min-w-0 flex-1 items-start justify-between gap-3">
@@ -210,7 +304,7 @@ export function AppSidebar({
               <button
                 type="button"
                 onClick={onOpenWorkspace}
-                className="app-soft-card flex w-full flex-col items-center justify-center gap-3 rounded-xl border-dashed px-4 py-8 text-center transition-colors"
+                className="app-sidebar-item flex w-full flex-col items-center justify-center gap-3 rounded-xl border-dashed px-4 py-8 text-center transition-colors"
               >
                 <span className="app-control flex size-11 items-center justify-center rounded-xl border-0 text-sidebar-foreground/50">
                   <MessageSquareIcon className="size-5" />
@@ -252,35 +346,35 @@ export function AppSidebar({
 
       <SidebarFooter className="bg-transparent px-3 py-3 group-data-[collapsible=icon]:px-2.5">
         <div className="space-y-2 group-data-[collapsible=icon]:hidden">
-          <button
-            type="button"
-            onClick={onOpenSettings}
-            className={cn(
-              "flex h-9 w-full items-center gap-2 rounded-lg px-3 text-[11px] transition-colors",
-              activeSection === "settings"
-                ? "app-soft-card border border-primary/25 bg-primary/[0.10] text-sidebar-foreground shadow-[0_10px_24px_rgba(15,23,42,0.05)]"
-                : "app-soft-hover text-sidebar-foreground/60 hover:text-sidebar-foreground",
-            )}
-          >
-            <Settings2Icon className="size-3.5 text-sidebar-foreground/50" />
-            <span className="flex-1 text-left">设置</span>
-          </button>
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <button
+                type="button"
+                className="app-sidebar-item flex h-10 w-full items-center gap-3 rounded-[16px] px-3 text-sidebar-foreground/78 transition-colors hover:text-sidebar-foreground"
+              >
+                <span className="flex size-8 items-center justify-center rounded-[12px] bg-sidebar-foreground/[0.06] text-sidebar-foreground/72">
+                  <Settings2Icon className="size-4" />
+                </span>
+                <span className="min-w-0 flex-1 text-left text-[12px] font-medium">设置</span>
+              </button>
+            </DropdownMenuTrigger>
+            {renderSettingsMenu()}
+          </DropdownMenu>
         </div>
 
         <SidebarMenu className="hidden gap-1 group-data-[collapsible=icon]:flex">
           <SidebarMenuItem>
-            <SidebarMenuButton
-              tooltip="设置"
-              onClick={onOpenSettings}
-              className={cn(
-                "size-10 justify-center rounded-lg px-0 text-[12px]",
-                activeSection === "settings"
-                  ? "app-control border-primary/30 bg-primary/[0.12] text-sidebar-foreground"
-                  : "app-control-ghost text-sidebar-foreground/60 hover:text-sidebar-foreground",
-              )}
-            >
-              <Settings2Icon className="size-4" />
-            </SidebarMenuButton>
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <SidebarMenuButton
+                  tooltip="设置"
+                  className="app-control-ghost size-10 justify-center rounded-lg px-0 text-[12px] text-sidebar-foreground/60 hover:text-sidebar-foreground"
+                >
+                  <Settings2Icon className="size-4" />
+                </SidebarMenuButton>
+              </DropdownMenuTrigger>
+              {renderSettingsMenu()}
+            </DropdownMenu>
           </SidebarMenuItem>
         </SidebarMenu>
       </SidebarFooter>

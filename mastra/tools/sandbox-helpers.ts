@@ -6,10 +6,14 @@ import { z } from 'zod';
 export const MAX_WEBFETCH_SIZE = 5 * 1024 * 1024;
 
 const TEXT_BY_NAME: Record<string, string> = {
+  'bash.txt': readFileSync(new URL('./text/bash.txt', import.meta.url), 'utf8'),
+  'edit.txt': readFileSync(new URL('./text/edit.txt', import.meta.url), 'utf8'),
+  'read.txt': readFileSync(new URL('./text/read.txt', import.meta.url), 'utf8'),
   'todoread.txt': readFileSync(new URL('./text/todoread.txt', import.meta.url), 'utf8'),
   'todowrite.txt': readFileSync(new URL('./text/todowrite.txt', import.meta.url), 'utf8'),
   'webfetch.txt': readFileSync(new URL('./text/webfetch.txt', import.meta.url), 'utf8'),
   'websearch.txt': readFileSync(new URL('./text/websearch.txt', import.meta.url), 'utf8'),
+  'write.txt': readFileSync(new URL('./text/write.txt', import.meta.url), 'utf8'),
 };
 
 function findProjectTextDir() {
