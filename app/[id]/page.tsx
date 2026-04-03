@@ -1093,28 +1093,6 @@ const getActivityVerb = (
   return `${verb} failed`;
 };
 
-const cleanMetaForActivity = (meta: string | null) =>
-  (meta ?? "")
-    .replace(
-      /^(file|files|path|pattern|query|command|cmd|url|patch|from)\s*:\s*/i,
-      ""
-    )
-    .trim();
-
-const extractPathishText = (meta: string | null) => {
-  const value = cleanMetaForActivity(meta);
-  if (!value) return null;
-  if (
-    value.includes("/") ||
-    value.includes("\\") ||
-    value.includes(" -> ") ||
-    value.startsWith(".")
-  ) {
-    return value;
-  }
-  return null;
-};
-
 const getToolPathTail = (item: Extract<ChatItem, { type: "tool" }>) => {
   if (isComputerUseTool(item.name)) {
     return getComputerUseToolSummary(item);
@@ -1552,6 +1530,26 @@ const MODEL_STORAGE_KEY = "chat-selected-model";
 const DEFAULT_MODEL_ID = "openrouter/openai/gpt-5.4-mini";
 const PREVIOUS_DEFAULT_MODEL_ID = "openrouter/z-ai/glm-5v-turbo";
 
+const getStoredModelSelection = () => {
+  if (typeof window === "undefined") {
+    return DEFAULT_MODEL_ID;
+  }
+
+  try {
+    const savedModel = window.localStorage.getItem(MODEL_STORAGE_KEY)?.trim();
+    if (savedModel && models.some((entry) => entry.id === savedModel)) {
+      if (savedModel === PREVIOUS_DEFAULT_MODEL_ID) {
+        return DEFAULT_MODEL_ID;
+      }
+      return savedModel;
+    }
+  } catch {
+    // Ignore storage errors.
+  }
+
+  return DEFAULT_MODEL_ID;
+};
+
 const logWorkspaceDebug = (label: string, payload?: Record<string, unknown>) => {
   console.info(`[workspace-debug] ${label}`, payload ?? {});
 };
@@ -1562,7 +1560,7 @@ export default function Home() {
     () => true,
     () => false,
   );
-  const [model, setModel] = useState(DEFAULT_MODEL_ID);
+  const [model, setModel] = useState(getStoredModelSelection());
   const [modelDialogOpen, setModelDialogOpen] = useState(false);
   const [selectedAgent] = useState(DEFAULT_AGENT_ID);
   const [reasoningOpenState, setReasoningOpenState] = useState<Record<string, boolean>>({});
@@ -1577,25 +1575,6 @@ export default function Home() {
     [],
   );
   const [threadSessionError, setThreadSessionError] = useState<string | null>(null);
-
-  useEffect(() => {
-    if (!hasMounted) return;
-    try {
-      const savedModel = window.localStorage.getItem(MODEL_STORAGE_KEY)?.trim();
-      if (savedModel && models.some((entry) => entry.id === savedModel)) {
-        if (savedModel === PREVIOUS_DEFAULT_MODEL_ID) {
-          setModel(DEFAULT_MODEL_ID);
-          return;
-        }
-        setModel(savedModel);
-        return;
-      }
-    } catch {
-      // Ignore storage errors.
-    }
-
-    setModel(DEFAULT_MODEL_ID);
-  }, [hasMounted]);
 
   useEffect(() => {
     if (!hasMounted || !model) return;
@@ -1641,7 +1620,6 @@ export default function Home() {
     status,
     error,
     guideState,
-    guideText,
     queuedSubmissionPreview,
     handleSubmit,
     promoteQueuedSubmissionToGuide,
@@ -1964,11 +1942,11 @@ export default function Home() {
       <SidebarInset className="app-shell bg-transparent">
         <ModelSelector open={modelDialogOpen} onOpenChange={setModelDialogOpen}>
           <ModelSelectorContent
-            className="max-w-[420px] rounded-[20px] border border-border/60 bg-background/96 shadow-2xl backdrop-blur"
+            className="max-w-[430px] rounded-[22px]"
             title="选择模型"
           >
-            <ModelSelectorInput placeholder="搜索模型..." className="text-[12px]" />
-            <ModelSelectorList className="max-h-[340px]">
+            <ModelSelectorInput placeholder="搜索模型..." />
+            <ModelSelectorList className="max-h-[360px] px-1.5 py-1.5">
               <ModelSelectorEmpty>没有找到模型。</ModelSelectorEmpty>
               {modelChefs.map((chef) => (
                 <ModelSelectorGroup key={chef} heading={chef}>
@@ -2135,20 +2113,17 @@ export default function Home() {
                       ) : items.length === 0 ? (
                         <ConversationEmptyState>
                           <div className="h-full w-full p-6">
-                            <div className="flex h-full w-full flex-col items-center justify-center gap-4 px-6 text-center">
-                              <div className="flex size-16 items-center justify-center rounded-xl border border-border/45 bg-muted/20">
-                                <SparklesIcon className="size-7 text-primary/80" />
+                            <div className="app-empty-hero flex h-full w-full flex-col items-center justify-center gap-4 rounded-[28px] px-8 text-center">
+                              <div className="app-control flex size-16 items-center justify-center rounded-[20px] shadow-none">
+                                <SparklesIcon className="size-7 text-primary/85" />
                               </div>
                               <div className="space-y-2">
                                 <h1 className="text-[34px] font-semibold leading-tight tracking-tight text-foreground">
-                                  Hello,{" "}
-                                  <span className="bg-gradient-to-r from-primary to-foreground/70 bg-clip-text text-transparent">
-                                    AlphaDev
-                                  </span>
+                                  Ready when the repo is.
                                 </h1>
                                 <p className="max-w-xl text-sm leading-6 text-muted-foreground">
-                                  The aura is synchronized. Ready to refactor, debug,
-                                  or architect your next masterpiece.
+                                  Pick a thread, reference files with @, and use Rovix as a focused
+                                  local workspace for debugging, refactoring, and agent steering.
                                 </p>
                               </div>
                             </div>
@@ -2231,7 +2206,8 @@ export default function Home() {
                                     }))
                                   }
                                   className={cn(
-                                    "h-auto w-full justify-start gap-2 rounded-md px-0 py-1 text-left font-normal text-foreground/78 shadow-none transition-colors hover:bg-transparent hover:text-foreground",
+                                    "app-tool-row h-auto w-full justify-start gap-2 rounded-[14px] px-2.5 py-2 text-left font-normal text-foreground/78 shadow-none hover:text-foreground",
+                                    open && "app-tool-row-open",
                                     item.status === "error" &&
                                       "text-destructive/80 hover:text-destructive"
                                   )}
@@ -2267,7 +2243,7 @@ export default function Home() {
                                   </div>
                                 </Button>
                                 {open ? (
-                                  <div className="ml-3 space-y-1 border-l border-border/35 pl-2.5 text-[10px] leading-4.5 text-muted-foreground">
+                                  <div className="app-tool-detail ml-3 space-y-1 px-3 py-2 text-[10px] leading-4.5 text-muted-foreground">
                                     {item.content ? (
                                       <div className="whitespace-pre-wrap text-muted-foreground">
                                         {item.content}
@@ -2316,7 +2292,8 @@ export default function Home() {
                                     }))
                                   }
                                   className={cn(
-                                    "group h-auto w-full justify-start gap-2 rounded-md border border-transparent px-0 py-1 text-left font-normal text-foreground/78 shadow-none transition-colors hover:border-border/50 hover:bg-background/30 hover:text-foreground",
+                                    "group app-tool-row h-auto w-full justify-start gap-2 rounded-[14px] px-2.5 py-2 text-left font-normal text-foreground/78 shadow-none hover:text-foreground",
+                                    open && "app-tool-row-open",
                                     item.status === "error" &&
                                       "text-destructive/80 hover:text-destructive"
                                   )}
@@ -2363,7 +2340,7 @@ export default function Home() {
                                   </div>
                                 </Button>
                                 {open ? (
-                                  <div className="ml-3 space-y-1.5 border-l border-border/30 pl-2.5 text-[10px]">
+                                  <div className="app-tool-detail ml-3 space-y-1.5 px-3 py-2 text-[10px]">
                                     {!hideRawToolPayload ? (
                                       <div className="space-y-0.5">
                                         <div className="text-[9px] tracking-[0.08em] text-muted-foreground/60">
@@ -2493,7 +2470,7 @@ export default function Home() {
                     <div className={cn(CHAT_COLUMN_CLASS)}>
                       <div
                         className={cn(
-                          "app-panel app-frosted overflow-hidden",
+                          "app-input-shell app-frosted overflow-hidden",
                           activePlan ? "rounded-[18px]" : "rounded-[16px]",
                         )}
                       >
@@ -2572,7 +2549,7 @@ export default function Home() {
                           <PromptInputBody>
                             <FileMentionTextarea
                               workspaceTree={desktopWorkspace?.tree ?? []}
-                              className="min-h-[60px] rounded-none border-0 bg-transparent px-5 py-3 text-[14px] leading-6 shadow-none focus-visible:ring-0"
+                              className="min-h-[64px] rounded-none border-0 bg-transparent px-5 py-3.5 text-[14px] leading-6 shadow-none focus-visible:ring-0"
                               placeholder={
                                 canStartConversation || !shouldShowEmptyThreadHint
                                   ? "输入 @ 选择文件，然后继续描述你的需求"
@@ -2596,7 +2573,7 @@ export default function Home() {
                                 <ModelSelectorTrigger asChild>
                                   <Button
                                     variant="outline"
-                                    className="h-8 min-w-0 max-w-[180px] justify-between gap-2 rounded-[10px] border-border/60 bg-background/80 px-2.5 text-[11px] shadow-none max-sm:w-full max-sm:max-w-none"
+                                    className="app-control h-8 min-w-0 max-w-[190px] justify-between gap-2 rounded-[10px] border-0 px-2.5 text-[11px] shadow-none max-sm:w-full max-sm:max-w-none"
                                   >
                                     <div className="flex min-w-0 items-center gap-2">
                                       {selectedModelData?.chefSlug ? (

@@ -42,7 +42,7 @@ export const ModelSelectorContent = ({
 }: ModelSelectorContentProps) => (
   <DialogContent
     className={cn(
-      "outline! border-none! p-0 outline-border! outline-solid!",
+      "app-popup-surface outline! border-none! overflow-hidden p-0 outline-border! outline-solid!",
       className
     )}
     {...props}
@@ -66,7 +66,13 @@ export const ModelSelectorInput = ({
   className,
   ...props
 }: ModelSelectorInputProps) => (
-  <CommandInput className={cn("h-auto py-2", className)} {...props} />
+  <CommandInput
+    className={cn(
+      "h-auto border-b border-border/60 bg-transparent px-1 py-3 text-[12px]",
+      className
+    )}
+    {...props}
+  />
 );
 
 export type ModelSelectorListProps = ComponentProps<typeof CommandList>;
