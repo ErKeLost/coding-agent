@@ -1,0 +1,19 @@
+Provides language-server style code intelligence for supported languages.
+
+Use this tool when you need IDE-style semantic operations rather than plain text search:
+- document symbols / file outline
+- workspace symbol search
+- go-to-definition style symbol discovery
+- completions at a file position
+- opening or closing files for the language server lifecycle
+
+Prefer simpler local tools like Read, Grep, Glob, and list when a plain file or text search is enough. Use LSP when symbol-aware navigation or structured code discovery is needed.
+
+Inputs:
+- sandboxId: the target sandbox identifier
+- operation: one of documentSymbol, workspaceSymbol, sandboxSymbols, completions, didOpen, didClose, start, stop
+- languageId: optional language override
+- projectPath: optional project root override
+- filePath: required for file-scoped operations
+- line and character: required for completions
+- query: optional symbol query for workspace-wide search

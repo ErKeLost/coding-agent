@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { bindWorkspaceRootToThread } from "@/mastra/workspace/local-workspace";
+import { bindWorkspaceRootToThread } from "@/mastra/workspace/thread-workspace-root";
 import {
   deleteThreadSession,
   getThreadSession,

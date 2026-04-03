@@ -3,10 +3,12 @@ import { existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import type { RequestContext } from '@mastra/core/request-context';
 import { LocalFilesystem, LocalSandbox, WORKSPACE_TOOLS, Workspace } from '@mastra/core/workspace';
+import {
+  getLastActiveWorkspaceRoot,
+  getThreadBoundWorkspaceRoot,
+} from './thread-workspace-root';
 
 const workspaceCache = new Map<string, Workspace>();
-const threadWorkspaceRootCache = new Map<string, string>();
-let lastActiveWorkspaceRoot: string | null = null;
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
 
 function getRequestContextString(requestContext: RequestContext, key: string) {
@@ -31,27 +33,10 @@ function resolveSkillDirectories(workspaceRoot: string) {
 export function resolveWorkspaceRootFromRequest(requestContext: RequestContext) {
   const requestedRoot = getRequestContextString(requestContext, 'workspaceRoot');
   const threadId = getRequestContextString(requestContext, 'threadId');
-  const cachedThreadRoot =
-    threadId && threadWorkspaceRootCache.has(threadId)
-      ? threadWorkspaceRootCache.get(threadId)
-      : undefined;
+  const cachedThreadRoot = getThreadBoundWorkspaceRoot(threadId);
   return resolveWorkspaceRoot(
-    requestedRoot ?? cachedThreadRoot ?? lastActiveWorkspaceRoot ?? undefined,
+    requestedRoot ?? cachedThreadRoot ?? getLastActiveWorkspaceRoot() ?? undefined,
   );
-}
-
-export function bindWorkspaceRootToThread(threadId: string, workspaceRoot: string) {
-  const normalizedThreadId = threadId.trim();
-  const normalizedWorkspaceRoot = workspaceRoot.trim();
-  if (!normalizedThreadId || !normalizedWorkspaceRoot) return;
-  threadWorkspaceRootCache.set(normalizedThreadId, normalizedWorkspaceRoot);
-  lastActiveWorkspaceRoot = normalizedWorkspaceRoot;
-}
-
-export function setActiveWorkspaceRoot(workspaceRoot: string) {
-  const normalizedWorkspaceRoot = workspaceRoot.trim();
-  if (!normalizedWorkspaceRoot) return;
-  lastActiveWorkspaceRoot = normalizedWorkspaceRoot;
 }
 
 export function getWorkspaceForRoot(workspaceRoot: string) {

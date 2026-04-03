@@ -1,7 +1,10 @@
 import "server-only";
 
 import { RequestContext } from "@mastra/core/request-context";
-import { bindWorkspaceRootToThread, setActiveWorkspaceRoot } from "@/mastra/workspace/local-workspace";
+import {
+  bindWorkspaceRootToThread,
+  setActiveWorkspaceRoot,
+} from "@/mastra/workspace/thread-workspace-root";
 import { getThreadSession, upsertThreadSession } from "@/lib/server/thread-session-store";
 import { extractCurrentInputText, inferContinuationContext } from "@/lib/continuation";
 import type { ThreadSession } from "@/lib/thread-session";

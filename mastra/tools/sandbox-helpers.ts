@@ -6,9 +6,14 @@ import { z } from 'zod';
 export const MAX_WEBFETCH_SIZE = 5 * 1024 * 1024;
 
 const TEXT_BY_NAME: Record<string, string> = {
+  'batch.txt': readFileSync(new URL('./text/batch.txt', import.meta.url), 'utf8'),
   'bash.txt': readFileSync(new URL('./text/bash.txt', import.meta.url), 'utf8'),
   'edit.txt': readFileSync(new URL('./text/edit.txt', import.meta.url), 'utf8'),
+  'ls.txt': readFileSync(new URL('./text/ls.txt', import.meta.url), 'utf8'),
+  'lsp.txt': readFileSync(new URL('./text/lsp.txt', import.meta.url), 'utf8'),
+  'question.txt': readFileSync(new URL('./text/question.txt', import.meta.url), 'utf8'),
   'read.txt': readFileSync(new URL('./text/read.txt', import.meta.url), 'utf8'),
+  'task.txt': readFileSync(new URL('./text/task.txt', import.meta.url), 'utf8'),
   'todoread.txt': readFileSync(new URL('./text/todoread.txt', import.meta.url), 'utf8'),
   'todowrite.txt': readFileSync(new URL('./text/todowrite.txt', import.meta.url), 'utf8'),
   'webfetch.txt': readFileSync(new URL('./text/webfetch.txt', import.meta.url), 'utf8'),
