@@ -2533,10 +2533,11 @@ export default function Home() {
                           <PromptInputBody>
                             <FileMentionTextarea
                               workspaceTree={desktopWorkspace?.tree ?? []}
+                              workspaceRoot={workspaceRoot}
                               className="min-h-[64px] rounded-none border-0 bg-transparent px-5 py-3.5 text-[14px] leading-6 shadow-none focus-visible:ring-0"
                               placeholder={
                                 canStartConversation || !shouldShowEmptyThreadHint
-                                  ? "输入 @ 选择文件，然后继续描述你的需求"
+                                  ? "输入 @ 选择文件或技能，然后继续描述你的需求"
                                   : "请先创建或选择一个线程"
                               }
                               readOnly={!canStartConversation}

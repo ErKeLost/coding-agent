@@ -3,6 +3,7 @@ import { existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import type { RequestContext } from '@mastra/core/request-context';
 import { LocalFilesystem, LocalSandbox, WORKSPACE_TOOLS, Workspace } from '@mastra/core/workspace';
+import { resolveUserSkillDirectories, resolveWorkspaceSkillDirectories } from '../skills';
 import {
   getLastActiveWorkspaceRoot,
   getThreadBoundWorkspaceRoot,
@@ -21,13 +22,9 @@ function resolveWorkspaceRoot(input?: string) {
 }
 
 function resolveSkillDirectories(workspaceRoot: string) {
-  const candidates = [
-    path.join(workspaceRoot, '.codex', 'skills'),
-    path.join(workspaceRoot, '.howone'),
-    path.join(workspaceRoot, '.mastra', 'skills'),
-  ];
-
-  return candidates.filter(candidate => existsSync(candidate));
+  return [...new Set([...resolveWorkspaceSkillDirectories(workspaceRoot), ...resolveUserSkillDirectories()])].filter(
+    candidate => existsSync(candidate),
+  );
 }
 
 export function resolveWorkspaceRootFromRequest(requestContext: RequestContext) {

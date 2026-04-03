@@ -133,8 +133,29 @@ ${guideText ? `- Active guidance: ${guideText}` : ''}`.trim());
 
   runtimeDirectives.push(
     `Current project path: ${workspaceRoot}
-Operate on the local project using the available file, search, edit, and command tools. Stay inside the project by default. If a task appears to require touching unrelated parts of the machine, confirm intent first. Use lsp_inspect for semantic lookup and search_skills/load_skill for on-demand skill discovery when helpful.`,
+Operate on the local project using the available file, search, edit, and command tools. Stay inside the project by default. If a task appears to require touching unrelated parts of the machine, confirm intent first. Use lsp_inspect for semantic lookup and use the skill tool for on-demand skill loading when helpful.`,
   );
+
+  const mentionedSkillsInstructions = getRequestContextString(
+    requestContext,
+    'mentionedSkillsInstructions',
+  );
+  if (mentionedSkillsInstructions) {
+    runtimeDirectives.push(mentionedSkillsInstructions);
+  }
+
+  const skillsInstructions = getRequestContextString(requestContext, 'skillsInstructions');
+  if (skillsInstructions) {
+    runtimeDirectives.push(skillsInstructions);
+  }
+
+  const enabledSkillsInstructions = getRequestContextString(
+    requestContext,
+    'enabledSkillsInstructions',
+  );
+  if (enabledSkillsInstructions) {
+    runtimeDirectives.push(enabledSkillsInstructions);
+  }
 
   return `${baseInstructions}\n\n${runtimeDirectives.join('\n\n')}`;
 };

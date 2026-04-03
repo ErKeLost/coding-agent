@@ -2,6 +2,15 @@ import "server-only";
 
 import { RequestContext } from "@mastra/core/request-context";
 import {
+  discoverSkills,
+  loadMentionedSkills,
+  renderEnabledSkillsInstructions,
+  renderMentionedSkillsInstructions,
+  renderSkillsInstructions,
+  selectSkillsByMentionText,
+  selectSkillsByIds,
+} from "@/mastra/skills";
+import {
   bindWorkspaceRootToThread,
   setActiveWorkspaceRoot,
 } from "@/mastra/workspace/thread-workspace-root";
@@ -76,6 +85,56 @@ export async function buildAgentRequestContext(
     });
     bindWorkspaceRootToThread(payload.threadId, effectiveWorkspaceRoot);
     setActiveWorkspaceRoot(effectiveWorkspaceRoot);
+  }
+
+  if (effectiveWorkspaceRoot) {
+    const discovery = await discoverSkills({
+      workspaceRoot: effectiveWorkspaceRoot,
+    });
+    const skillsInstructions = renderSkillsInstructions(discovery.skills);
+    if (skillsInstructions) {
+      requestContext.set("skillsInstructions", skillsInstructions);
+    }
+    if (discovery.errors.length > 0) {
+      requestContext.set("skillsLoadErrors", JSON.stringify(discovery.errors));
+    }
+
+    const enabledSkillIds = Array.isArray(threadSession?.state.extensions?.enabledSkillIds)
+      ? threadSession?.state.extensions?.enabledSkillIds
+      : [];
+    const enabledSkills = selectSkillsByIds(discovery.skills, enabledSkillIds);
+    const enabledSkillsInstructions = renderEnabledSkillsInstructions(enabledSkills);
+    if (enabledSkillsInstructions) {
+      requestContext.set("enabledSkillsInstructions", enabledSkillsInstructions);
+      requestContext.set("enabledSkillIds", JSON.stringify(enabledSkillIds));
+    }
+
+    const currentInputText = extractCurrentInputText(payload.messages ?? payload.message);
+    if (currentInputText) {
+      const mentionedSkillMetadata = selectSkillsByMentionText(
+        discovery.skills,
+        currentInputText,
+      );
+      if (mentionedSkillMetadata.length > 0) {
+        const mentionedSkills = await loadMentionedSkills(mentionedSkillMetadata);
+        const mentionedSkillsInstructions = renderMentionedSkillsInstructions(
+          mentionedSkills.loaded,
+        );
+        if (mentionedSkillsInstructions) {
+          requestContext.set("mentionedSkillsInstructions", mentionedSkillsInstructions);
+          requestContext.set(
+            "mentionedSkillIds",
+            JSON.stringify(mentionedSkillMetadata.map((skill) => skill.id)),
+          );
+        }
+        if (mentionedSkills.errors.length > 0) {
+          requestContext.set(
+            "mentionedSkillsLoadErrors",
+            JSON.stringify(mentionedSkills.errors),
+          );
+        }
+      }
+    }
   }
 
   const currentMessageText = extractCurrentInputText(payload.messages ?? payload.message);

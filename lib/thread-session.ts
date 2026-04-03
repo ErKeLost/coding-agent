@@ -28,6 +28,10 @@ export type SerializablePreviewLog = {
   timestamp: string;
 };
 
+export type ThreadExtensionsState = {
+  enabledSkillIds: string[];
+};
+
 export type { WorkflowGraphEdge, WorkflowGraphNode, WorkflowGraphSnapshot };
 
 export type ThreadSessionState = {
@@ -36,6 +40,7 @@ export type ThreadSessionState = {
   items?: unknown[];
   plan?: SerializablePlan | null;
   previewLogs?: SerializablePreviewLog[];
+  extensions?: ThreadExtensionsState;
   graph?: WorkflowGraphSnapshot | null;
   execution?: {
     status: "idle" | "resumable";

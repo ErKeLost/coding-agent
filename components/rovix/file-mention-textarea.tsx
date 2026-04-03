@@ -4,13 +4,30 @@ import { Button } from "@/components/ui/button";
 import { PromptInputTextarea, usePromptInputController } from "@/components/ai-elements/prompt-input";
 import type { DesktopWorkspaceNode } from "@/lib/desktop-workspace";
 import { cn } from "@/lib/utils";
-import { FileCode2Icon } from "lucide-react";
-import { useMemo, useRef, useState } from "react";
+import { FileCode2Icon, SparklesIcon } from "lucide-react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
-type MentionCandidate = {
+type FileMentionCandidate = {
+  kind: "file";
   path: string;
   name: string;
   parentPath: string;
+};
+
+type SkillMentionCandidate = {
+  kind: "skill";
+  id: string;
+  name: string;
+  description: string;
+  shortDescription?: string;
+  filePath: string;
+  scope: "workspace" | "user";
+};
+
+type MentionCandidate = FileMentionCandidate | SkillMentionCandidate;
+
+type MentionSearchResult = MentionCandidate & {
+  score: number;
 };
 
 type ActiveMention = {
@@ -21,10 +38,11 @@ type ActiveMention = {
 
 type FileMentionTextareaProps = React.ComponentProps<typeof PromptInputTextarea> & {
   workspaceTree?: DesktopWorkspaceNode[];
+  workspaceRoot?: string | null;
 };
 
-const flattenWorkspaceFiles = (nodes: DesktopWorkspaceNode[]): MentionCandidate[] => {
-  const files: MentionCandidate[] = [];
+const flattenWorkspaceFiles = (nodes: DesktopWorkspaceNode[]): FileMentionCandidate[] => {
+  const files: FileMentionCandidate[] = [];
 
   const walk = (items: DesktopWorkspaceNode[]) => {
     items.forEach((node) => {
@@ -35,6 +53,7 @@ const flattenWorkspaceFiles = (nodes: DesktopWorkspaceNode[]): MentionCandidate[
 
       const parentSegments = node.path.split("/").slice(0, -1);
       files.push({
+        kind: "file",
         path: node.path,
         name: node.name,
         parentPath: parentSegments.join("/"),
@@ -70,6 +89,7 @@ const getActiveMention = (value: string, caretIndex: number): ActiveMention | nu
 
 export function FileMentionTextarea({
   workspaceTree = [],
+  workspaceRoot,
   className,
   onChange,
   onKeyDown,
@@ -79,14 +99,91 @@ export function FileMentionTextarea({
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const [activeMention, setActiveMention] = useState<ActiveMention | null>(null);
   const [selectedIndex, setSelectedIndex] = useState(0);
+  const [skills, setSkills] = useState<SkillMentionCandidate[]>([]);
   const lastMentionQueryRef = useRef<string | null>(null);
   const files = useMemo(() => flattenWorkspaceFiles(workspaceTree), [workspaceTree]);
+  const availableSkills = useMemo(
+    () => (workspaceRoot?.trim() ? skills : []),
+    [skills, workspaceRoot],
+  );
+
+  useEffect(() => {
+    if (!workspaceRoot?.trim()) {
+      return;
+    }
+
+    const abortController = new AbortController();
+    const query = new URLSearchParams({ workspaceRoot });
+
+    void fetch(`/api/skills?${query.toString()}`, {
+      cache: "no-store",
+      signal: abortController.signal,
+    })
+      .then(async (response) => {
+        if (!response.ok) {
+          throw new Error("Failed to load skills");
+        }
+
+        const payload = (await response.json()) as {
+          skills?: Array<{
+            id: string;
+            name: string;
+            description: string;
+            shortDescription?: string;
+            filePath: string;
+            scope: "workspace" | "user";
+          }>;
+        };
+
+        if (!abortController.signal.aborted) {
+          setSkills(
+            Array.isArray(payload.skills)
+              ? payload.skills.map((skill) => ({
+                  kind: "skill",
+                  id: skill.id,
+                  name: skill.name,
+                  description: skill.description,
+                  shortDescription: skill.shortDescription,
+                  filePath: skill.filePath,
+                  scope: skill.scope,
+                }))
+              : [],
+          );
+        }
+      })
+      .catch(() => {
+        if (!abortController.signal.aborted) {
+          setSkills([]);
+        }
+      });
+
+    return () => {
+      abortController.abort();
+    };
+  }, [workspaceRoot]);
 
   const mentionResults = useMemo(() => {
-    if (!activeMention) return [];
+    if (!activeMention) return [] as MentionSearchResult[];
     const query = activeMention.query.trim().toLowerCase();
 
-    return files
+    const matchedSkills: MentionSearchResult[] = availableSkills
+      .map((skill) => {
+        const lowerName = skill.name.toLowerCase();
+        const lowerDescription = skill.description.toLowerCase();
+        const score = !query
+          ? 4
+          : lowerName.includes(query)
+            ? 5
+            : lowerDescription.includes(query)
+              ? 3
+              : query.split("").every((char) => lowerName.includes(char))
+                ? 2
+                : 0;
+        return { ...skill, score };
+      })
+      .filter((skill) => skill.score > 0);
+
+    const matchedFiles: MentionSearchResult[] = files
       .map((file) => {
         const lowerName = file.name.toLowerCase();
         const lowerPath = file.path.toLowerCase();
@@ -101,10 +198,19 @@ export function FileMentionTextarea({
                 : 0;
         return { ...file, score };
       })
-      .filter((file) => file.score > 0)
-      .sort((left, right) => right.score - left.score || left.path.localeCompare(right.path))
+      .filter((file) => file.score > 0);
+
+    return [...matchedSkills, ...matchedFiles]
+      .sort((left, right) => {
+        if (left.score !== right.score) return right.score - left.score;
+        if (left.kind !== right.kind) return left.kind === "skill" ? -1 : 1;
+        if (left.kind === "skill" && right.kind === "skill") {
+          return left.name.localeCompare(right.name);
+        }
+        return left.path.localeCompare((right as FileMentionCandidate).path);
+      })
       .slice(0, 8);
-  }, [activeMention, files]);
+  }, [activeMention, availableSkills, files]);
 
   const syncMentionState = (nextValue: string, caretIndex: number) => {
     const nextMention = getActiveMention(nextValue, caretIndex);
@@ -118,9 +224,14 @@ export function FileMentionTextarea({
   const insertMention = (candidate: MentionCandidate) => {
     if (!activeMention) return;
 
+    const insertedValue =
+      candidate.kind === "skill"
+        ? `[$${candidate.name}](skill://${candidate.filePath}) `
+        : `@${candidate.path} `;
+
     const nextValue =
       controller.textInput.value.slice(0, activeMention.start) +
-      `@${candidate.path} ` +
+      insertedValue +
       controller.textInput.value.slice(activeMention.end);
     controller.textInput.setInput(nextValue);
     setActiveMention(null);
@@ -128,11 +239,27 @@ export function FileMentionTextarea({
     requestAnimationFrame(() => {
       const textarea = textareaRef.current;
       if (!textarea) return;
-      const nextCaret = activeMention.start + candidate.path.length + 2;
+      const nextCaret = activeMention.start + insertedValue.length;
       textarea.focus();
       textarea.setSelectionRange(nextCaret, nextCaret);
     });
   };
+
+  const skillResults = mentionResults.filter(
+    (candidate): candidate is MentionSearchResult & SkillMentionCandidate => candidate.kind === "skill",
+  );
+  const fileResults = mentionResults.filter(
+    (candidate): candidate is MentionSearchResult & FileMentionCandidate => candidate.kind === "file",
+  );
+
+  const getCandidateIndex = (candidate: MentionSearchResult) =>
+    mentionResults.findIndex((item) =>
+      item.kind === "skill" && candidate.kind === "skill"
+        ? item.id === candidate.id
+        : item.kind === "file" && candidate.kind === "file"
+          ? item.path === candidate.path
+          : false,
+    );
 
   return (
     <div className="relative w-full">
@@ -152,35 +279,89 @@ export function FileMentionTextarea({
                   "color-mix(in srgb, var(--app-soft-fill) 78%, transparent)",
               }}
             >
-              Files
+              Resources
             </div>
-            <div className="max-h-56 space-y-0.5 overflow-y-auto px-1 py-1">
+            <div className="max-h-56 space-y-1 overflow-y-auto px-1 py-1">
               {mentionResults.length > 0 ? (
-                mentionResults.map((candidate, index) => (
-                  <Button
-                    key={candidate.path}
-                    type="button"
-                    variant="ghost"
-                    onMouseDown={(event) => {
-                      event.preventDefault();
-                      insertMention(candidate);
-                    }}
-                    className={cn(
-                      "h-auto w-full justify-start gap-2 rounded-[9px] px-2 py-1.5 text-left shadow-none transition-colors",
-                      index === selectedIndex ? "bg-primary/10" : "hover:bg-primary/[0.06]"
-                    )}
-                  >
-                    <span className="flex size-6 shrink-0 items-center justify-center rounded-md border border-primary/18 bg-primary/[0.07] text-primary/90">
-                      <FileCode2Icon className="size-3" />
-                    </span>
-                    <span className="min-w-0 flex-1 truncate text-[11.5px] font-medium leading-5 text-foreground">
-                        {candidate.name}
-                    </span>
-                  </Button>
-                ))
+                <>
+                  {skillResults.length > 0 ? (
+                    <div className="space-y-0.5">
+                      <div className="px-3 py-1 text-[10px] font-medium tracking-[0.08em] text-muted-foreground uppercase">
+                        Skills
+                      </div>
+                      {skillResults.map((candidate) => {
+                        const index = getCandidateIndex(candidate);
+                        return (
+                          <Button
+                            key={candidate.id}
+                            type="button"
+                            variant="ghost"
+                            onMouseDown={(event) => {
+                              event.preventDefault();
+                              insertMention(candidate);
+                            }}
+                            className={cn(
+                              "h-auto w-full justify-start gap-2 rounded-[9px] px-2 py-1.5 text-left shadow-none transition-colors",
+                              index === selectedIndex ? "bg-primary/10" : "hover:bg-primary/[0.06]",
+                            )}
+                          >
+                            <span className="flex size-6 shrink-0 items-center justify-center rounded-md border border-primary/18 bg-primary/[0.07] text-primary/90">
+                              <SparklesIcon className="size-3" />
+                            </span>
+                            <span className="min-w-0 flex-1">
+                              <span className="block truncate text-[11.5px] font-medium leading-5 text-foreground">
+                                {candidate.name}
+                              </span>
+                              <span className="block truncate text-[10.5px] leading-4 text-muted-foreground">
+                                {candidate.shortDescription ?? candidate.description}
+                              </span>
+                            </span>
+                          </Button>
+                        );
+                      })}
+                    </div>
+                  ) : null}
+                  {fileResults.length > 0 ? (
+                    <div className="space-y-0.5">
+                      <div className="px-3 py-1 text-[10px] font-medium tracking-[0.08em] text-muted-foreground uppercase">
+                        Files
+                      </div>
+                      {fileResults.map((candidate) => {
+                        const index = getCandidateIndex(candidate);
+                        return (
+                          <Button
+                            key={candidate.path}
+                            type="button"
+                            variant="ghost"
+                            onMouseDown={(event) => {
+                              event.preventDefault();
+                              insertMention(candidate);
+                            }}
+                            className={cn(
+                              "h-auto w-full justify-start gap-2 rounded-[9px] px-2 py-1.5 text-left shadow-none transition-colors",
+                              index === selectedIndex ? "bg-primary/10" : "hover:bg-primary/[0.06]",
+                            )}
+                          >
+                            <span className="flex size-6 shrink-0 items-center justify-center rounded-md border border-primary/18 bg-primary/[0.07] text-primary/90">
+                              <FileCode2Icon className="size-3" />
+                            </span>
+                            <span className="min-w-0 flex-1">
+                              <span className="block truncate text-[11.5px] font-medium leading-5 text-foreground">
+                                {candidate.name}
+                              </span>
+                              <span className="block truncate text-[10.5px] leading-4 text-muted-foreground">
+                                {candidate.parentPath || candidate.path}
+                              </span>
+                            </span>
+                          </Button>
+                        );
+                      })}
+                    </div>
+                  ) : null}
+                </>
               ) : (
                 <div className="px-3 py-7 text-center text-[12px] text-muted-foreground">
-                  没有匹配文件
+                  没有匹配的文件或技能
                 </div>
               )}
             </div>
@@ -193,7 +374,10 @@ export function FileMentionTextarea({
         className={cn(className, activeMention && "rounded-t-none border-t-0")}
         onChange={(event) => {
           onChange?.(event);
-          syncMentionState(event.currentTarget.value, event.currentTarget.selectionStart ?? event.currentTarget.value.length);
+          syncMentionState(
+            event.currentTarget.value,
+            event.currentTarget.selectionStart ?? event.currentTarget.value.length,
+          );
         }}
         onKeyDown={(event) => {
           if (activeMention && mentionResults.length > 0) {
@@ -205,7 +389,7 @@ export function FileMentionTextarea({
             if (event.key === "ArrowUp") {
               event.preventDefault();
               setSelectedIndex((current) =>
-                current === 0 ? mentionResults.length - 1 : current - 1
+                current === 0 ? mentionResults.length - 1 : current - 1,
               );
               return;
             }

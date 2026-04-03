@@ -1,96 +1,13 @@
-import path from 'node:path';
-import { promises as fs } from 'node:fs';
-import type { Dirent } from 'node:fs';
 import { createTool } from '@mastra/core/tools';
 import { z } from 'zod';
+import { discoverSkills, loadSkillContent } from '../skills';
 import { HowOneResultSchema } from './sandbox-helpers';
-import { getWorkspaceFromToolContext } from './local-tool-runtime';
+import { getRequestContextFromToolContext, getWorkspaceFromToolContext } from './local-tool-runtime';
 
-const DEFAULT_SKILL_DIR_NAMES = [
-  '.codex/skills',
-  '.agents/skills',
-  '.mastra/skills',
-  '.howone',
-];
-
-type SkillEntry = {
-  name: string;
-  description?: string;
-  filePath: string;
-  dir: string;
-};
-
-function uniquePaths(paths: string[]) {
-  return [...new Set(paths.map(candidate => path.resolve(candidate)))];
-}
-
-function parseFrontmatter(raw: string) {
-  if (!raw.startsWith('---\n')) {
-    return { body: raw.trim(), metadata: {} as Record<string, string> };
-  }
-
-  const closingIndex = raw.indexOf('\n---\n', 4);
-  if (closingIndex === -1) {
-    return { body: raw.trim(), metadata: {} as Record<string, string> };
-  }
-
-  const frontmatter = raw.slice(4, closingIndex);
-  const body = raw.slice(closingIndex + 5).trim();
-  const metadata: Record<string, string> = {};
-
-  for (const line of frontmatter.split('\n')) {
-    const separatorIndex = line.indexOf(':');
-    if (separatorIndex === -1) continue;
-    const key = line.slice(0, separatorIndex).trim();
-    const value = line.slice(separatorIndex + 1).trim().replace(/^['"]|['"]$/g, '');
-    if (key) {
-      metadata[key] = value;
-    }
-  }
-
-  return { body, metadata };
-}
-
-async function collectSkillFiles(baseDir: string, results: SkillEntry[]) {
-  let entries: Dirent[];
-  try {
-    entries = await fs.readdir(baseDir, { withFileTypes: true });
-  } catch {
-    return;
-  }
-
-  for (const entry of entries) {
-    const absolutePath = path.join(baseDir, entry.name);
-    if (entry.isDirectory()) {
-      await collectSkillFiles(absolutePath, results);
-      continue;
-    }
-
-    if (!entry.isFile() || entry.name !== 'SKILL.md') {
-      continue;
-    }
-
-    const raw = await fs.readFile(absolutePath, 'utf8');
-    const parsed = parseFrontmatter(raw);
-    const skillDir = path.dirname(absolutePath);
-    results.push({
-      name: parsed.metadata.name?.trim() || path.basename(skillDir),
-      description: parsed.metadata.description?.trim() || undefined,
-      filePath: absolutePath,
-      dir: skillDir,
-    });
-  }
-}
-
-async function loadSkillsFromDirectories(directories: string[]) {
-  const results: SkillEntry[] = [];
-  for (const directory of uniquePaths(directories)) {
-    await collectSkillFiles(directory, results);
-  }
-  return results.sort((left, right) => left.name.localeCompare(right.name));
-}
-
-function formatSkillList(skills: SkillEntry[]) {
+function formatSkillList(
+  skills: Array<{ name: string; description?: string; filePath: string; scope: string }>,
+  enabledIds: string[],
+) {
   if (skills.length === 0) {
     return 'No skills found.';
   }
@@ -98,8 +15,8 @@ function formatSkillList(skills: SkillEntry[]) {
   return skills
     .map(skill =>
       skill.description
-        ? `- ${skill.name}: ${skill.description}`
-        : `- ${skill.name}`,
+        ? `- ${skill.name}${enabledIds.includes((skill as { id?: string }).id ?? '') ? ' [enabled]' : ''}: ${skill.description} (scope: ${skill.scope}, file: ${skill.filePath})`
+        : `- ${skill.name}${enabledIds.includes((skill as { id?: string }).id ?? '') ? ' [enabled]' : ''} (scope: ${skill.scope}, file: ${skill.filePath})`,
     )
     .join('\n');
 }
@@ -116,47 +33,71 @@ export const skillTool = createTool({
   outputSchema: HowOneResultSchema,
   execute: async (inputData, context) => {
     const { workspaceRoot } = getWorkspaceFromToolContext(context, 'skill');
+    const requestContext = getRequestContextFromToolContext(context, 'skill');
     const normalizedName = inputData.name?.trim();
     const wantsList = !normalizedName || normalizedName.toLowerCase() === 'list';
-    const configuredDir = inputData.skillsDir?.trim();
-    const homeDir = process.env.HOME;
-    const baseDirectories = configuredDir
-      ? [path.isAbsolute(configuredDir) ? configuredDir : path.resolve(workspaceRoot, configuredDir)]
-      : DEFAULT_SKILL_DIR_NAMES.map(dir => path.resolve(homeDir ?? workspaceRoot, dir));
-
-    const workspaceDirectories = DEFAULT_SKILL_DIR_NAMES.map(dir =>
-      path.resolve(workspaceRoot, dir),
-    );
-    const skills = await loadSkillsFromDirectories([...baseDirectories, ...workspaceDirectories]);
+    const enabledSkillIds = (() => {
+      const value = requestContext.get('enabledSkillIds');
+      if (typeof value !== 'string' || !value.trim()) return [] as string[];
+      try {
+        const parsed = JSON.parse(value) as unknown;
+        return Array.isArray(parsed)
+          ? parsed.filter((entry): entry is string => typeof entry === 'string')
+          : [];
+      } catch {
+        return [] as string[];
+      }
+    })();
+    const discovery = await discoverSkills({
+      workspaceRoot,
+      skillsDir: inputData.skillsDir?.trim(),
+    });
+    const skills = discovery.skills;
 
     if (wantsList) {
       return {
         title: 'Available skills',
-        output: formatSkillList(skills),
-        metadata: { directories: uniquePaths([...baseDirectories, ...workspaceDirectories]), count: skills.length },
+        output: formatSkillList(skills, enabledSkillIds),
+        metadata: {
+          directories: discovery.roots.map(root => root.path),
+          count: skills.length,
+          errors: discovery.errors,
+          enabledSkillIds,
+        },
       };
     }
 
-    const found = skills.find(s => s.name.toLowerCase() === normalizedName.toLowerCase());
-    if (!found) {
+    const loaded = await loadSkillContent({
+      workspaceRoot,
+      skillsDir: inputData.skillsDir?.trim(),
+      name: normalizedName,
+    });
+
+    if (!loaded.skill || !loaded.body) {
       const available = skills.map(s => s.name).join(', ');
       throw new Error(`Skill "${normalizedName}" not found. Available: ${available || 'none'}`);
     }
 
-    const raw = await fs.readFile(found.filePath, 'utf8');
-    const parsed = parseFrontmatter(raw);
-
     const output = [
-      `## Skill: ${found.name}`,
+      `<skill_content name="${loaded.skill.name}">`,
+      `# Skill: ${loaded.skill.name}`,
       '',
-      `**Base directory**: ${found.dir}`,
+      loaded.body.trim(),
       '',
-      parsed.body.trim(),
+      `Base directory for this skill: ${loaded.skill.dir}`,
+      'Relative paths in this skill are resolved from this base directory.',
+      '</skill_content>',
+      '',
     ].join('\n');
     return {
       title: `Loaded skill: ${normalizedName}`,
       output,
-      metadata: { name: found.name, dir: found.dir, filePath: found.filePath },
+      metadata: {
+        name: loaded.skill.name,
+        dir: loaded.skill.dir,
+        filePath: loaded.skill.filePath,
+        scope: loaded.skill.scope,
+      },
     };
   },
 });
