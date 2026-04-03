@@ -3246,7 +3246,7 @@ dependencies = [
 
 [[package]]
 name = "rovix"
-version = "0.2.6"
+version = "0.2.7"
 dependencies = [
  "rfd",
  "serde",

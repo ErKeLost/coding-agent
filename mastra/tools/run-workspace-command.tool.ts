@@ -1,7 +1,12 @@
 import { createTool } from '@mastra/core/tools';
 import z from 'zod';
-import { getWorkspaceForRequest } from '../workspace/local-workspace';
 import { checkCommand } from './command-guard';
+import {
+  getRequestContextFromToolContext,
+  resolveWorkspaceDiskPath,
+} from './local-tool-runtime';
+import { executeLocalCommand } from './local-command-exec';
+import { resolveWorkspaceRootFromRequest } from '../workspace/local-workspace';
 
 const timeoutSchema = z.preprocess(value => {
   if (typeof value === 'string') {
@@ -35,24 +40,13 @@ export const runWorkspaceCommandTool = createTool({
     pid: z.string().optional(),
   }),
   execute: async (input, context) => {
-    const requestContext =
-      context?.requestContext ??
-      context?.runtimeContext ??
-      context?.context?.requestContext ??
-      context?.agent?.requestContext;
-
-    if (!requestContext || typeof requestContext.get !== 'function') {
-      throw new Error('Missing request context for runCommand.');
-    }
-
-    const workspace = getWorkspaceForRequest(requestContext);
-    const sandbox = workspace.sandbox;
-    if (!sandbox) {
-      throw new Error('Workspace sandbox is not available.');
-    }
+    const requestContext = getRequestContextFromToolContext(context, 'runCommand');
+    const workspaceRoot = resolveWorkspaceRootFromRequest(requestContext);
 
     const normalizedTimeout = input.timeout ?? undefined;
-    const normalizedCwd = input.cwd ?? undefined;
+    const normalizedCwd = input.cwd
+      ? resolveWorkspaceDiskPath(workspaceRoot, input.cwd)
+      : workspaceRoot;
 
     // ── Command guard (Codex-style execpolicy) ───────────────────────────
     const guard = checkCommand(input.command);
@@ -71,50 +65,23 @@ export const runWorkspaceCommandTool = createTool({
         : '';
     // ─────────────────────────────────────────────────────────────────────
 
-    if (input.background) {
-      if (!sandbox.processes) {
-        throw new Error('Background processes are not available in this workspace.');
-      }
-
-      const startedAt = Date.now();
-      const handle = await sandbox.processes.spawn(input.command, {
-        cwd: normalizedCwd,
-        timeout: normalizedTimeout,
-      });
-
-      return {
-        success: true,
-        state: 'running' as const,
-        command: input.command,
-        executionTime: Date.now() - startedAt,
-        pid: handle.pid,
-        stdout: warnPrefix + (handle.stdout ?? ''),
-        stderr: handle.stderr,
-      };
-    }
-
-    const startedAt = Date.now();
-    const result = await sandbox.executeCommand?.(input.command, [], {
+    const result = await executeLocalCommand({
+      command: input.command,
       cwd: normalizedCwd,
       timeout: normalizedTimeout,
+      background: input.background,
+      kind: 'command',
     });
-
-    if (!result) {
-      throw new Error('Sandbox executeCommand is not available.');
-    }
 
     return {
       success: result.success,
-      state: result.timedOut
-        ? ('timed_out' as const)
-        : result.success
-          ? ('completed' as const)
-          : ('failed' as const),
+      state: result.state,
       exitCode: result.exitCode,
-      stdout: warnPrefix + (result.stdout ?? ''),
+      stdout: warnPrefix + result.stdout,
       stderr: result.stderr,
-      command: result.command ?? input.command,
-      executionTime: result.executionTimeMs ?? Date.now() - startedAt,
+      command: result.command,
+      executionTime: result.executionTime,
+      pid: result.processId ?? (result.pid !== undefined ? String(result.pid) : undefined),
     };
   },
 });

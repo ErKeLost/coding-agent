@@ -11,6 +11,7 @@ import {
   resolveWorkspaceDiskPath,
   truncateOutput,
 } from './local-tool-runtime';
+import { executeLocalCommand } from './local-command-exec';
 
 const BASH_DESCRIPTION = loadText('bash.txt');
 
@@ -27,11 +28,7 @@ export const bashTool = createTool({
   }),
   outputSchema: HowOneResultSchema,
   execute: async (inputData, context) => {
-    const { workspace, workspaceRoot } = getWorkspaceFromToolContext(context, 'bash');
-    const sandbox = workspace.sandbox;
-    if (!sandbox) {
-      throw new Error('Workspace sandbox is not available.');
-    }
+    const { workspaceRoot } = getWorkspaceFromToolContext(context, 'bash');
 
     const abortSignal = context?.abortSignal;
     if (abortSignal?.aborted) throw new Error('Command aborted');
@@ -56,39 +53,13 @@ export const bashTool = createTool({
         : '';
     const description = inputData.description?.trim() || inputData.command;
 
-    if (runInBackground) {
-      if (!sandbox.processes) {
-        throw new Error('Background processes are not available in this workspace.');
-      }
-
-      const handle = await sandbox.processes.spawn(inputData.command, {
-        cwd: workdir,
-        timeout,
-      });
-
-      return {
-        title: description,
-        output: warnPrefix + (handle.stdout ?? ''),
-        metadata: {
-          command: inputData.command,
-          description,
-          pid: handle.pid,
-          cwd: workdir ?? workspaceRoot,
-          run_in_background: true,
-          stdout: handle.stdout ?? '',
-          stderr: handle.stderr ?? '',
-        },
-      };
-    }
-
-    const result = await sandbox.executeCommand?.(inputData.command, [], {
-      cwd: workdir,
+    const result = await executeLocalCommand({
+      command: inputData.command,
+      cwd: workdir ?? workspaceRoot,
       timeout,
+      background: runInBackground,
+      kind: 'shell',
     });
-
-    if (!result) {
-      throw new Error('Sandbox executeCommand is not available.');
-    }
 
     const combined = `${warnPrefix}${result.stdout ?? ''}${result.stderr ?? ''}`;
     const { text: output, truncated } = truncateOutput(combined);
@@ -97,15 +68,19 @@ export const bashTool = createTool({
       title: description,
       output,
       metadata: {
-        command: result.command ?? inputData.command,
+        command: result.command,
         cwd: workdir ?? workspaceRoot,
         exit: result.exitCode,
         description,
         truncated,
-        timedOut: result.timedOut ?? false,
-        run_in_background: false,
-        stdout: result.stdout ?? '',
-        stderr: result.stderr ?? '',
+        timedOut: result.state === 'timed_out',
+        run_in_background: runInBackground,
+        state: result.state,
+        pid: result.pid,
+        processId: result.processId,
+        logPath: result.logPath,
+        stdout: result.stdout,
+        stderr: result.stderr,
       },
     };
   },

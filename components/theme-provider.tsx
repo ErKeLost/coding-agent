@@ -5,7 +5,6 @@ import * as React from "react";
 type Theme = "light" | "dark" | "system";
 export type ColorTheme =
   | "sand"
-  | "graphite"
   | "ocean"
   | "forest"
   | "rose";
@@ -19,11 +18,6 @@ export const COLOR_THEMES: Array<{
     value: "sand",
     label: "Sand",
     description: "暖米色玻璃质感，适合默认工作流界面。",
-  },
-  {
-    value: "graphite",
-    label: "Graphite",
-    description: "冷灰工业感，适合更克制的编码氛围。",
   },
   {
     value: "ocean",
@@ -79,6 +73,10 @@ function readStoredColorTheme(
 
   try {
     const storedTheme = window.localStorage.getItem(storageKey);
+    if (storedTheme === "graphite") {
+      window.localStorage.setItem(storageKey, fallback);
+      return fallback;
+    }
     if (COLOR_THEMES.some((theme) => theme.value === storedTheme)) {
       return storedTheme as ColorTheme;
     }

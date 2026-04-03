@@ -1,7 +1,9 @@
 "use client";
 
-import { useEffect, useMemo, useRef } from "react";
 import { FileDiff } from "@pierre/diffs";
+import { useEffect, useMemo, useRef, type CSSProperties } from "react";
+
+import { useTheme } from "@/components/theme-provider";
 
 type DiffFilePreviewProps = {
   filename: string;
@@ -39,13 +41,34 @@ export function DiffFilePreview({
   after,
 }: DiffFilePreviewProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
-  const themeType = useMemo(
+  const { resolvedTheme } = useTheme();
+  const themeType = resolvedTheme === "dark" ? "dark" : "light";
+  const previewStyle = useMemo(
     () =>
-      typeof document !== "undefined" &&
-      document.documentElement.classList.contains("dark")
-        ? "dark"
-        : "light",
-    []
+      ({
+        background: "var(--app-panel-bg)",
+        borderColor: "var(--app-panel-border)",
+        boxShadow: "var(--app-panel-shadow)",
+        "--diffs-font-family":
+          'var(--font-geist-mono), ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace',
+        "--diffs-header-font-family":
+          'var(--font-geist-sans), ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif',
+        "--diffs-font-size": "12px",
+        "--diffs-line-height": "1.6",
+        "--diffs-gap-inline": "6px",
+        "--diffs-gap-block": "6px",
+        "--diffs-selection-color-override":
+          themeType === "dark" ? "rgb(219 234 254)" : "rgb(30 64 175)",
+        "--diffs-bg-selection-override":
+          themeType === "dark"
+            ? "rgba(96, 165, 250, 0.22)"
+            : "rgba(96, 165, 250, 0.16)",
+        "--diffs-bg-selection-number-override":
+          themeType === "dark"
+            ? "rgba(96, 165, 250, 0.34)"
+            : "rgba(59, 130, 246, 0.22)",
+      }) as CSSProperties,
+    [themeType]
   );
 
   useEffect(() => {
@@ -53,14 +76,17 @@ export function DiffFilePreview({
 
     const instance = new FileDiff({
       theme: {
-        dark: "github-dark-default",
-        light: "github-light-default",
+        dark: "pierre-dark",
+        light: "pierre-light",
       },
       themeType,
       diffStyle: "split",
       diffIndicators: "bars",
       disableBackground: false,
-      disableFileHeader: false,
+      disableFileHeader: true,
+      hunkSeparators: "line-info-basic",
+      lineDiffType: "word-alt",
+      lineHoverHighlight: "line",
       overflow: "scroll",
     });
 
@@ -84,18 +110,40 @@ export function DiffFilePreview({
   }, [after, before, filename, language, themeType]);
 
   return (
-    <div className="flex h-full min-h-0 flex-col overflow-hidden rounded-[18px] border border-[#1f2a44] bg-[#0d1529]">
-      <div className="flex items-center justify-between border-b border-b-[#1f2a44] px-4 py-3">
-        <div className="font-mono text-[12px] text-[#dbeafe]">{filename}</div>
-        <div className="rounded-full border border-[#24304b] bg-[#131b2e] px-2.5 py-1 text-[10px] uppercase tracking-[0.12em] text-[#7c8aa5]">
-          diff preview
+    <div
+      className="flex h-full min-h-0 flex-col overflow-hidden rounded-[20px] border"
+      style={previewStyle}
+    >
+      <div
+        className="flex items-center justify-between gap-3 border-b px-4 py-3"
+        style={{
+          borderColor: "var(--app-hairline)",
+          background: "var(--app-soft-fill-strong)",
+        }}
+      >
+        <div className="min-w-0">
+          <div className="truncate font-mono text-[12px] text-foreground/88">
+            {filename}
+          </div>
+          <div className="mt-0.5 text-[10px] text-muted-foreground/72">
+            Side-by-side diff
+          </div>
+        </div>
+        <div
+          className="rounded-full border px-2.5 py-1 text-[10px] uppercase tracking-[0.12em] text-muted-foreground/78"
+          style={{
+            borderColor: "var(--app-hairline)",
+            background: "var(--app-soft-fill)",
+          }}
+        >
+          {language}
         </div>
       </div>
-      <div className="scrollbar-frost min-h-0 flex-1 overflow-auto bg-[#0b1326] p-2">
-        <div
-          ref={containerRef}
-          className="[&_pre]:!m-0 [&_pre]:!rounded-[12px] [&_pre]:!border-0 [&_pre]:!bg-transparent [&_pre]:!text-[12px]"
-        />
+      <div
+        className="scrollbar-frost min-h-0 flex-1 overflow-auto p-3"
+        style={{ background: "color-mix(in srgb, var(--background) 78%, transparent)" }}
+      >
+        <div ref={containerRef} className="min-h-[220px]" />
       </div>
     </div>
   );

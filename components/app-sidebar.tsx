@@ -64,7 +64,6 @@ type AppSidebarProps = {
 
 const colorThemeLabels = {
   sand: "沙丘",
-  graphite: "石墨",
   ocean: "海洋",
   forest: "森林",
   rose: "玫瑰",
@@ -72,7 +71,6 @@ const colorThemeLabels = {
 
 const colorThemeSwatches = {
   sand: ["#b68252", "#d4b27d", "#f3e7d1"],
-  graphite: ["#67748f", "#9ca8be", "#d6dce7"],
   ocean: ["#2777c8", "#4bb4d8", "#d8edf5"],
   forest: ["#3f8e68", "#78b28a", "#d9ebdc"],
   rose: ["#b04a62", "#d27a8d", "#f3d9df"],

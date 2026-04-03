@@ -510,11 +510,24 @@ const getLanguageFromPath = (filePath?: string | null) => {
   return "text";
 };
 
-const ToolResultPreview = ({
-  item,
-}: {
-  item: Extract<ChatItem, { type: "tool" }>;
-}) => {
+type ToolStandalonePreview =
+  | {
+      kind: "code";
+      filename: string;
+      language: string;
+      code: string;
+    }
+  | {
+      kind: "diff";
+      filename: string;
+      language: string;
+      before: string;
+      after: string;
+    };
+
+const getToolStandalonePreview = (
+  item: Extract<ChatItem, { type: "tool" }>
+): ToolStandalonePreview | null => {
   const result = getToolResultRecord(item);
   const metadata = getToolResultMetadata(item);
   if (!result) return null;
@@ -524,6 +537,8 @@ const ToolResultPreview = ({
     getString(metadata?.filePath) ??
     getString(metadata?.filepath) ??
     getString(result.title);
+  if (!filePath) return null;
+
   const language = getLanguageFromPath(filePath);
   const output = getString(result.output);
   const preview = getString(metadata?.preview);
@@ -532,24 +547,55 @@ const ToolResultPreview = ({
 
   if (item.name === "read") {
     const code = preview ?? output;
-    if (!code || !filePath) return null;
+    if (!code) return null;
+    return {
+      kind: "code",
+      filename: filePath,
+      language,
+      code,
+    };
+  }
+
+  if (
+    (item.name === "edit" || item.name === "write") &&
+    before !== undefined &&
+    after !== undefined
+  ) {
+    return {
+      kind: "diff",
+      filename: filePath,
+      language,
+      before,
+      after,
+    };
+  }
+
+  return null;
+};
+
+const ToolResultPreview = ({
+  preview,
+}: {
+  preview: ToolStandalonePreview;
+}) => {
+  if (preview.kind === "code") {
     return (
-      <div className="overflow-hidden rounded-[16px] border border-border/35 bg-background/20">
-        <ShikiFilePreview code={code} filename={filePath} language={language} />
-      </div>
+      <ShikiFilePreview
+        code={preview.code}
+        filename={preview.filename}
+        language={preview.language}
+      />
     );
   }
 
-  if ((item.name === "edit" || item.name === "write") && filePath && before !== undefined && after !== undefined) {
+  if (preview.kind === "diff") {
     return (
-      <div className="overflow-hidden rounded-[16px] border border-border/35 bg-background/20">
-        <DiffFilePreview
-          filename={filePath}
-          language={language}
-          before={before}
-          after={after}
-        />
-      </div>
+      <DiffFilePreview
+        filename={preview.filename}
+        language={preview.language}
+        before={preview.before}
+        after={preview.after}
+      />
     );
   }
 
@@ -2300,6 +2346,8 @@ export default function Home() {
                             const resultCount = getResultCount(item.result);
                             const runInfo = getRunInfo(item);
                             const open = toolOpenState[item.id] ?? false;
+                            const standalonePreview = getToolStandalonePreview(item);
+                            const hideRawToolPayload = Boolean(standalonePreview);
                             const summaryText =
                               roundSummaryByFirstActivityId.get(item.id);
                             return (
@@ -2366,15 +2414,17 @@ export default function Home() {
                                 </button>
                                 {open ? (
                                   <div className="ml-5 space-y-1.5 border-l border-border/30 pl-3 text-[10px]">
-                                    <div className="space-y-0.5">
-                                      <div className="text-[9px] tracking-[0.08em] text-muted-foreground/60">
-                                        Args
+                                    {!hideRawToolPayload ? (
+                                      <div className="space-y-0.5">
+                                        <div className="text-[9px] tracking-[0.08em] text-muted-foreground/60">
+                                          Args
+                                        </div>
+                                        <pre className="max-h-24 overflow-auto px-0 py-0 text-[9px] leading-4.5 text-muted-foreground/90">
+                                          {JSON.stringify(item.args ?? {}, null, 2)}
+                                        </pre>
                                       </div>
-                                      <pre className="max-h-24 overflow-auto px-0 py-0 text-[9px] leading-4.5 text-muted-foreground/90">
-                                        {JSON.stringify(item.args ?? {}, null, 2)}
-                                      </pre>
-                                    </div>
-                                    {item.steps?.length ? (
+                                    ) : null}
+                                    {!hideRawToolPayload && item.steps?.length ? (
                                       <div className="space-y-0.5">
                                         <div className="text-[9px] tracking-[0.08em] text-muted-foreground/60">
                                           Trace
@@ -2412,8 +2462,10 @@ export default function Home() {
                                       </div>
                                     ) : null}
                                     <ComputerUseToolPreview item={item} />
-                                    <ToolResultPreview item={item} />
-                                    {item.result ? (
+                                    {standalonePreview ? (
+                                      <ToolResultPreview preview={standalonePreview} />
+                                    ) : null}
+                                    {!hideRawToolPayload && item.result ? (
                                       <div className="space-y-0.5">
                                         <div className="text-[9px] tracking-[0.08em] text-muted-foreground/60">
                                           {isComputerUseTool(item.name)
