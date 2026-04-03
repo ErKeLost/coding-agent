@@ -73,6 +73,7 @@ export interface AttachmentsContext {
   add: (files: File[] | FileList) => void;
   remove: (id: string) => void;
   clear: () => void;
+  restore: (files: FileUIPart[]) => void;
   openFileDialog: () => void;
   fileInputRef: RefObject<HTMLInputElement | null>;
 }
@@ -179,6 +180,15 @@ export function PromptInputProvider({
     });
   }, []);
 
+  const restore = useCallback((files: FileUIPart[]) => {
+    setAttachmentFiles(
+      files.map((file) => ({
+        ...file,
+        id: nanoid(),
+      }))
+    );
+  }, []);
+
   const clear = useCallback(() => {
     setAttachmentFiles((prev) => {
       for (const f of prev) {
@@ -218,10 +228,11 @@ export function PromptInputProvider({
       add,
       remove,
       clear,
+      restore,
       openFileDialog,
       fileInputRef,
     }),
-    [attachmentFiles, add, remove, clear, openFileDialog]
+    [attachmentFiles, add, remove, clear, restore, openFileDialog]
   );
 
   const __registerFileInput = useCallback(
@@ -534,6 +545,23 @@ export const PromptInput = ({
     [usingProvider, controller]
   );
 
+  const restoreAttachments = useCallback(
+    (restoredFiles: FileUIPart[]) => {
+      if (usingProvider) {
+        controller?.attachments.restore(restoredFiles);
+        return;
+      }
+
+      setItems(
+        restoredFiles.map((file) => ({
+          ...file,
+          id: nanoid(),
+        }))
+      );
+    },
+    [usingProvider, controller]
+  );
+
   const clearReferencedSources = useCallback(
     () => setReferencedSources([]),
     []
@@ -668,10 +696,11 @@ export const PromptInput = ({
       add,
       remove,
       clear: clearAttachments,
+      restore: restoreAttachments,
       openFileDialog,
       fileInputRef: inputRef,
     }),
-    [files, add, remove, clearAttachments, openFileDialog]
+    [files, add, remove, clearAttachments, restoreAttachments, openFileDialog]
   );
 
   const refsCtx = useMemo<ReferencedSourcesContext>(
@@ -714,7 +743,7 @@ export const PromptInput = ({
 
     // Convert blob URLs to data URLs asynchronously
     Promise.all(
-      files.map(async ({ id, ...item }) => {
+      files.map(async ({ ...item }) => {
         if (item.url?.startsWith("blob:")) {
           const dataUrl = await convertBlobUrlToDataUrl(item.url);
           // If conversion failed, keep the original blob URL

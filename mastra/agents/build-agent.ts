@@ -89,6 +89,10 @@ const buildInstructions = ({ requestContext }: { requestContext: RequestContext 
   const guideMode = getRequestContextString(requestContext, 'guideMode');
   const guideText = getRequestContextString(requestContext, 'guideText');
   const emptyTurnRetry = getRequestContextString(requestContext, 'emptyTurnRetry');
+  const currentTurnIncludesImages = getRequestContextString(
+    requestContext,
+    'currentTurnIncludesImages',
+  );
 
   const runtimeDirectives = [
     `Execution contract:
@@ -129,6 +133,14 @@ ${guideText ? `- Active guidance: ${guideText}` : ''}`.trim());
     runtimeDirectives.push(`Retry policy:
 - The previous attempt stopped without concrete progress.
 - This retry must begin with action, not acknowledgement or meta commentary.`);
+  }
+
+  if (currentTurnIncludesImages === '1') {
+    runtimeDirectives.push(`Multimodal policy:
+- The current user turn includes one or more uploaded images.
+- Analyze the uploaded image content directly before browsing the workspace or searching the repository.
+- Do not reinterpret an uploaded image as a request to search the project for image files unless the user explicitly asks about repository images.
+- Base your first response on what you can observe in the attached image, then use tools only if the user asks for project-specific follow-up.`);
   }
 
   runtimeDirectives.push(

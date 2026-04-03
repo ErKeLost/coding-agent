@@ -167,6 +167,109 @@ type AgentStreamRequest = {
   requestContext?: Record<string, unknown>;
 };
 
+const normalizeImageMessageParts = (messages: unknown) => {
+  if (!Array.isArray(messages)) {
+    return messages;
+  }
+
+  return messages.map((message) => {
+    if (!message || typeof message !== "object") {
+      return message;
+    }
+
+    const typedMessage = message as {
+      role?: unknown;
+      content?: unknown;
+    };
+
+    if (!Array.isArray(typedMessage.content)) {
+      return message;
+    }
+
+    return {
+      ...typedMessage,
+      content: typedMessage.content.map((part) => {
+        if (!part || typeof part !== "object") {
+          return part;
+        }
+
+        const typedPart = part as {
+          type?: unknown;
+          mediaType?: unknown;
+          data?: unknown;
+          filename?: unknown;
+        };
+
+        if (
+          typedPart.type === "file" &&
+          typeof typedPart.mediaType === "string" &&
+          typedPart.mediaType.startsWith("image/") &&
+          typeof typedPart.data === "string"
+        ) {
+          return {
+            type: "image" as const,
+            mediaType: typedPart.mediaType,
+            image: typedPart.data,
+          };
+        }
+
+        return part;
+      }),
+    };
+  });
+};
+
+const summarizeIncomingMessageInput = (input: unknown) => {
+  if (!Array.isArray(input)) {
+    return {
+      mode: typeof input === 'string' ? 'string' : 'unknown',
+      messageCount: 0,
+      imageParts: 0,
+      fileParts: 0,
+      textParts: 0,
+    };
+  }
+
+  let imageParts = 0;
+  let fileParts = 0;
+  let textParts = 0;
+
+  for (const message of input) {
+    if (!message || typeof message !== 'object') {
+      continue;
+    }
+
+    const content = (message as { content?: unknown }).content;
+    if (typeof content === 'string') {
+      textParts += 1;
+      continue;
+    }
+
+    if (!Array.isArray(content)) {
+      continue;
+    }
+
+    for (const part of content) {
+      if (!part || typeof part !== 'object') {
+        continue;
+      }
+
+      const type = (part as { type?: unknown }).type;
+      if (type === 'image') imageParts += 1;
+      else if (type === 'file') fileParts += 1;
+      else if (type === 'text') textParts += 1;
+    }
+  }
+
+  return {
+    mode: 'messages',
+    messageCount: input.length,
+    imageParts,
+    fileParts,
+    textParts,
+  };
+};
+
 export async function POST(
   req: Request,
   { params }: { params: Promise<{ agentId: string }> }
@@ -179,7 +282,9 @@ export async function POST(
     return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
   }
 
-  const messageInput = payload.messages ?? payload.message;
+  const messageInput = payload.messages
+    ? normalizeImageMessageParts(payload.messages)
+    : payload.message;
   if (!messageInput) {
     return NextResponse.json({ error: "message is required" }, { status: 400 });
   }
@@ -193,6 +298,7 @@ export async function POST(
         : null,
     effectiveWorkspaceRoot,
   });
+  console.info('[mastra-debug] incoming-message-input', summarizeIncomingMessageInput(messageInput));
   const tuning = getModelTuning(payload.model);
 
   const { agentId } = await params;

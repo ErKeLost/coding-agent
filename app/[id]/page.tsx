@@ -1463,9 +1463,9 @@ const PromptInputAttachmentsDisplay = () => {
           data={attachment}
           key={attachment.id}
           onRemove={() => attachments.remove(attachment.id)}
-          className="size-14 overflow-hidden rounded-xl border border-border/45 bg-background/70 shadow-[0_8px_24px_rgba(0,0,0,0.18)]"
+          className="size-14 overflow-hidden rounded-lg border border-border/45 bg-background/70 shadow-[0_8px_24px_rgba(0,0,0,0.18)]"
         >
-          <AttachmentPreview className="rounded-2xl bg-muted/30" />
+          <AttachmentPreview className="rounded-lg bg-muted/30" />
           <AttachmentRemove />
         </Attachment>
       ))}
@@ -1575,6 +1575,8 @@ export default function Home() {
     [],
   );
   const [threadSessionError, setThreadSessionError] = useState<string | null>(null);
+  const [lastSubmittedMessage, setLastSubmittedMessage] =
+    useState<PromptInputMessage | null>(null);
 
   useEffect(() => {
     if (!hasMounted || !model) return;
@@ -1613,8 +1615,10 @@ export default function Home() {
     logWorkspaceDebug,
     isPlanRecord,
   });
+  const effectiveWorkspaceRoot =
+    workspaceRoot ?? activeThreadRecord?.workspaceRoot ?? null;
   const activeWorkspaceLabel = summarizeWorkspaceRoot(
-    workspaceRoot ?? activeThreadRecord?.workspaceRoot ?? null
+    effectiveWorkspaceRoot
   );
   const {
     status,
@@ -1841,7 +1845,7 @@ export default function Home() {
   } = useDesktopWorkspace({
     hasMounted,
     recentThreadCount: recentThreads.length,
-    workspaceRoot,
+    workspaceRoot: effectiveWorkspaceRoot,
     currentThreadId: threadId || null,
     onNewThread: createThreadSession,
     setWorkspaceRoot,
@@ -1858,8 +1862,8 @@ export default function Home() {
 
   const handleNewThread = useCallback((initialWorkspaceRoot?: string | null) => {
     resetThreadUiChrome();
-    createThreadSession(initialWorkspaceRoot);
-  }, [createThreadSession, resetThreadUiChrome]);
+    createThreadSession(initialWorkspaceRoot ?? effectiveWorkspaceRoot);
+  }, [createThreadSession, effectiveWorkspaceRoot, resetThreadUiChrome]);
 
   const handleSelectThread = useCallback((nextThreadId: string) => {
     if (!nextThreadId || nextThreadId === threadId) return;
@@ -1909,6 +1913,11 @@ export default function Home() {
       return;
     }
 
+    setLastSubmittedMessage({
+      text: message.text,
+      files: message.files.map((file) => ({ ...file })),
+    });
+
     await handleSubmit(message);
   }, [canStartConversation, handleSubmit, model]);
 
@@ -1937,7 +1946,7 @@ export default function Home() {
         onDeleteThread={handleDeleteThread}
         onOpenWorkspace={handleChangeWorkspaceRoot}
         recentThreads={recentThreads}
-        workspaceRoot={workspaceRoot}
+        workspaceRoot={effectiveWorkspaceRoot}
       />
       <SidebarInset className="app-shell bg-transparent">
         <ModelSelector open={modelDialogOpen} onOpenChange={setModelDialogOpen}>
@@ -2534,6 +2543,7 @@ export default function Home() {
                             <FileMentionTextarea
                               workspaceTree={desktopWorkspace?.tree ?? []}
                               workspaceRoot={workspaceRoot}
+                              lastSubmittedMessage={lastSubmittedMessage}
                               className="min-h-[64px] rounded-none border-0 bg-transparent px-5 py-3.5 text-[14px] leading-6 shadow-none focus-visible:ring-0"
                               placeholder={
                                 canStartConversation || !shouldShowEmptyThreadHint

@@ -55,7 +55,7 @@ type ThreadEntry = {
 
 type AppSidebarProps = {
   currentThreadId?: string;
-  onNewThread: () => void;
+  onNewThread: (workspaceRoot?: string | null) => void;
   onSelectThread: (threadId: string) => void;
   onDeleteThread?: (threadId: string) => void;
   onOpenWorkspace?: () => void;
@@ -123,8 +123,10 @@ export function AppSidebar({
     },
     []
   );
+  const ungroupedThreads = recentThreads.filter((thread) => !thread.workspaceRoot);
   const hasWorkspace = Boolean(workspaceRoot);
   const hasGroupedThreads = groupedThreads.length > 0;
+  const hasUngroupedThreads = ungroupedThreads.length > 0;
   const darkModeEnabled = resolvedTheme === "dark";
   const activeColorThemeLabel = colorThemeLabels[colorTheme];
 
@@ -224,8 +226,8 @@ export function AppSidebar({
             <Button
               type="button"
               variant="ghost"
+              onClick={() => onNewThread(workspaceRoot)}
               size="icon-sm"
-              onClick={() => onNewThread()}
               className="app-control rounded-lg border-0 text-sidebar-foreground/72 shadow-none transition-colors hover:text-sidebar-foreground group-data-[collapsible=icon]:hidden"
               aria-label="新建对话"
             >
@@ -297,7 +299,66 @@ export function AppSidebar({
             </section>
           ))}
 
-          {!hasGroupedThreads ? (
+          {hasUngroupedThreads ? (
+            <section className="space-y-2.5">
+              <div className="flex items-center gap-2 px-1 text-sidebar-foreground/70">
+                <MessageSquareIcon className="size-4 shrink-0 text-sidebar-foreground/50" />
+                <span className="min-w-0 flex-1 truncate text-[13px] font-semibold">
+                  未分组
+                </span>
+              </div>
+
+              <SidebarMenu className="gap-0.5">
+                {ungroupedThreads.map((thread) => {
+                  const isActive = thread.id === currentThreadId;
+                  return (
+                    <SidebarMenuItem key={thread.id}>
+                      <ContextMenu>
+                        <ContextMenuTrigger asChild>
+                          <SidebarMenuButton
+                            tooltip={thread.title}
+                            onClick={() => onSelectThread(thread.id)}
+                            className={cn(
+                              "h-auto items-start rounded-lg px-3 py-2.5",
+                              isActive
+                                ? "app-sidebar-item-active"
+                                : "app-sidebar-item"
+                            )}
+                          >
+                            <div className="flex min-w-0 flex-1 items-start justify-between gap-3">
+                              <div className="min-w-0">
+                                <div className="truncate text-[12px] font-medium leading-5">
+                                  {thread.title}
+                                </div>
+                                <div className="truncate text-[11px] text-sidebar-foreground/50">
+                                  {thread.subtitle}
+                                </div>
+                              </div>
+                              <span className="shrink-0 pt-0.5 text-[11px] text-sidebar-foreground/50">
+                                {formatRelativeTime(thread.updatedAt)}
+                              </span>
+                            </div>
+                          </SidebarMenuButton>
+                        </ContextMenuTrigger>
+                        <ContextMenuContent className="min-w-[180px] rounded-lg border-border bg-popover p-1 shadow-lg">
+                          <ContextMenuItem
+                            variant="destructive"
+                            onClick={() => onDeleteThread?.(thread.id)}
+                            className="rounded-lg"
+                          >
+                            <Trash2Icon className="size-4" />
+                            删除线程
+                          </ContextMenuItem>
+                        </ContextMenuContent>
+                      </ContextMenu>
+                    </SidebarMenuItem>
+                  );
+                })}
+              </SidebarMenu>
+            </section>
+          ) : null}
+
+          {!hasGroupedThreads && !hasUngroupedThreads ? (
             <section className="space-y-2.5">
               {hasWorkspace ? (
                 <div className="px-1 text-[13px] font-semibold text-sidebar-foreground/70">
@@ -339,7 +400,7 @@ export function AppSidebar({
           <Button
             type="button"
             variant="ghost"
-            onClick={() => onNewThread()}
+            onClick={() => onNewThread(workspaceRoot)}
             className="app-control size-10 rounded-lg border-0 text-sidebar-foreground shadow-none transition-colors"
             aria-label="新建对话"
           >

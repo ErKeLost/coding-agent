@@ -38,6 +38,41 @@ const summarizeWorkspaceRoot = (value: string) => {
   return segments.at(-1) ?? normalized;
 };
 
+const currentTurnIncludesImageInput = (input: unknown) => {
+  if (!Array.isArray(input)) {
+    return false;
+  }
+
+  return input.some((message) => {
+    if (!message || typeof message !== "object") {
+      return false;
+    }
+
+    const content = (message as { content?: unknown }).content;
+    if (!Array.isArray(content)) {
+      return false;
+    }
+
+    return content.some((part) => {
+      if (!part || typeof part !== "object") {
+        return false;
+      }
+
+      const typedPart = part as {
+        type?: unknown;
+        mediaType?: unknown;
+      };
+
+      return (
+        typedPart.type === "image" ||
+        (typedPart.type === "file" &&
+          typeof typedPart.mediaType === "string" &&
+          typedPart.mediaType.startsWith("image/"))
+      );
+    });
+  });
+};
+
 export async function buildAgentRequestContext(
   payload: AgentRequestPayload,
 ): Promise<BuiltAgentRequestContext> {
@@ -138,6 +173,9 @@ export async function buildAgentRequestContext(
   }
 
   const currentMessageText = extractCurrentInputText(payload.messages ?? payload.message);
+  if (currentTurnIncludesImageInput(payload.messages)) {
+    requestContext.set("currentTurnIncludesImages", "1");
+  }
   const continuationContext = inferContinuationContext(threadSession, currentMessageText);
   if (continuationContext.isContinuation) {
     requestContext.set("continuationMode", "resume");

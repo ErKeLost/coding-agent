@@ -22,6 +22,23 @@ export type QueuedSubmission = {
 export type SubmissionMode = "default" | "guide";
 export type GuideState = "idle" | "queued" | "applied" | "error";
 
+type ModelContentPart =
+  | {
+      type: "text";
+      text: string;
+    }
+  | {
+      type: "image";
+      mediaType: string;
+      image: string;
+    }
+  | {
+      type: "file";
+      mediaType: string;
+      filename?: string;
+      data: string;
+    };
+
 type SerializablePlan = {
   title: string;
   todos: Array<{
@@ -197,6 +214,24 @@ export function useAgentStream({
       const effectiveThreadId =
         threadId || (typeof routeId === "string" ? routeId : undefined);
 
+      const content: ModelContentPart[] = [
+        ...(text ? [{ type: "text" as const, text }] : []),
+        ...preparedAttachments.map((file) =>
+          file.mediaType.startsWith("image/")
+            ? {
+                type: "image" as const,
+                mediaType: file.mediaType,
+                image: file.dataUrl,
+              }
+            : {
+                type: "file" as const,
+                mediaType: file.mediaType,
+                filename: file.filename,
+                data: file.dataUrl,
+              },
+        ),
+      ];
+
       const response = await fetch(`/api/agents/${selectedAgent}/stream`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -206,15 +241,7 @@ export function useAgentStream({
                 messages: [
                   {
                     role: "user",
-                    content: [
-                      ...(text ? [{ type: "text" as const, text }] : []),
-                      ...preparedAttachments.map((file) => ({
-                        type: "file" as const,
-                        mediaType: file.mediaType,
-                        filename: file.filename,
-                        data: file.dataUrl,
-                      })),
-                    ],
+                    content,
                   },
                 ],
               }

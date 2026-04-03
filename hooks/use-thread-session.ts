@@ -6,7 +6,6 @@ import type { ReadonlyURLSearchParams } from "next/navigation";
 import type { ChatItem, PreviewLog } from "@/lib/stream-event-bus";
 import type { ThreadRecord } from "@/lib/thread-session";
 
-const RECENT_THREADS_STORAGE_KEY = "chat-recent-threads";
 const PENDING_NEW_THREAD_STORAGE_KEY = "chat-pending-new-thread";
 
 type SerializablePlan = {
@@ -106,14 +105,6 @@ export function useThreadSession({
 
   useEffect(() => {
     try {
-      const rawThreads = window.localStorage.getItem(RECENT_THREADS_STORAGE_KEY);
-      if (rawThreads) {
-        const parsedThreads = JSON.parse(rawThreads) as unknown;
-        if (Array.isArray(parsedThreads)) {
-          setRecentThreads(parsedThreads as ThreadRecord[]);
-        }
-      }
-
       const pendingThread = window.localStorage.getItem(PENDING_NEW_THREAD_STORAGE_KEY);
       if (pendingThread) {
         setPendingNewThreadId(pendingThread);
@@ -122,18 +113,6 @@ export function useThreadSession({
       // Ignore storage errors during hydration.
     }
   }, []);
-
-  useEffect(() => {
-    if (typeof window === "undefined") return;
-    try {
-      window.localStorage.setItem(
-        RECENT_THREADS_STORAGE_KEY,
-        JSON.stringify(recentThreads),
-      );
-    } catch {
-      // Ignore storage errors.
-    }
-  }, [recentThreads]);
 
   useEffect(() => {
     if (typeof window === "undefined") return;

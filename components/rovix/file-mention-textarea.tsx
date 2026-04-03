@@ -1,7 +1,12 @@
 "use client";
 
 import { Button } from "@/components/ui/button";
-import { PromptInputTextarea, usePromptInputController } from "@/components/ai-elements/prompt-input";
+import {
+  PromptInputTextarea,
+  type PromptInputMessage,
+  usePromptInputAttachments,
+  usePromptInputController,
+} from "@/components/ai-elements/prompt-input";
 import type { DesktopWorkspaceNode } from "@/lib/desktop-workspace";
 import { cn } from "@/lib/utils";
 import { FileCode2Icon, SparklesIcon } from "lucide-react";
@@ -39,6 +44,7 @@ type ActiveMention = {
 type FileMentionTextareaProps = React.ComponentProps<typeof PromptInputTextarea> & {
   workspaceTree?: DesktopWorkspaceNode[];
   workspaceRoot?: string | null;
+  lastSubmittedMessage?: PromptInputMessage | null;
 };
 
 const flattenWorkspaceFiles = (nodes: DesktopWorkspaceNode[]): FileMentionCandidate[] => {
@@ -90,12 +96,14 @@ const getActiveMention = (value: string, caretIndex: number): ActiveMention | nu
 export function FileMentionTextarea({
   workspaceTree = [],
   workspaceRoot,
+  lastSubmittedMessage,
   className,
   onChange,
   onKeyDown,
   ...props
 }: FileMentionTextareaProps) {
   const controller = usePromptInputController();
+  const attachments = usePromptInputAttachments();
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const [activeMention, setActiveMention] = useState<ActiveMention | null>(null);
   const [selectedIndex, setSelectedIndex] = useState(0);
@@ -242,6 +250,22 @@ export function FileMentionTextarea({
       const nextCaret = activeMention.start + insertedValue.length;
       textarea.focus();
       textarea.setSelectionRange(nextCaret, nextCaret);
+    });
+  };
+
+  const restorePreviousMessage = () => {
+    if (!lastSubmittedMessage) return;
+
+    controller.textInput.setInput(lastSubmittedMessage.text);
+    attachments.restore(lastSubmittedMessage.files.map((file) => ({ ...file })));
+    setActiveMention(null);
+
+    requestAnimationFrame(() => {
+      const textarea = textareaRef.current;
+      if (!textarea) return;
+      const caret = lastSubmittedMessage.text.length;
+      textarea.focus();
+      textarea.setSelectionRange(caret, caret);
     });
   };
 
@@ -403,6 +427,21 @@ export function FileMentionTextarea({
               setActiveMention(null);
               return;
             }
+          }
+
+          if (
+            event.key === "ArrowUp" &&
+            !event.altKey &&
+            !event.ctrlKey &&
+            !event.metaKey &&
+            !event.shiftKey &&
+            !event.currentTarget.value &&
+            attachments.files.length === 0 &&
+            lastSubmittedMessage
+          ) {
+            event.preventDefault();
+            restorePreviousMessage();
+            return;
           }
 
           onKeyDown?.(event);
