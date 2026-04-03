@@ -2111,24 +2111,8 @@ export default function Home() {
                       {isHydratingThread ? (
                         <ThreadHistoryLoadingState />
                       ) : items.length === 0 ? (
-                        <ConversationEmptyState>
-                          <div className="h-full w-full p-6">
-                            <div className="app-empty-hero flex h-full w-full flex-col items-center justify-center gap-4 rounded-[28px] px-8 text-center">
-                              <div className="app-control flex size-16 items-center justify-center rounded-[20px] shadow-none">
-                                <SparklesIcon className="size-7 text-primary/85" />
-                              </div>
-                              <div className="space-y-2">
-                                <h1 className="text-[34px] font-semibold leading-tight tracking-tight text-foreground">
-                                  Ready when the repo is.
-                                </h1>
-                                <p className="max-w-xl text-sm leading-6 text-muted-foreground">
-                                  Pick a thread, reference files with @, and use Rovix as a focused
-                                  local workspace for debugging, refactoring, and agent steering.
-                                </p>
-                              </div>
-                            </div>
-                          </div>
-                        </ConversationEmptyState>
+                        <>
+                        </>
                       ) : (
                         items.map((item) => {
                           if (item.type === "thinking") {
