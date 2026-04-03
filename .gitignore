@@ -8,4 +8,7 @@ dist
 *.db-*
 .next
 .vercel
-claude-code
+claude-code/*
+codex/*
+oh-my-opencode/*
+opencode-learn/*
