@@ -64,8 +64,29 @@ export function DesktopUpdateCheck() {
                   label: "立即重启",
                   onClick: () => {
                     void (async () => {
-                      const { relaunch } = await import("@tauri-apps/plugin-process");
-                      await relaunch();
+                      try {
+                        gooeyToast.update(toastId, {
+                          title: "正在重启应用",
+                          description: "如果几秒内没有关闭，请稍后手动重启。",
+                          type: "info",
+                        });
+
+                        const { relaunch } = await import("@tauri-apps/plugin-process");
+                        await relaunch();
+                      } catch (error) {
+                        gooeyToast.update(toastId, {
+                          title: "自动重启失败",
+                          description:
+                            error instanceof Error
+                              ? error.message
+                              : "应用暂时无法自动重启，请手动退出后重新打开。",
+                          type: "error",
+                        });
+
+                        if (process.env.NODE_ENV !== "production") {
+                          console.warn("[desktop-updater] relaunch failed", error);
+                        }
+                      }
                     })();
                   },
                 },
