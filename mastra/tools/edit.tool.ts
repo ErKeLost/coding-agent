@@ -1,5 +1,6 @@
 import { createTool } from '@mastra/core/tools';
 import { createTwoFilesPatch } from 'diff';
+import { promises as fs } from 'node:fs';
 import { z } from 'zod';
 import { normalizeLineEndings, replace } from './edit-utils';
 import {
@@ -9,7 +10,7 @@ import {
 import {
   getWorkspaceFromToolContext,
   normalizeWorkspacePath,
-  resolveWorkspaceFsPath,
+  resolveWorkspaceDiskPath,
 } from './local-tool-runtime';
 
 const EDIT_DESCRIPTION = loadText('edit.txt');
@@ -26,28 +27,19 @@ export const editTool = createTool({
   }),
   outputSchema: HowOneResultSchema,
   execute: async (inputData, context) => {
-    const { workspace } = getWorkspaceFromToolContext(context, 'edit');
-    if (!workspace.filesystem) {
-      throw new Error('Workspace filesystem is not available.');
-    }
+    const { workspaceRoot } = getWorkspaceFromToolContext(context, 'edit');
 
-    const filePath = resolveWorkspaceFsPath(inputData.filePath);
+    const filePath = resolveWorkspaceDiskPath(workspaceRoot, inputData.filePath);
     const { relativePath } = normalizeWorkspacePath(inputData.filePath);
 
     if (inputData.oldString === inputData.newString) {
       throw new Error('oldString and newString must be different');
     }
 
-    const raw = await workspace.filesystem.readFile(filePath, { encoding: 'utf8' });
-    if (typeof raw !== 'string') {
-      throw new Error(`Cannot edit binary file: ${relativePath}`);
-    }
+    const raw = await fs.readFile(filePath, 'utf8');
     const newContent = replace(raw, inputData.oldString, inputData.newString, inputData.replaceAll ?? false);
 
-    await workspace.filesystem.writeFile(filePath, newContent, {
-      recursive: true,
-      overwrite: true,
-    });
+    await fs.writeFile(filePath, newContent, 'utf8');
     const diff = createTwoFilesPatch(
       relativePath,
       relativePath,
@@ -60,6 +52,8 @@ export const editTool = createTool({
       output: '',
       metadata: {
         diff,
+        before: raw,
+        after: newContent,
         filepath: relativePath,
         filePath: relativePath,
         relativePath,

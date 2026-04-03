@@ -1,4 +1,5 @@
 import { createTool } from '@mastra/core/tools';
+import { promises as fs } from 'node:fs';
 import { z } from 'zod';
 import {
   HowOneResultSchema,
@@ -11,6 +12,7 @@ import {
   normalizeWorkspacePath,
   readPreviewAttachment,
   resolveWorkspaceFsPath,
+  resolveWorkspaceDiskPath,
 } from './local-tool-runtime';
 
 const READ_DESCRIPTION = loadText('read.txt');
@@ -26,7 +28,7 @@ export const readTool = createTool({
   }),
   outputSchema: HowOneResultSchema,
   execute: async (inputData, context) => {
-    const { workspace, workspaceRoot } = getWorkspaceFromToolContext(context, 'read');
+    const { workspaceRoot } = getWorkspaceFromToolContext(context, 'read');
     const filePath = resolveWorkspaceFsPath(inputData.filePath);
     const { relativePath } = normalizeWorkspacePath(inputData.filePath);
 
@@ -48,14 +50,8 @@ export const readTool = createTool({
       };
     }
 
-    if (!workspace.filesystem) {
-      throw new Error('Workspace filesystem is not available.');
-    }
-
-    const raw = await workspace.filesystem.readFile(filePath, { encoding: 'utf8' });
-    if (typeof raw !== 'string') {
-      throw new Error(`Cannot read binary file: ${relativePath}`);
-    }
+    const diskPath = resolveWorkspaceDiskPath(workspaceRoot, inputData.filePath);
+    const raw = await fs.readFile(diskPath, 'utf8');
 
     const offset = typeof inputData.offset === 'number' ? inputData.offset : 0;
     const limit = typeof inputData.limit === 'number' ? inputData.limit : DEFAULT_READ_LIMIT;

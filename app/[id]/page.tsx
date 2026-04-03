@@ -65,7 +65,9 @@ import {
 import { Image } from "@/components/ai-elements/image";
 import { Plan } from "@/components/tool-ui/plan";
 import { AppSidebar } from "@/components/app-sidebar";
+import { DiffFilePreview } from "@/components/rovix/diff-file-preview";
 import { FileMentionTextarea } from "@/components/rovix/file-mention-textarea";
+import { ShikiFilePreview } from "@/components/rovix/shiki-file-preview";
 import { WorkspaceSearchDialog } from "@/components/rovix/workspace-search-dialog";
 
 import { Badge } from "@/components/ui/badge";
@@ -486,6 +488,72 @@ const getToolResultRecord = (item: Extract<ChatItem, { type: "tool" }>) =>
 const getToolResultMetadata = (item: Extract<ChatItem, { type: "tool" }>) => {
   const result = getToolResultRecord(item);
   return result && isRecord(result.metadata) ? result.metadata : null;
+};
+
+const getLanguageFromPath = (filePath?: string | null) => {
+  if (!filePath) return "text";
+  const normalized = filePath.toLowerCase();
+  if (normalized.endsWith(".tsx")) return "tsx";
+  if (normalized.endsWith(".ts")) return "typescript";
+  if (normalized.endsWith(".jsx")) return "jsx";
+  if (normalized.endsWith(".js")) return "javascript";
+  if (normalized.endsWith(".json")) return "json";
+  if (normalized.endsWith(".rs")) return "rust";
+  if (normalized.endsWith(".py")) return "python";
+  if (normalized.endsWith(".md")) return "markdown";
+  if (normalized.endsWith(".css")) return "css";
+  if (normalized.endsWith(".html")) return "html";
+  if (normalized.endsWith(".yml") || normalized.endsWith(".yaml")) return "yaml";
+  if (normalized.endsWith(".sh")) return "bash";
+  if (normalized.endsWith(".sql")) return "sql";
+  if (normalized.endsWith(".toml")) return "toml";
+  return "text";
+};
+
+const ToolResultPreview = ({
+  item,
+}: {
+  item: Extract<ChatItem, { type: "tool" }>;
+}) => {
+  const result = getToolResultRecord(item);
+  const metadata = getToolResultMetadata(item);
+  if (!result) return null;
+
+  const filePath =
+    getString(metadata?.relativePath) ??
+    getString(metadata?.filePath) ??
+    getString(metadata?.filepath) ??
+    getString(result.title);
+  const language = getLanguageFromPath(filePath);
+  const output = getString(result.output);
+  const preview = getString(metadata?.preview);
+  const before = getString(metadata?.before);
+  const after = getString(metadata?.after);
+
+  if (item.name === "read") {
+    const code = preview ?? output;
+    if (!code || !filePath) return null;
+    return (
+      <div className="overflow-hidden rounded-[16px] border border-border/35 bg-background/20">
+        <ShikiFilePreview code={code} filename={filePath} language={language} />
+      </div>
+    );
+  }
+
+  if ((item.name === "edit" || item.name === "write") && filePath && before !== undefined && after !== undefined) {
+    return (
+      <div className="overflow-hidden rounded-[16px] border border-border/35 bg-background/20">
+        <DiffFilePreview
+          filename={filePath}
+          language={language}
+          before={before}
+          after={after}
+        />
+      </div>
+    );
+  }
+
+  return null;
 };
 
 const getVisibleToolName = (item: Extract<ChatItem, { type: "tool" }>) => {
@@ -2344,6 +2412,7 @@ export default function Home() {
                                       </div>
                                     ) : null}
                                     <ComputerUseToolPreview item={item} />
+                                    <ToolResultPreview item={item} />
                                     {item.result ? (
                                       <div className="space-y-0.5">
                                         <div className="text-[9px] tracking-[0.08em] text-muted-foreground/60">

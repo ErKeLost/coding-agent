@@ -6,7 +6,7 @@ import { mastraStore } from './storage';
 const resolveMastraLogLevel = () => {
   const configuredLevel = process.env.MASTRA_LOG_LEVEL?.trim();
   if (configuredLevel) return configuredLevel;
-  return process.env.NODE_ENV === 'production' ? 'info' : 'warn';
+  return 'info';
 };
 
 export const mastra = new Mastra({
