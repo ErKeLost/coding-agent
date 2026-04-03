@@ -12,3 +12,5 @@ claude-code/*
 codex/*
 oh-my-opencode/*
 opencode-learn/*
+# Local Netlify folder
+.netlify

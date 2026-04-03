@@ -1,13 +1,19 @@
 {
   "name": "my-app",
-  "version": "0.2.13",
+  "version": "0.2.14",
   "private": true,
+  "workspaces": [
+    "apps/*"
+  ],
   "scripts": {
     "dev": "next dev",
     "dev:desktop": "next dev --hostname 127.0.0.1 --port 3000",
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
+    "site:dev": "bun run --filter @rovix/site dev",
+    "site:build": "bun run --filter @rovix/site build",
+    "site:preview": "bun run --filter @rovix/site preview",
     "desktop:dev": "tauri dev",
     "desktop:build": "tauri build",
     "prepare:sidecar": "node scripts/prepare-sidecar.mjs"

@@ -186,6 +186,13 @@ const isPlanRecord = (
 
 const models = [
   {
+    id: "openrouter/qwen/qwen3.6-plus:free",
+    name: "Qwen 3.6 Plus (Free)",
+    chef: "Qwen",
+    chefSlug: "qwen",
+    providers: ["openrouter"],
+  },
+  {
     id: "openrouter/z-ai/glm-5v-turbo",
     name: "GLM-5V Turbo",
     chef: "Z.AI",
@@ -1527,8 +1534,11 @@ const CHAT_COLUMN_CLASS =
   "mx-auto w-full max-w-5xl px-6 md:px-8 xl:px-10";
 
 const MODEL_STORAGE_KEY = "chat-selected-model";
-const DEFAULT_MODEL_ID = "openrouter/openai/gpt-5.4-mini";
-const PREVIOUS_DEFAULT_MODEL_ID = "openrouter/z-ai/glm-5v-turbo";
+const DEFAULT_MODEL_ID = "openrouter/qwen/qwen3.6-plus:free";
+const LEGACY_DEFAULT_MODEL_IDS = new Set([
+  "openrouter/z-ai/glm-5v-turbo",
+  "openrouter/openai/gpt-5.4-mini",
+]);
 
 const getStoredModelSelection = () => {
   if (typeof window === "undefined") {
@@ -1538,7 +1548,7 @@ const getStoredModelSelection = () => {
   try {
     const savedModel = window.localStorage.getItem(MODEL_STORAGE_KEY)?.trim();
     if (savedModel && models.some((entry) => entry.id === savedModel)) {
-      if (savedModel === PREVIOUS_DEFAULT_MODEL_ID) {
+      if (LEGACY_DEFAULT_MODEL_IDS.has(savedModel)) {
         return DEFAULT_MODEL_ID;
       }
       return savedModel;

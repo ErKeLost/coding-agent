@@ -56,7 +56,7 @@ const staticTools = {
   write: writeTool,
 };
 
-const modelEnv = process.env.MODEL ?? 'z-ai/glm-5v-turbo';
+const modelEnv = process.env.MODEL ?? 'qwen/qwen3.6-plus:free';
 function getRequestContextString(requestContext: RequestContext, key: string) {
   const value = (requestContext as { get: (name: string) => unknown }).get(key);
   return typeof value === 'string' && value.trim() ? value.trim() : undefined;
