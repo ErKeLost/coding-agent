@@ -1,6 +1,6 @@
 [package]
 name = "rovix"
-version = "0.2.8"
+version = "0.2.10"
 description = "Desktop shell for the Rovix app"
 authors = ["Rovix"]
 edition = "2021"
