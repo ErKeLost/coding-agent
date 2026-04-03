@@ -8,7 +8,7 @@
  *   .next/static      → src-tauri/next-server/.next/static
  *   public/           → src-tauri/next-server/public  (if it exists)
  */
-import { cp, rm, mkdir } from "node:fs/promises";
+import { cp, lstat, mkdir, readdir, readlink, rm } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -16,6 +16,59 @@ import { fileURLToPath } from "node:url";
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const root = path.join(__dirname, "..");
 const target = path.join(root, "src-tauri/next-server");
+const standaloneDir = path.join(root, ".next/standalone");
+const rootNodeModulesDir = path.join(root, "node_modules");
+
+const resolveCopySource = (resolvedTarget) => {
+  if (existsSync(resolvedTarget)) {
+    return resolvedTarget;
+  }
+
+  const standaloneNodeModulesDir = path.join(standaloneDir, "node_modules");
+  if (resolvedTarget.startsWith(standaloneNodeModulesDir)) {
+    const fallback = path.join(
+      rootNodeModulesDir,
+      path.relative(standaloneNodeModulesDir, resolvedTarget)
+    );
+    if (existsSync(fallback)) {
+      return fallback;
+    }
+  }
+
+  return null;
+};
+
+const materializeSymlinks = async (dir) => {
+  const entries = await readdir(dir, { withFileTypes: true });
+
+  for (const entry of entries) {
+    const entryPath = path.join(dir, entry.name);
+
+    if (entry.isSymbolicLink()) {
+      const linkTarget = await readlink(entryPath);
+      const resolvedTarget = path.resolve(path.dirname(entryPath), linkTarget);
+      const copySource = resolveCopySource(resolvedTarget);
+
+      if (!copySource) {
+        console.warn(`  ⚠ Skipping unresolved symlink: ${entryPath} -> ${linkTarget}`);
+        continue;
+      }
+
+      const sourceStats = await lstat(copySource);
+      await rm(entryPath, { recursive: true, force: true });
+      await cp(copySource, entryPath, { recursive: true, force: true, dereference: true });
+
+      if (sourceStats.isDirectory()) {
+        await materializeSymlinks(entryPath);
+      }
+      continue;
+    }
+
+    if (entry.isDirectory()) {
+      await materializeSymlinks(entryPath);
+    }
+  }
+};
 
 console.log("Preparing Next.js standalone server for Tauri bundling…");
 
@@ -26,7 +79,6 @@ if (existsSync(target)) {
 await mkdir(target, { recursive: true });
 
 // 1. Copy standalone output (server.js + minimal node_modules)
-const standaloneDir = path.join(root, ".next/standalone");
 if (!existsSync(standaloneDir)) {
   console.error(
     "ERROR: .next/standalone not found. Run `bun run build` first."
@@ -34,6 +86,8 @@ if (!existsSync(standaloneDir)) {
   process.exit(1);
 }
 await cp(standaloneDir, target, { recursive: true });
+console.log("Materializing symlinks in standalone output…");
+await materializeSymlinks(target);
 
 // 2. Copy static assets (.next/static is NOT included in standalone output)
 await cp(
