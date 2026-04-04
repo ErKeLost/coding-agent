@@ -197,7 +197,7 @@ export function AppSidebar({
     <Sidebar
       variant="sidebar"
       collapsible="icon"
-      className="app-sidebar-surface border-r border-border bg-transparent"
+      className="app-sidebar-surface bg-transparent"
       style={
         {
           "--sidebar-width": "18rem",

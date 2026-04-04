@@ -362,6 +362,9 @@ export function BottomTerminalPanel({
         return;
       }
       mountMapRef.current.set(sessionId, node);
+      if (!isExpanded) {
+        return;
+      }
       const currentPath = workspaceRootRef.current;
       const currentSession = currentPath
         ? getSessionRecord(currentPath, sessionId)
@@ -372,7 +375,7 @@ export function BottomTerminalPanel({
       }
       void ensureTerminalInstance(sessionId);
     },
-    [ensureTerminalInstance, getSessionRecord, hydrateSession],
+    [ensureTerminalInstance, getSessionRecord, hydrateSession, isExpanded],
   );
 
   const createSession = useCallback(
@@ -503,13 +506,14 @@ export function BottomTerminalPanel({
   }, [createSession, hydrateSession, isDesktopRuntime, workspaceRoot]);
 
   useEffect(() => {
+    if (!isExpanded) return;
     if (!workspaceRoot) return;
     for (const session of workspaceState?.sessions ?? []) {
       if (mountMapRef.current.has(session.sessionId)) {
         void hydrateSession(workspaceRoot, session);
       }
     }
-  }, [hydrateSession, workspaceRoot, workspaceState?.sessions]);
+  }, [hydrateSession, isExpanded, workspaceRoot, workspaceState?.sessions]);
 
   useEffect(() => {
     for (const sessionId of terminalMapRef.current.keys()) {

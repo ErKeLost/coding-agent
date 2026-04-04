@@ -15,9 +15,7 @@ import { useParams, useRouter } from "next/navigation";
 
 import {
   Conversation,
-  ConversationContent,
   ConversationEmptyState,
-  ConversationScrollButton,
 } from "@/components/ai-elements/conversation";
 import {
   Message,
@@ -30,12 +28,6 @@ import {
   ReasoningTrigger,
 } from "@/components/ai-elements/reasoning";
 import {
-  Attachment,
-  AttachmentPreview,
-  AttachmentRemove,
-  Attachments,
-} from "@/components/ai-elements/attachments";
-import {
   PromptInput,
   PromptInputActionAddAttachments,
   PromptInputActionMenu,
@@ -44,10 +36,8 @@ import {
   PromptInputBody,
   PromptInputFooter,
   type PromptInputMessage,
-  PromptInputProvider,
   PromptInputSubmit,
   PromptInputTools,
-  usePromptInputAttachments,
 } from "@/components/ai-elements/prompt-input";
 import {
   ModelSelector,
@@ -63,39 +53,25 @@ import {
   ModelSelectorTrigger,
 } from "@/components/ai-elements/model-selector";
 import { Image } from "@/components/ai-elements/image";
-import { Plan } from "@/components/tool-ui/plan";
 import { AppSidebar } from "@/components/app-sidebar";
-import { BranchPicker } from "@/components/rovix/branch-picker";
 import { BottomTerminalPanel } from "@/components/rovix/bottom-terminal-panel";
 import { DiffFilePreview } from "@/components/rovix/diff-file-preview";
 import { FileMentionTextarea } from "@/components/rovix/file-mention-textarea";
 import { GitChangesDialog } from "@/components/rovix/git-changes-dialog";
 import { ShikiFilePreview } from "@/components/rovix/shiki-file-preview";
 import { WorkspaceSearchDialog } from "@/components/rovix/workspace-search-dialog";
+import { WorkspaceHeaderBar } from "@/components/rovix/workspace/workspace-header-bar";
+import { WorkspaceConversationPanel } from "@/components/rovix/workspace/workspace-conversation-panel";
+import { WorkspaceComposerShell } from "@/components/rovix/workspace/workspace-composer-shell";
+import { WorkspaceModelTerminalControls } from "@/components/rovix/workspace/workspace-model-terminal-controls";
+import { WorkspacePageLayout } from "@/components/rovix/workspace/workspace-page-layout";
+import { WorkspacePromptAttachments } from "@/components/rovix/workspace/workspace-prompt-attachments";
 
 import { Badge } from "@/components/ui/badge";
-import {
-  Card,
-  CardContent,
-  CardFooter,
-  CardHeader,
-} from "@/components/ui/card";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuLabel,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
 import { Button } from "@/components/ui/button";
-import {
-  SidebarInset,
-  SidebarProvider,
-  SidebarTrigger,
-} from "@/components/ui/sidebar";
-import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { SidebarInset, SidebarProvider } from "@/components/ui/sidebar";
 import { cn } from "@/lib/utils";
+import { useWorkspaceShellStore } from "@/app/[id]/_stores/workspace-shell-store";
 import {
   type DesktopWorkspaceNode,
   setStoredWorkspaceRoot,
@@ -104,7 +80,6 @@ import {
   AppWindowIcon,
   CameraIcon,
   CheckIcon,
-  ChevronDownIcon,
   ChevronRightIcon,
   FileCode2Icon,
   FolderIcon,
@@ -113,18 +88,12 @@ import {
   LoaderCircleIcon,
   MonitorIcon,
   MousePointer2Icon,
-  SearchIcon,
-  Settings2Icon,
   SparklesIcon,
-  SquareTerminalIcon,
   UploadIcon,
 } from "lucide-react";
 import { gooeyToast } from "goey-toast";
 
-import {
-  type ChatItem,
-  type ToolStep,
-} from "@/lib/stream-event-bus";
+import { type ChatItem, type ToolStep } from "@/lib/stream-event-bus";
 import { useDesktopWorkspace } from "@/hooks/use-desktop-workspace";
 import { useThreadSession } from "@/hooks/use-thread-session";
 import { useAgentStream } from "@/hooks/use-agent-stream";
@@ -145,7 +114,9 @@ const summarizeQueuedSubmission = (submission: {
   files?: Array<{ filename?: string | null } | null>;
 }) => {
   if (submission.text?.trim()) return submission.text.trim();
-  const firstFilename = submission.files?.find((file) => file?.filename)?.filename;
+  const firstFilename = submission.files?.find(
+    (file) => file?.filename,
+  )?.filename;
   if (firstFilename) return firstFilename;
   return "待发送消息";
 };
@@ -170,7 +141,7 @@ const ThreadHistoryLoadingState = () => (
 );
 
 const isPlanRecord = (
-  value: unknown
+  value: unknown,
 ): value is {
   title: string;
   todos: Array<{
@@ -223,7 +194,8 @@ const models = [
   },
 ] as const;
 
-const createId = () => `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+const createId = () =>
+  `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 const createThreadId = () =>
   `thread-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 const DEFAULT_AGENT_ID = "build-agent";
@@ -284,8 +256,7 @@ const getString = (value: unknown) =>
 const getNumber = (value: unknown) =>
   typeof value === "number" ? value : undefined;
 
-const toDisplayPath = (value: string) =>
-  value.replace(/^\/workspace\//, "");
+const toDisplayPath = (value: string) => value.replace(/^\/workspace\//, "");
 
 const truncateText = (value: string, max = 80) =>
   value.length > max ? `${value.slice(0, max - 3)}...` : value;
@@ -331,7 +302,7 @@ const getToolArgsRecord = (value: unknown) => {
 
 const getArgPathValue = (
   args: Record<string, unknown> | null,
-  keys: string[]
+  keys: string[],
 ) => {
   if (!args) return undefined;
   for (const key of keys) {
@@ -380,7 +351,7 @@ const isGenericToolLabel = (toolName: string) =>
 
 const inferGenericToolName = (
   item: Extract<ChatItem, { type: "tool" }>,
-  args: Record<string, unknown> | null
+  args: Record<string, unknown> | null,
 ) => {
   if (isComputerUseTool(item.name)) return item.name;
   if (getString(args?.command)) return "runCommand";
@@ -437,7 +408,8 @@ const getLanguageFromPath = (filePath?: string | null) => {
   if (normalized.endsWith(".md")) return "markdown";
   if (normalized.endsWith(".css")) return "css";
   if (normalized.endsWith(".html")) return "html";
-  if (normalized.endsWith(".yml") || normalized.endsWith(".yaml")) return "yaml";
+  if (normalized.endsWith(".yml") || normalized.endsWith(".yaml"))
+    return "yaml";
   if (normalized.endsWith(".sh")) return "bash";
   if (normalized.endsWith(".sql")) return "sql";
   if (normalized.endsWith(".toml")) return "toml";
@@ -460,7 +432,7 @@ type ToolStandalonePreview =
     };
 
 const getToolStandalonePreview = (
-  item: Extract<ChatItem, { type: "tool" }>
+  item: Extract<ChatItem, { type: "tool" }>,
 ): ToolStandalonePreview | null => {
   const result = getToolResultRecord(item);
   const metadata = getToolResultMetadata(item);
@@ -507,11 +479,7 @@ const getToolStandalonePreview = (
   return null;
 };
 
-const ToolResultPreview = ({
-  preview,
-}: {
-  preview: ToolStandalonePreview;
-}) => {
+const ToolResultPreview = ({ preview }: { preview: ToolStandalonePreview }) => {
   if (preview.kind === "code") {
     return (
       <ShikiFilePreview
@@ -567,8 +535,7 @@ const getVisibleToolName = (item: Extract<ChatItem, { type: "tool" }>) => {
 
   const metadata = getToolResultMetadata(item);
   const metadataToolName =
-    getString(metadata?.toolName) ??
-    getString(metadata?.name);
+    getString(metadata?.toolName) ?? getString(metadata?.name);
   if (metadataToolName && !isGenericToolLabel(metadataToolName)) {
     return metadataToolName;
   }
@@ -587,10 +554,11 @@ const parseDataUrlAttachment = (value?: string) => {
 };
 
 const getComputerUseScreenshotPreview = (
-  item: Extract<ChatItem, { type: "tool" }>
+  item: Extract<ChatItem, { type: "tool" }>,
 ) => {
   const metadata = getToolResultMetadata(item);
-  const imageUrl = getString(metadata?.imageUrl) ?? getString(metadata?.publicUrl);
+  const imageUrl =
+    getString(metadata?.imageUrl) ?? getString(metadata?.publicUrl);
   if (imageUrl) {
     return { type: "url" as const, src: imageUrl };
   }
@@ -612,7 +580,7 @@ const getComputerUseScreenshotPreview = (
 };
 
 const getComputerUseToolSummary = (
-  item: Extract<ChatItem, { type: "tool" }>
+  item: Extract<ChatItem, { type: "tool" }>,
 ) => {
   const args = getToolArgsRecord(item.args);
   const metadata = getToolResultMetadata(item);
@@ -666,11 +634,11 @@ const getComputerUseToolSummary = (
   if (name === "computer_use_mouse_drag") {
     const start = formatCoordinatePair(
       getNumber(args?.startX),
-      getNumber(args?.startY)
+      getNumber(args?.startY),
     );
     const end = formatCoordinatePair(
       getNumber(args?.endX),
-      getNumber(args?.endY)
+      getNumber(args?.endY),
     );
     return start && end ? `${start} -> ${end}` : "mouse drag";
   }
@@ -684,7 +652,7 @@ const getComputerUseToolSummary = (
   if (name === "computer_use_mouse_position") {
     const coords = formatCoordinatePair(
       getNumber(metadata?.x),
-      getNumber(metadata?.y)
+      getNumber(metadata?.y),
     );
     return coords ? `cursor @ ${coords}` : "cursor position";
   }
@@ -697,7 +665,9 @@ const getComputerUseToolSummary = (
   if (name === "computer_use_keyboard_press") {
     const key = getString(args?.key);
     const modifiers = Array.isArray(args?.modifiers)
-      ? args.modifiers.filter((entry): entry is string => typeof entry === "string")
+      ? args.modifiers.filter(
+          (entry): entry is string => typeof entry === "string",
+        )
       : [];
     if (key) {
       return modifiers.length ? `${modifiers.join("+")}+${key}` : key;
@@ -752,23 +722,22 @@ const ComputerUseToolPreview = ({
   const cursorPosition = isRecord(metadata?.cursorPosition)
     ? formatCoordinatePair(
         getNumber(metadata.cursorPosition.x),
-        getNumber(metadata.cursorPosition.y)
+        getNumber(metadata.cursorPosition.y),
       )
     : null;
   const toolName = item.name.toLowerCase();
 
-  const icon =
-    toolName.includes("screenshot") ? (
-      <CameraIcon className="size-3.5" />
-    ) : toolName.includes("keyboard") ? (
-      <KeyboardIcon className="size-3.5" />
-    ) : toolName.includes("window") ? (
-      <AppWindowIcon className="size-3.5" />
-    ) : toolName.includes("display") ? (
-      <MonitorIcon className="size-3.5" />
-    ) : (
-      <MousePointer2Icon className="size-3.5" />
-    );
+  const icon = toolName.includes("screenshot") ? (
+    <CameraIcon className="size-3.5" />
+  ) : toolName.includes("keyboard") ? (
+    <KeyboardIcon className="size-3.5" />
+  ) : toolName.includes("window") ? (
+    <AppWindowIcon className="size-3.5" />
+  ) : toolName.includes("display") ? (
+    <MonitorIcon className="size-3.5" />
+  ) : (
+    <MousePointer2Icon className="size-3.5" />
+  );
 
   return (
     <div className="space-y-2">
@@ -782,7 +751,9 @@ const ComputerUseToolPreview = ({
               <div className="truncate text-foreground/85">{output}</div>
             ) : null}
             {cursorPosition ? (
-              <div className="text-muted-foreground/75">cursor {cursorPosition}</div>
+              <div className="text-muted-foreground/75">
+                cursor {cursorPosition}
+              </div>
             ) : null}
           </div>
         </div>
@@ -836,7 +807,8 @@ const ComputerUseToolPreview = ({
             const height = getNumber(display.height);
             const x = getNumber(display.x) ?? 0;
             const y = getNumber(display.y) ?? 0;
-            const active = display === primaryDisplay || display.isActive === true;
+            const active =
+              display === primaryDisplay || display.isActive === true;
             return (
               <div
                 key={`${item.id}-display-${index}`}
@@ -845,7 +817,9 @@ const ComputerUseToolPreview = ({
                 <div className="flex items-center gap-2">
                   <MonitorIcon className="size-3.5 text-foreground/65" />
                   <span className="font-medium text-foreground/85">
-                    {width && height ? `${width}x${height}` : `Display ${index + 1}`}
+                    {width && height
+                      ? `${width}x${height}`
+                      : `Display ${index + 1}`}
                   </span>
                   {active ? (
                     <span className="rounded-full border border-emerald-500/25 bg-emerald-500/10 px-1.5 py-0.5 text-[9px] text-emerald-700 dark:text-emerald-300">
@@ -853,7 +827,9 @@ const ComputerUseToolPreview = ({
                     </span>
                   ) : null}
                 </div>
-                <div className="mt-1 text-muted-foreground/75">origin {x}, {y}</div>
+                <div className="mt-1 text-muted-foreground/75">
+                  origin {x}, {y}
+                </div>
               </div>
             );
           })}
@@ -900,9 +876,9 @@ const formatToolMeta = (item: Extract<ChatItem, { type: "tool" }>) => {
   if (name === "writeFiles") {
     const files = Array.isArray(args.files)
       ? args.files
-        .map((entry) => (isRecord(entry) ? getString(entry.path) : undefined))
-        .filter((entry): entry is string => Boolean(entry))
-        .map(toDisplayPath)
+          .map((entry) => (isRecord(entry) ? getString(entry.path) : undefined))
+          .filter((entry): entry is string => Boolean(entry))
+          .map(toDisplayPath)
       : [];
     return files.length ? `files: ${formatList(files)}` : null;
   }
@@ -917,22 +893,25 @@ const formatToolMeta = (item: Extract<ChatItem, { type: "tool" }>) => {
     return `path: ${toDisplayPath(path ?? ".")}`;
   }
   if (name === "glob" && pattern) {
-    return `pattern: ${truncateText(pattern, 60)}${path ? ` | in ${toDisplayPath(path)}` : ""
-      }`;
+    return `pattern: ${truncateText(pattern, 60)}${
+      path ? ` | in ${toDisplayPath(path)}` : ""
+    }`;
   }
   if (name === "grep" && pattern) {
     const include = getString(args.include);
-    return `pattern: ${truncateText(pattern, 60)}${path ? ` | in ${toDisplayPath(path)}` : ""
-      }${include ? ` | include ${include}` : ""}`;
+    return `pattern: ${truncateText(pattern, 60)}${
+      path ? ` | in ${toDisplayPath(path)}` : ""
+    }${include ? ` | include ${include}` : ""}`;
   }
   if (name === "replace") {
     const files = Array.isArray(args.files)
       ? args.files
-        .filter((entry): entry is string => typeof entry === "string")
-        .map(toDisplayPath)
+          .filter((entry): entry is string => typeof entry === "string")
+          .map(toDisplayPath)
       : [];
-    return `pattern: ${truncateText(pattern ?? "replace", 50)}${files.length ? ` | files: ${formatList(files)}` : ""
-      }`;
+    return `pattern: ${truncateText(pattern ?? "replace", 50)}${
+      files.length ? ` | files: ${formatList(files)}` : ""
+    }`;
   }
   if (name === "edit" && filePath) {
     const replaceAll = args.replaceAll ? " | replace all" : "";
@@ -954,11 +933,15 @@ const formatToolMeta = (item: Extract<ChatItem, { type: "tool" }>) => {
   }
   if (name === "readLocalProcessLogs") {
     const processId = getString(args.processId);
-    return processId ? `process: ${truncateText(processId, 48)}` : "read process logs";
+    return processId
+      ? `process: ${truncateText(processId, 48)}`
+      : "read process logs";
   }
   if (name === "stopLocalProcess") {
     const processId = getString(args.processId);
-    return processId ? `process: ${truncateText(processId, 48)}` : "stop process";
+    return processId
+      ? `process: ${truncateText(processId, 48)}`
+      : "stop process";
   }
   if (name === "listLocalProcesses") {
     return "local services";
@@ -973,8 +956,8 @@ const formatToolMeta = (item: Extract<ChatItem, { type: "tool" }>) => {
   if (name === "downloadFiles") {
     const paths = Array.isArray(args.paths)
       ? args.paths
-        .filter((entry): entry is string => typeof entry === "string")
-        .map(toDisplayPath)
+          .filter((entry): entry is string => typeof entry === "string")
+          .map(toDisplayPath)
       : [];
     return paths.length ? `paths: ${formatList(paths)}` : null;
   }
@@ -999,17 +982,19 @@ const formatToolMeta = (item: Extract<ChatItem, { type: "tool" }>) => {
     const lang = getString(args.lang);
     const paths = Array.isArray(args.paths)
       ? args.paths
-        .filter((entry): entry is string => typeof entry === "string")
-        .map(toDisplayPath)
+          .filter((entry): entry is string => typeof entry === "string")
+          .map(toDisplayPath)
       : [];
-    return `pattern: ${truncateText(pattern ?? "search", 50)}${lang ? ` | lang ${lang}` : ""
-      }${paths.length ? ` | in ${formatList(paths)}` : ""}`;
+    return `pattern: ${truncateText(pattern ?? "search", 50)}${
+      lang ? ` | lang ${lang}` : ""
+    }${paths.length ? ` | in ${formatList(paths)}` : ""}`;
   }
   if (name === "ast_grep_replace") {
     const lang = getString(args.lang);
     const rewrite = getString(args.rewrite);
-    return `pattern: ${truncateText(pattern ?? "replace", 50)}${rewrite ? ` | rewrite ${truncateText(rewrite, 40)}` : ""
-      }${lang ? ` | lang ${lang}` : ""}`;
+    return `pattern: ${truncateText(pattern ?? "replace", 50)}${
+      rewrite ? ` | rewrite ${truncateText(rewrite, 40)}` : ""
+    }${lang ? ` | lang ${lang}` : ""}`;
   }
 
   if (filePath) return `file: ${toDisplayPath(filePath)}`;
@@ -1022,7 +1007,7 @@ const formatToolMeta = (item: Extract<ChatItem, { type: "tool" }>) => {
 
 const getToolDisplayTitle = (
   item: Extract<ChatItem, { type: "tool" }>,
-  visibleToolName: string
+  visibleToolName: string,
 ) => {
   const toolMeta = formatToolMeta(item);
   const pathTail = getToolPathTail(item);
@@ -1085,7 +1070,7 @@ const getToolAction = (toolName: string): ActivityAction => {
 const getActivityVerb = (
   action: ActivityAction,
   status: "pending" | "done" | "error",
-  toolName?: string
+  toolName?: string,
 ) => {
   const normalizedToolName = toolName?.trim().toLowerCase() ?? "";
 
@@ -1121,7 +1106,7 @@ const getActivityVerb = (
 
 const getToolDisplayText = (
   displayTitle: { primary: string; secondary: string | null },
-  visibleToolName: string
+  visibleToolName: string,
 ) => {
   const normalizedToolName = visibleToolName.trim().toLowerCase();
 
@@ -1155,7 +1140,8 @@ const getToolPathTail = (item: Extract<ChatItem, { type: "tool" }>) => {
   }
   const args = getToolArgsRecord(item.args);
   const result = isRecord(item.result) ? item.result : null;
-  const resultMeta = result && isRecord(result.metadata) ? result.metadata : null;
+  const resultMeta =
+    result && isRecord(result.metadata) ? result.metadata : null;
   const resultTitle =
     getString(result?.title) ??
     getString(resultMeta?.title) ??
@@ -1188,7 +1174,11 @@ const getToolPathTail = (item: Extract<ChatItem, { type: "tool" }>) => {
     "relative_file_path",
     "relative_path",
   ]);
-  const argSource = getArgPathValue(args, ["source", "sourcePath", "source_path"]);
+  const argSource = getArgPathValue(args, [
+    "source",
+    "sourcePath",
+    "source_path",
+  ]);
   const argDest = getArgPathValue(args, [
     "destination",
     "destinationPath",
@@ -1196,8 +1186,7 @@ const getToolPathTail = (item: Extract<ChatItem, { type: "tool" }>) => {
   ]);
   const argFiles =
     args && Array.isArray(args.files)
-      ? args
-          .files
+      ? args.files
           .map((entry) => {
             if (typeof entry === "string") return entry;
             if (isRecord(entry)) {
@@ -1211,21 +1200,18 @@ const getToolPathTail = (item: Extract<ChatItem, { type: "tool" }>) => {
     args && Array.isArray(args.paths)
       ? args.paths.filter((entry): entry is string => typeof entry === "string")
       : [];
-  const metaFilePath =
-    resultMeta
-      ? getString(resultMeta.filePath) ??
-        getString(resultMeta.file) ??
-        getString(resultMeta.relativeFilePath)
-      : undefined;
-  const metaRelativePath =
-    resultMeta
-      ? getString(resultMeta.relativePath) ??
-        getString(resultMeta.relative_file_path)
-      : undefined;
-  const metaPath =
-    resultMeta
-      ? getString(resultMeta.path) ?? getString(resultMeta.pathname)
-      : undefined;
+  const metaFilePath = resultMeta
+    ? (getString(resultMeta.filePath) ??
+      getString(resultMeta.file) ??
+      getString(resultMeta.relativeFilePath))
+    : undefined;
+  const metaRelativePath = resultMeta
+    ? (getString(resultMeta.relativePath) ??
+      getString(resultMeta.relative_file_path))
+    : undefined;
+  const metaPath = resultMeta
+    ? (getString(resultMeta.path) ?? getString(resultMeta.pathname))
+    : undefined;
 
   const primary =
     argFilePath ??
@@ -1262,13 +1248,19 @@ const getToolPathTail = (item: Extract<ChatItem, { type: "tool" }>) => {
 const getResultCount = (result: unknown) => {
   if (!isRecord(result)) return undefined;
   const metadata = isRecord(result.metadata) ? result.metadata : null;
-  const directCount = typeof result.count === "number" ? result.count : undefined;
+  const directCount =
+    typeof result.count === "number" ? result.count : undefined;
   const metadataCount =
     metadata && typeof metadata.count === "number" ? metadata.count : undefined;
   return metadataCount ?? directCount;
 };
 
-type ToolRunState = "started" | "running" | "completed" | "failed" | "timed_out";
+type ToolRunState =
+  | "started"
+  | "running"
+  | "completed"
+  | "failed"
+  | "timed_out";
 
 type RunInfo = {
   state?: ToolRunState;
@@ -1286,7 +1278,11 @@ const isToolRunState = (value: unknown): value is ToolRunState =>
 const getRunInfo = (item: Extract<ChatItem, { type: "tool" }>): RunInfo => {
   const result = item.result;
   if (isRecord(result)) {
-    const state = isToolRunState(result.state) ? result.state : isToolRunState(result.runState) ? result.runState : undefined;
+    const state = isToolRunState(result.state)
+      ? result.state
+      : isToolRunState(result.runState)
+        ? result.runState
+        : undefined;
     const sessionId = getString(result.sessionId);
     const durationMs =
       typeof result.executionTime === "number"
@@ -1314,7 +1310,7 @@ const formatUsageTokens = (value?: number) =>
 const formatUsageCost = (
   usage: LanguageModelUsage | undefined,
   modelId?: string,
-  costUSD?: number
+  costUSD?: number,
 ) => {
   if (typeof costUSD === "number") {
     return new Intl.NumberFormat("en-US", {
@@ -1385,7 +1381,7 @@ const blobUrlToDataUrl = async (url: string) => {
 };
 
 const prepareAttachmentForModel = async (
-  file: FileUIPart
+  file: FileUIPart,
 ): Promise<PreparedAttachment> => {
   const sourceDataUrl = file.url.startsWith("data:")
     ? file.url
@@ -1439,7 +1435,10 @@ const FileTreeNodeItem = ({
           className="h-auto w-full justify-start gap-1.5 rounded px-0 py-1 pr-2 text-[11.5px] font-normal text-[#56657d] shadow-none transition-colors hover:bg-[#111c2e] hover:text-white"
         >
           <ChevronRightIcon
-            className={cn("size-2.5 shrink-0 transition-transform", expanded && "rotate-90")}
+            className={cn(
+              "size-2.5 shrink-0 transition-transform",
+              expanded && "rotate-90",
+            )}
           />
           <FolderIcon className="size-3 shrink-0 text-amber-500/70" />
           {node.name}
@@ -1468,59 +1467,11 @@ const FileTreeNodeItem = ({
         "h-auto w-full justify-start gap-1.5 rounded px-0 py-1 pr-2 text-left text-[11.5px] font-normal shadow-none transition-colors",
         selectedPath === node.path
           ? "bg-[#1a2540] text-white"
-          : "text-[#56657d] hover:text-white hover:bg-[#111c2e]"
+          : "text-[#56657d] hover:text-white hover:bg-[#111c2e]",
       )}
     >
       <FileCode2Icon className="size-3 shrink-0 text-indigo-400/70" />
       <span className="truncate">{node.name}</span>
-    </Button>
-  );
-};
-
-const PromptInputAttachmentsDisplay = () => {
-  const attachments = usePromptInputAttachments();
-
-  if (attachments.files.length === 0) {
-    return null;
-  }
-
-  return (
-    <Attachments
-      variant="grid"
-      className="ml-0 w-full justify-start gap-3 px-5 pt-4"
-    >
-      {attachments.files.map((attachment) => (
-        <Attachment
-          data={attachment}
-          key={attachment.id}
-          onRemove={() => attachments.remove(attachment.id)}
-          className="size-14 overflow-hidden rounded-lg border border-border/45 bg-background/70 shadow-[0_8px_24px_rgba(0,0,0,0.18)]"
-        >
-          <AttachmentPreview className="rounded-lg bg-muted/30" />
-          <AttachmentRemove />
-        </Attachment>
-      ))}
-    </Attachments>
-  );
-};
-
-const PromptGuideButton = ({
-  disabled,
-  onClick,
-}: {
-  disabled?: boolean;
-  onClick: () => void;
-}) => {
-  return (
-    <Button
-      type="button"
-      variant="ghost"
-      disabled={disabled}
-      onClick={onClick}
-      className="app-control h-9 rounded-full border-0 px-3 text-[12px] font-medium text-foreground/88 shadow-none disabled:cursor-not-allowed"
-    >
-      <SparklesIcon className="size-3.5 text-primary/80" />
-      引导
     </Button>
   );
 };
@@ -1549,42 +1500,21 @@ const ModelSelectorItemRow = ({
           <ModelSelectorLogo key={provider} provider={provider} />
         ))}
       </ModelSelectorLogoGroup>
-      {selected ? <CheckIcon className="ml-auto size-3.5" /> : <div className="ml-auto size-3.5" />}
+      {selected ? (
+        <CheckIcon className="ml-auto size-3.5" />
+      ) : (
+        <div className="ml-auto size-3.5" />
+      )}
     </ModelSelectorItem>
   );
 };
 
-const CHAT_COLUMN_CLASS =
-  "mx-auto w-full max-w-5xl px-6 md:px-8 xl:px-10";
+const CHAT_COLUMN_CLASS = "mx-auto w-full max-w-5xl px-6 md:px-8 xl:px-10";
 
-const MODEL_STORAGE_KEY = "chat-selected-model";
-const DEFAULT_MODEL_ID = "openrouter/qwen/qwen3.6-plus:free";
-const LEGACY_DEFAULT_MODEL_IDS = new Set([
-  "openrouter/z-ai/glm-5v-turbo",
-  "openrouter/openai/gpt-5.4-mini",
-]);
-
-const getStoredModelSelection = () => {
-  if (typeof window === "undefined") {
-    return DEFAULT_MODEL_ID;
-  }
-
-  try {
-    const savedModel = window.localStorage.getItem(MODEL_STORAGE_KEY)?.trim();
-    if (savedModel && models.some((entry) => entry.id === savedModel)) {
-      if (LEGACY_DEFAULT_MODEL_IDS.has(savedModel)) {
-        return DEFAULT_MODEL_ID;
-      }
-      return savedModel;
-    }
-  } catch {
-    // Ignore storage errors.
-  }
-
-  return DEFAULT_MODEL_ID;
-};
-
-const logWorkspaceDebug = (label: string, payload?: Record<string, unknown>) => {
+const logWorkspaceDebug = (
+  label: string,
+  payload?: Record<string, unknown>,
+) => {
   console.info(`[workspace-debug] ${label}`, payload ?? {});
 };
 
@@ -1594,11 +1524,37 @@ export default function Home() {
     () => true,
     () => false,
   );
-  const [model, setModel] = useState(getStoredModelSelection());
-  const [modelDialogOpen, setModelDialogOpen] = useState(false);
+  const model = useWorkspaceShellStore((state) => state.model);
+  const setModel = useWorkspaceShellStore((state) => state.setModel);
+  const modelDialogOpen = useWorkspaceShellStore(
+    (state) => state.modelDialogOpen,
+  );
+  const setModelDialogOpen = useWorkspaceShellStore(
+    (state) => state.setModelDialogOpen,
+  );
+  const reasoningOpenState = useWorkspaceShellStore(
+    (state) => state.reasoningOpenState,
+  );
+  const setReasoningOpenState = useWorkspaceShellStore(
+    (state) => state.setReasoningOpenState,
+  );
+  const resetReasoningOpenState = useWorkspaceShellStore(
+    (state) => state.resetReasoningOpenState,
+  );
+  const gitDialogOpen = useWorkspaceShellStore((state) => state.gitDialogOpen);
+  const setGitDialogOpen = useWorkspaceShellStore(
+    (state) => state.setGitDialogOpen,
+  );
+  const terminalExpanded = useWorkspaceShellStore(
+    (state) => state.terminalExpanded,
+  );
+  const setTerminalExpanded = useWorkspaceShellStore(
+    (state) => state.setTerminalExpanded,
+  );
   const [selectedAgent] = useState(DEFAULT_AGENT_ID);
-  const [reasoningOpenState, setReasoningOpenState] = useState<Record<string, boolean>>({});
-  const previousThinkingStatusesRef = useRef<Record<string, "pending" | "done">>({});
+  const previousThinkingStatusesRef = useRef<
+    Record<string, "pending" | "done">
+  >({});
   const params = useParams();
   const router = useRouter();
   const selectedModelData = models.find((m) => m.id === model);
@@ -1606,20 +1562,11 @@ export default function Home() {
     () => [...new Set(models.map((entry) => entry.chef))],
     [],
   );
-  const [threadSessionError, setThreadSessionError] = useState<string | null>(null);
+  const [threadSessionError, setThreadSessionError] = useState<string | null>(
+    null,
+  );
   const [lastSubmittedMessage, setLastSubmittedMessage] =
     useState<PromptInputMessage | null>(null);
-  const [gitDialogOpen, setGitDialogOpen] = useState(false);
-  const [terminalExpanded, setTerminalExpanded] = useState(false);
-
-  useEffect(() => {
-    if (!hasMounted || !model) return;
-    try {
-      window.localStorage.setItem(MODEL_STORAGE_KEY, model);
-    } catch {
-      // Ignore storage errors.
-    }
-  }, [hasMounted, model]);
   const {
     items,
     setItems,
@@ -1651,9 +1598,7 @@ export default function Home() {
   });
   const effectiveWorkspaceRoot =
     workspaceRoot ?? activeThreadRecord?.workspaceRoot ?? null;
-  const activeWorkspaceLabel = summarizeWorkspaceRoot(
-    effectiveWorkspaceRoot
-  );
+  const activeWorkspaceLabel = summarizeWorkspaceRoot(effectiveWorkspaceRoot);
   const {
     status,
     error,
@@ -1690,7 +1635,10 @@ export default function Home() {
 
   const roundSummaryByFirstActivityId = useMemo(() => {
     const summary = new Map<string, string>();
-    type RoundCounts = Record<ActivityAction, { pending: number; done: number; error: number }>;
+    type RoundCounts = Record<
+      ActivityAction,
+      { pending: number; done: number; error: number }
+    >;
     const freshCounts = (): RoundCounts => ({
       browse: { pending: 0, done: 0, error: 0 },
       edit: { pending: 0, done: 0, error: 0 },
@@ -1731,9 +1679,12 @@ export default function Home() {
       const chunks: string[] = [];
       for (const action of actionOrder) {
         const stat = counts[action];
-        if (stat.pending > 0) chunks.push(`正在${labelByAction[action]} ${stat.pending}`);
-        if (stat.done > 0) chunks.push(`已${labelByAction[action]} ${stat.done}`);
-        if (stat.error > 0) chunks.push(`${labelByAction[action]}失败 ${stat.error}`);
+        if (stat.pending > 0)
+          chunks.push(`正在${labelByAction[action]} ${stat.pending}`);
+        if (stat.done > 0)
+          chunks.push(`已${labelByAction[action]} ${stat.done}`);
+        if (stat.error > 0)
+          chunks.push(`${labelByAction[action]}失败 ${stat.error}`);
       }
       if (chunks.length) {
         summary.set(firstActivityId, chunks.join("，"));
@@ -1761,7 +1712,8 @@ export default function Home() {
       if (item.type !== "tool" && item.type !== "agent") continue;
 
       if (!firstActivityId) firstActivityId = item.id;
-      const action = item.type === "agent" ? "delegate" : getToolAction(item.name);
+      const action =
+        item.type === "agent" ? "delegate" : getToolAction(item.name);
       counts[action][item.status] += 1;
     }
 
@@ -1809,7 +1761,7 @@ export default function Home() {
     if (!plan?.todos?.length) return null;
     if (status !== "submitted" && status !== "streaming") return null;
     const remainingTodos = plan.todos.filter(
-      (todo) => todo.status !== "completed" && todo.status !== "cancelled"
+      (todo) => todo.status !== "completed" && todo.status !== "cancelled",
     );
     if (remainingTodos.length === 0) return null;
     return {
@@ -1832,7 +1784,8 @@ export default function Home() {
 
   const canStartConversation = Boolean(threadId) && !isHydratingThread;
   const canSubmitChat = canStartConversation && Boolean(model);
-  const shouldShowEmptyThreadHint = !canStartConversation && recentThreads.length === 0;
+  const shouldShowEmptyThreadHint =
+    !canStartConversation && recentThreads.length === 0;
   const chatDisabledReason = canStartConversation
     ? null
     : "请先创建或选择一个线程，然后再开始对话。";
@@ -1864,71 +1817,84 @@ export default function Home() {
   });
 
   const resetThreadUiChrome = useCallback(() => {
-    setReasoningOpenState({});
+    resetReasoningOpenState();
     previousThinkingStatusesRef.current = {};
     setThreadSessionError(null);
-  }, []);
+  }, [resetReasoningOpenState]);
 
-  const handleNewThread = useCallback((initialWorkspaceRoot?: string | null) => {
-    resetThreadUiChrome();
-    createThreadSession(initialWorkspaceRoot ?? effectiveWorkspaceRoot);
-  }, [createThreadSession, effectiveWorkspaceRoot, resetThreadUiChrome]);
+  const handleNewThread = useCallback(
+    (initialWorkspaceRoot?: string | null) => {
+      resetThreadUiChrome();
+      createThreadSession(initialWorkspaceRoot ?? effectiveWorkspaceRoot);
+    },
+    [createThreadSession, effectiveWorkspaceRoot, resetThreadUiChrome],
+  );
 
-  const handleSelectThread = useCallback((nextThreadId: string) => {
-    if (!nextThreadId || nextThreadId === threadId) return;
-    resetThreadUiChrome();
-    selectThreadSession(nextThreadId);
-  }, [resetThreadUiChrome, selectThreadSession, threadId]);
+  const handleSelectThread = useCallback(
+    (nextThreadId: string) => {
+      if (!nextThreadId || nextThreadId === threadId) return;
+      resetThreadUiChrome();
+      selectThreadSession(nextThreadId);
+    },
+    [resetThreadUiChrome, selectThreadSession, threadId],
+  );
 
-  const handleDeleteThread = useCallback(async (targetThreadId: string) => {
-    if (!targetThreadId) return;
-    const deletingLastActiveThread =
-      threadId === targetThreadId &&
-      recentThreads.filter((entry) => entry.id !== targetThreadId).length === 0;
+  const handleDeleteThread = useCallback(
+    async (targetThreadId: string) => {
+      if (!targetThreadId) return;
+      const deletingLastActiveThread =
+        threadId === targetThreadId &&
+        recentThreads.filter((entry) => entry.id !== targetThreadId).length ===
+          0;
 
-    resetThreadUiChrome();
-    await deleteThreadSession(targetThreadId);
+      resetThreadUiChrome();
+      await deleteThreadSession(targetThreadId);
 
-    if (!deletingLastActiveThread) {
-      return;
-    }
+      if (!deletingLastActiveThread) {
+        return;
+      }
 
-    setDesktopWorkspace(null);
-    setEditorSelectedFile(null);
-    setWorkspaceBranches(null);
-    setStoredWorkspaceRoot(null);
-  }, [
-    deleteThreadSession,
-    recentThreads,
-    resetThreadUiChrome,
-    setDesktopWorkspace,
-    setEditorSelectedFile,
-    setWorkspaceBranches,
-    threadId,
-  ]);
+      setDesktopWorkspace(null);
+      setEditorSelectedFile(null);
+      setWorkspaceBranches(null);
+      setStoredWorkspaceRoot(null);
+    },
+    [
+      deleteThreadSession,
+      recentThreads,
+      resetThreadUiChrome,
+      setDesktopWorkspace,
+      setEditorSelectedFile,
+      setWorkspaceBranches,
+      threadId,
+    ],
+  );
 
   const handleSelectEditorFile = handleOpenWorkspaceFile;
   const handleHeaderBranchChange = handleSwitchWorkspaceBranch;
   const handlePushWorkspace = handlePushWorkspaceBranch;
-  const handleChatSubmit = useCallback(async (message: PromptInputMessage) => {
-    if (!canStartConversation) {
-      setThreadSessionError("请先创建或选择一个线程，然后再开始对话。");
-      return;
-    }
+  const handleChatSubmit = useCallback(
+    async (message: PromptInputMessage) => {
+      if (!canStartConversation) {
+        setThreadSessionError("请先创建或选择一个线程，然后再开始对话。");
+        return;
+      }
 
-    if (!model) {
-      setModelDialogOpen(true);
-      setThreadSessionError("请先选择模型，然后再发送消息。");
-      return;
-    }
+      if (!model) {
+        setModelDialogOpen(true);
+        setThreadSessionError("请先选择模型，然后再发送消息。");
+        return;
+      }
 
-    setLastSubmittedMessage({
-      text: message.text,
-      files: message.files.map((file) => ({ ...file })),
-    });
+      setLastSubmittedMessage({
+        text: message.text,
+        files: message.files.map((file) => ({ ...file })),
+      });
 
-    await handleSubmit(message);
-  }, [canStartConversation, handleSubmit, model]);
+      await handleSubmit(message);
+    },
+    [canStartConversation, handleSubmit, model],
+  );
 
   const handleSelectModel = useCallback((nextModel: string) => {
     setModel(nextModel);
@@ -1957,7 +1923,7 @@ export default function Home() {
         recentThreads={recentThreads}
         workspaceRoot={effectiveWorkspaceRoot}
       />
-      <SidebarInset className="app-shell bg-transparent">
+      <SidebarInset className="app-shell min-w-0 overflow-hidden border-l border-border/55 bg-transparent">
         <ModelSelector open={modelDialogOpen} onOpenChange={setModelDialogOpen}>
           <ModelSelectorContent
             className="max-w-[430px] rounded-[22px]"
@@ -1983,492 +1949,318 @@ export default function Home() {
             </ModelSelectorList>
           </ModelSelectorContent>
         </ModelSelector>
-        <div className="app-shell flex h-screen min-w-0 w-full flex-col overflow-hidden bg-transparent text-foreground">
-          <main className="min-h-0 flex-1 overflow-hidden">
-            <section
-              className="grid h-full min-h-0 min-w-0 border-l border-border/50 bg-transparent"
-              style={{
-                gridTemplateRows: terminalExpanded
-                  ? "minmax(0, 1fr) 372px"
-                  : "minmax(0, 1fr) 0px",
-              }}
-            >
-              <Card className="flex min-h-0 min-w-0 flex-col gap-0 overflow-hidden rounded-none border-0 bg-transparent pt-0 shadow-none">
-                <CardHeader className="border-border/50 border-b px-0 py-3">
-                  <div
-                    className={cn(
-                      CHAT_COLUMN_CLASS,
-                      "flex min-w-0 flex-wrap items-start justify-between gap-x-4 gap-y-3 xl:flex-nowrap xl:items-center"
-                    )}
-                  >
-                    <div className="flex min-w-0 flex-1 items-center gap-3 max-md:w-full md:max-w-[380px] lg:max-w-[440px] xl:max-w-[500px]">
-                      <SidebarTrigger className="md:hidden" />
-                      <div className="min-w-0 flex-1">
-                        <div className="flex items-center gap-2">
-                          <span className="truncate text-[15px] font-medium tracking-tight text-foreground/92">
-                            {activeThreadRecord?.title ?? "Untitled thread"}
-                          </span>
-                        </div>
-                        <div className="mt-1 flex items-center gap-2 overflow-hidden text-[11px] text-muted-foreground/72">
-                          <>
-                            <span className="truncate">
-                              {activeWorkspaceLabel}
-                            </span>
-                            <span className="text-border">•</span>
-                            <span className="truncate">
-                              {activeThreadRecord?.updatedAt
-                                ? formatRelativeUpdatedAt(activeThreadRecord.updatedAt)
-                                : "just now"}
-                            </span>
-                          </>
-                        </div>
-                      </div>
-                    </div>
-                    <div className="hidden min-w-0 flex-wrap items-center justify-end gap-2 md:flex xl:flex-nowrap">
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        onClick={() => setWorkspaceSearchOpen(true)}
-                        className="app-control h-9 rounded-lg border-0 px-3 text-[12px] font-normal text-foreground/78 shadow-none transition-colors hover:text-foreground"
-                      >
-                        <SearchIcon className="size-4" />
-                        搜索
-                      </Button>
-                      {workspaceBranches?.hasGit ? (
-                        <>
-                          <div className="flex h-9 max-w-full items-center overflow-hidden rounded-[14px] border border-border/60 bg-background/75 p-1 shadow-[0_8px_20px_rgba(0,0,0,0.07)] backdrop-blur-xl dark:bg-background/55">
-                            <BranchPicker
-                              branches={workspaceBranches.branches}
-                              currentBranch={workspaceBranches.currentBranch}
-                              loading={workspaceBranchLoading}
-                              onSelect={handleHeaderBranchChange}
-                              onCreate={handleHeaderBranchChange}
-                            />
-                            <div className="mx-1 h-4 w-px bg-border/55" />
-                            <DropdownMenu>
-                              <DropdownMenuTrigger asChild>
-                                <Button
-                                  type="button"
-                                  variant="ghost"
-                                  className="h-7 rounded-[10px] bg-[color:var(--app-soft-fill)] px-3 text-[11px] font-medium text-foreground/92 shadow-none transition-colors hover:bg-[color:var(--app-control-hover)]"
-                                >
-                                  <Settings2Icon className="size-3 text-foreground/72" />
-                                  提交
-                                  <ChevronDownIcon className="size-3 text-muted-foreground/75" />
-                                </Button>
-                              </DropdownMenuTrigger>
-                              <DropdownMenuContent
-                                align="end"
-                                sideOffset={6}
-                                className="min-w-[168px] rounded-[12px] p-1 text-popover-foreground shadow-[0_18px_48px_rgba(0,0,0,0.18)]"
-                              >
-                                <DropdownMenuLabel className="px-2 py-1 text-[10px] font-medium tracking-[0.01em] text-muted-foreground/78">
-                                  Git 操作
-                                </DropdownMenuLabel>
-                                <DropdownMenuItem
-                                  onClick={() => setGitDialogOpen(true)}
-                                  disabled={workspaceBranchLoading || !workspaceBranches.hasChanges}
-                                  className="rounded-[8px] px-2 py-1.5 text-[11px] font-medium"
-                                >
-                                  <Settings2Icon className="size-3.5 text-foreground/72" />
-                                  提交
-                                </DropdownMenuItem>
-                                <DropdownMenuItem
-                                  onClick={() => void handlePushWorkspace()}
-                                  disabled={workspaceBranchLoading || !workspaceBranches.hasRemote}
-                                  className="rounded-[8px] px-2 py-1.5 text-[11px] font-medium"
-                                >
-                                  <UploadIcon className="size-3.5" />
-                                  推送
-                                </DropdownMenuItem>
-                                <DropdownMenuSeparator className="my-0.75" />
-                                <DropdownMenuItem
-                                  onClick={() => void handleCreateBranch()}
-                                  className="rounded-[8px] px-2 py-1.5 text-[11px] font-medium"
-                                >
-                                  <GitBranchIcon className="size-3.5" />
-                                  Create branch
-                                </DropdownMenuItem>
-                              </DropdownMenuContent>
-                            </DropdownMenu>
-                          </div>
-                        </>
-                      ) : (
-                        <Button
-                          type="button"
-                          variant="ghost"
-                          onClick={() => void handleHeaderBranchChange("main")}
-                          className="app-control h-9 rounded-lg border-0 px-3 text-[12px] font-normal text-foreground/78 shadow-none transition-colors hover:text-foreground"
-                        >
-                          <GitBranchIcon className="size-4" />
-                          初始化 main
-                        </Button>
-                      )}
-                    </div>
-                  </div>
-                </CardHeader>
-
-                <CardContent className="flex min-h-0 flex-1 flex-col overflow-hidden px-0">
-                  <Conversation className="flex min-h-0 flex-1 overflow-hidden">
-                    <ConversationContent
-                      className={cn(
-                        CHAT_COLUMN_CLASS,
-                        "min-h-0 flex-1 gap-4 overflow-y-auto pt-5 pb-4 sm:pt-6 sm:pb-5"
-                      )}
-                    >
-                      {isHydratingThread ? (
-                        <ThreadHistoryLoadingState />
-                      ) : items.length === 0 ? (
-                        <>
-                        </>
-                      ) : (
-                        items.map((item) => {
-                          if (item.type === "thinking") {
-                            if (item.status === "done" && !item.content.trim()) {
-                              return null;
-                            }
-                            return (
-                              <div key={item.id} className="pl-0.5">
-                                <Reasoning
-                                  isStreaming={item.status === "pending"}
-                                  open={reasoningOpenState[item.id] ?? false}
-                                  onOpenChange={(open) =>
-                                    setReasoningOpenState((previous) => ({
-                                      ...previous,
-                                      [item.id]: open,
-                                    }))
-                                  }
-                                  className="mt-0"
-                                >
-                                  <ReasoningTrigger
-                                    className="min-h-0 border-0 bg-transparent px-0 py-0 text-[11px] font-normal text-muted-foreground shadow-none hover:bg-transparent hover:text-foreground/80"
-                                    getThinkingMessage={(streaming) =>
-                                      streaming ? "正在思考" : "已思考"
-                                    }
-                                  />
-                                  {item.content ? (
-                                    <ReasoningContent
-                                      showDivider={false}
-                                      className="mt-0.5 border-l border-border/35 px-0 py-0 pl-2.5 text-[11px] leading-5 text-muted-foreground shadow-none"
-                                    >
-                                      {item.content}
-                                    </ReasoningContent>
-                                  ) : null}
-                                </Reasoning>
-                              </div>
-                            );
-                          }
-
-                          if (item.type === "tool" && item.parentToolCallId) {
-                            return null;
-                          }
-
-                          if (item.type === "agent") {
-                            const childTools = items.filter(
-                              (entry): entry is Extract<ChatItem, { type: "tool" }> =>
-                                entry.type === "tool" &&
-                                entry.parentToolCallId === item.parentToolCallId
-                            );
-                            const summaryText =
-                              roundSummaryByFirstActivityId.get(item.id);
-                            return (
-                              <div key={item.id} className="space-y-1">
-                                {summaryText ? (
-                                  <div className="pl-5.5 text-[10px] leading-4.5 text-muted-foreground/75">
-                                    {summaryText}
-                                  </div>
-                                ) : null}
-                                <div
-                                  className={cn(
-                                    "app-tool-row rounded-[14px] px-3 py-2 text-[12px] leading-5 text-foreground/82",
-                                    item.status === "error" && "text-destructive/90"
-                                  )}
-                                >
-                                  <div className="min-w-0 truncate">
-                                    <span className="text-muted-foreground/82">
-                                      {getActivityVerb("delegate", item.status)}
-                                    </span>{" "}
-                                    <span>{item.name}</span>
-                                    {childTools.length ? (
-                                      <span className="text-muted-foreground/68"> {childTools.length} 个工具</span>
-                                    ) : null}
-                                  </div>
-                                </div>
-                              </div>
-                            );
-                          }
-
-                          if (item.type === "tool") {
-                            const visibleToolName = getVisibleToolName(item);
-                            const displayTitle = getToolDisplayTitle(
-                              item,
-                              visibleToolName
-                            );
-                            const action = getToolAction(visibleToolName);
-                            const verb = getActivityVerb(
-                              action,
-                              item.status,
-                              visibleToolName
-                            );
-                            const displayText = getToolDisplayText(
-                              displayTitle,
-                              visibleToolName
-                            );
-                            const summaryText =
-                              roundSummaryByFirstActivityId.get(item.id);
-                            return (
-                              <div key={item.id} className="space-y-1">
-                                {summaryText ? (
-                                  <div className="pl-5.5 text-[10px] leading-4.5 text-muted-foreground/75">
-                                    {summaryText}
-                                  </div>
-                                ) : null}
-                                <div
-                                  className={cn(
-                                    "app-tool-row rounded-[14px] px-3 py-2 text-[12px] leading-5 text-foreground/82",
-                                    item.status === "error" && "text-destructive/90"
-                                  )}
-                                >
-                                  <div className="min-w-0 truncate">
-                                    <span className="text-muted-foreground/82">{verb}</span>{" "}
-                                    <span className="font-mono text-foreground/88">{displayText}</span>
-                                    {item.errorText ? (
-                                      <span className="text-destructive/90"> {item.errorText}</span>
-                                    ) : null}
-                                  </div>
-                                </div>
-                              </div>
-                            );
-                          }
-
-                          return (
-                            <Message key={item.id} from={item.role}>
-                              <MessageContent>
-                                <MessageResponse>{item.content}</MessageResponse>
-                                {item.images?.length ? (
-                                  <div className="grid gap-3 pt-2">
-                                    {item.images.map((img, index) => (
-                                      <Image
-                                        key={`${item.id}-${index}`}
-                                        {...img}
-                                        alt=""
-                                      />
-                                    ))}
-                                  </div>
-                                ) : null}
-                                {item.role === "assistant" && item.usage ? (
-                                  <div className="mt-3.5 flex flex-wrap items-center gap-2 text-[10px] text-muted-foreground/80">
-                                    <Badge
-                                      variant="secondary"
-                                      className="rounded-full border border-amber-200/70 bg-amber-50/80 px-2 py-0.5 text-[10px] text-amber-700 dark:border-amber-900/50 dark:bg-amber-950/30 dark:text-amber-300"
-                                    >
-                                      In {formatUsageTokens(item.usage.inputTokens)}
-                                    </Badge>
-                                    <Badge
-                                      variant="secondary"
-                                      className="rounded-full border border-emerald-200/70 bg-emerald-50/80 px-2 py-0.5 text-[10px] text-emerald-700 dark:border-emerald-900/50 dark:bg-emerald-950/30 dark:text-emerald-300"
-                                    >
-                                      Out {formatUsageTokens(item.usage.outputTokens)}
-                                    </Badge>
-                                    <Badge
-                                      variant="secondary"
-                                      className="rounded-full border border-stone-200/70 bg-stone-50/80 px-2 py-0.5 text-[10px] text-stone-700 dark:border-stone-700/60 dark:bg-stone-900/40 dark:text-stone-300"
-                                    >
-                                      Total {formatUsageTokens(item.usage.totalTokens)}
-                                    </Badge>
-                                    <span className="text-[10px] text-muted-foreground/80">
-                                      Cost{" "}
-                                      {formatUsageCost(
-                                        item.usage,
-                                        item.modelId,
-                                        item.usageCostUSD
-                                      )}
-                                    </span>
-                                  </div>
-                                ) : null}
-                              </MessageContent>
-                            </Message>
-                          );
-                        })
-                      )}
-                    </ConversationContent>
-                    <ConversationScrollButton />
-                  </Conversation>
-                </CardContent>
-
-                <CardFooter className="px-0 py-3">
-                  <PromptInputProvider initialInput="">
-                    <div className={cn(CHAT_COLUMN_CLASS)}>
-                      <div
-                        className={cn(
-                          "app-input-shell app-frosted overflow-hidden",
-                          activePlan ? "rounded-[18px]" : "rounded-[16px]",
-                        )}
-                      >
-                        {activePlan ? (
-                          <Plan
-                            {...activePlan}
-                            maxVisibleTodos={2}
-                            showProgress
-                            className="w-full rounded-none border-0 border-b border-border/45 bg-transparent py-0 shadow-none"
-                          />
-                        ) : null}
-
-                        {queuedSubmissionPreview || guideBanner ? (
-                          <div
-                            className={cn(
-                              "w-full border-b border-border/40 bg-transparent",
-                              activePlan ? "" : "",
-                            )}
-                          >
-                            {queuedSubmissionPreview ? (
-                              <div className="flex w-full flex-wrap items-center justify-between gap-2 px-5 py-3 text-[12px] text-muted-foreground">
-                                <div className="flex min-w-0 flex-1 items-center gap-2">
-                                  <LoaderCircleIcon className="size-3.5 animate-spin" />
-                                  <span className="truncate">
-                                    {summarizeQueuedSubmission(queuedSubmissionPreview)}
-                                  </span>
-                                </div>
-                                <PromptGuideButton
-                                  disabled={!canStartConversation}
-                                  onClick={() => void promoteQueuedSubmissionToGuide()}
-                                />
-                              </div>
-                            ) : null}
-
-                            {guideBanner ? (
-                              <div
-                                className={cn(
-                                  "flex w-full flex-wrap items-center justify-between gap-2 px-5 py-3 text-[12px] text-muted-foreground",
-                                  queuedSubmissionPreview ? "border-t border-border/35" : "",
-                                )}
-                              >
-                                <div className="flex min-w-0 flex-1 items-center gap-2">
-                                  <SparklesIcon className="size-3.5 shrink-0 text-primary/80" />
-                                  <span className="truncate">
-                                    {guideBanner.text}
-                                  </span>
-                                </div>
-                                {queuedSubmissionPreview ? (
-                                  <Button
-                                    type="button"
-                                    variant="ghost"
-                                    size="sm"
-                                    onClick={() => void promoteQueuedSubmissionToGuide()}
-                                    className="h-auto shrink-0 px-0 py-0 text-[11px] text-foreground/75 shadow-none transition-colors hover:bg-transparent hover:text-foreground"
-                                  >
-                                    转为引导
-                                  </Button>
-                                ) : null}
-                              </div>
-                            ) : null}
-                          </div>
-                        ) : null}
-
-                        <PromptInput
-                          className={cn(
-                            "border-0 bg-transparent p-0 shadow-none",
-                            activePlan || queuedSubmissionPreview || guideBanner
-                              ? "rounded-none"
-                              : "rounded-[16px]",
-                          )}
-                          globalDrop={canStartConversation}
-                          multiple
-                          onSubmit={handleChatSubmit}
-                        >
-                          <PromptInputAttachmentsDisplay />
-                          <PromptInputBody>
-                            <FileMentionTextarea
-                              workspaceTree={desktopWorkspace?.tree ?? []}
-                              workspaceRoot={workspaceRoot}
-                              lastSubmittedMessage={lastSubmittedMessage}
-                              className="min-h-[64px] rounded-none border-0 bg-transparent px-5 py-3.5 text-[14px] leading-6 shadow-none focus-visible:ring-0"
-                              placeholder={
-                                canStartConversation || !shouldShowEmptyThreadHint
-                                  ? "输入 @ 选择文件或技能，然后继续描述你的需求"
-                                  : "请先创建或选择一个线程"
+        <div className="app-shell flex h-full min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-transparent text-foreground">
+          <main className="flex h-full min-h-0 min-w-0 flex-1 overflow-hidden">
+            <WorkspacePageLayout
+              terminalExpanded={terminalExpanded}
+              header={
+                <WorkspaceHeaderBar
+                  chatColumnClassName={CHAT_COLUMN_CLASS}
+                  title={activeThreadRecord?.title ?? "Untitled thread"}
+                  workspaceLabel={activeWorkspaceLabel}
+                  updatedLabel={
+                    activeThreadRecord?.updatedAt
+                      ? formatRelativeUpdatedAt(activeThreadRecord.updatedAt)
+                      : "just now"
+                  }
+                  workspaceBranches={workspaceBranches}
+                  workspaceBranchLoading={workspaceBranchLoading}
+                  onOpenSearch={() => setWorkspaceSearchOpen(true)}
+                  onSelectBranch={handleHeaderBranchChange}
+                  onCreateBranch={handleCreateBranch}
+                  onOpenGitDialog={() => setGitDialogOpen(true)}
+                  onPushWorkspace={handlePushWorkspace}
+                />
+              }
+              content={
+                <WorkspaceConversationPanel
+                  chatColumnClassName={CHAT_COLUMN_CLASS}
+                >
+                  {isHydratingThread ? (
+                    <ThreadHistoryLoadingState />
+                  ) : items.length === 0 ? (
+                    <></>
+                  ) : (
+                    items.map((item) => {
+                      if (item.type === "thinking") {
+                        if (item.status === "done" && !item.content.trim()) {
+                          return null;
+                        }
+                        return (
+                          <div key={item.id} className="pl-0.5">
+                            <Reasoning
+                              isStreaming={item.status === "pending"}
+                              open={reasoningOpenState[item.id] ?? false}
+                              onOpenChange={(open) =>
+                                setReasoningOpenState((previous) => ({
+                                  ...previous,
+                                  [item.id]: open,
+                                }))
                               }
-                              readOnly={!canStartConversation}
-                            />
-                          </PromptInputBody>
-                          {shouldShowEmptyThreadHint ? (
-                            <div className="border-border/35 border-t px-5 py-2.5 text-[12px] text-muted-foreground">
-                              {chatDisabledReason}
+                              className="mt-0"
+                            >
+                              <ReasoningTrigger
+                                className="min-h-0 border-0 bg-transparent px-0 py-0 text-[11px] font-normal text-muted-foreground shadow-none hover:bg-transparent hover:text-foreground/80"
+                                getThinkingMessage={(streaming) =>
+                                  streaming ? "正在思考" : "已思考"
+                                }
+                              />
+                              {item.content ? (
+                                <ReasoningContent
+                                  showDivider={false}
+                                  className="mt-0.5 border-l border-border/35 px-0 py-0 pl-2.5 text-[11px] leading-5 text-muted-foreground shadow-none"
+                                >
+                                  {item.content}
+                                </ReasoningContent>
+                              ) : null}
+                            </Reasoning>
+                          </div>
+                        );
+                      }
+
+                      if (item.type === "tool" && item.parentToolCallId) {
+                        return null;
+                      }
+
+                      if (item.type === "agent") {
+                        const childTools = items.filter(
+                          (
+                            entry,
+                          ): entry is Extract<ChatItem, { type: "tool" }> =>
+                            entry.type === "tool" &&
+                            entry.parentToolCallId === item.parentToolCallId,
+                        );
+                        const summaryText = roundSummaryByFirstActivityId.get(
+                          item.id,
+                        );
+                        return (
+                          <div key={item.id} className="space-y-1">
+                            {summaryText ? (
+                              <div className="pl-5.5 text-[10px] leading-4.5 text-muted-foreground/75">
+                                {summaryText}
+                              </div>
+                            ) : null}
+                            <div
+                              className={cn(
+                                "app-tool-row rounded-[14px] px-3 py-2 text-[12px] leading-5 text-foreground/82",
+                                item.status === "error" &&
+                                  "text-destructive/90",
+                              )}
+                            >
+                              <div className="min-w-0 truncate">
+                                <span className="text-muted-foreground/82">
+                                  {getActivityVerb("delegate", item.status)}
+                                </span>{" "}
+                                <span>{item.name}</span>
+                                {childTools.length ? (
+                                  <span className="text-muted-foreground/68">
+                                    {" "}
+                                    {childTools.length} 个工具
+                                  </span>
+                                ) : null}
+                              </div>
                             </div>
-                          ) : !model ? (
-                            <div className="border-border/35 border-t px-5 py-2.5 text-[12px] text-muted-foreground">
-                              请先选择模型，然后再发送消息。
+                          </div>
+                        );
+                      }
+
+                      if (item.type === "tool") {
+                        const visibleToolName = getVisibleToolName(item);
+                        const displayTitle = getToolDisplayTitle(
+                          item,
+                          visibleToolName,
+                        );
+                        const action = getToolAction(visibleToolName);
+                        const verb = getActivityVerb(
+                          action,
+                          item.status,
+                          visibleToolName,
+                        );
+                        const displayText = getToolDisplayText(
+                          displayTitle,
+                          visibleToolName,
+                        );
+                        const summaryText = roundSummaryByFirstActivityId.get(
+                          item.id,
+                        );
+                        return (
+                          <div key={item.id} className="space-y-1">
+                            {summaryText ? (
+                              <div className="pl-5.5 text-[10px] leading-4.5 text-muted-foreground/75">
+                                {summaryText}
+                              </div>
+                            ) : null}
+                            <div
+                              className={cn(
+                                "app-tool-row rounded-[14px] px-3 py-2 text-[12px] leading-5 text-foreground/82",
+                                item.status === "error" &&
+                                  "text-destructive/90",
+                              )}
+                            >
+                              <div className="min-w-0 truncate">
+                                <span className="text-muted-foreground/82">
+                                  {verb}
+                                </span>{" "}
+                                <span className="font-mono text-foreground/88">
+                                  {displayText}
+                                </span>
+                                {item.errorText ? (
+                                  <span className="text-destructive/90">
+                                    {" "}
+                                    {item.errorText}
+                                  </span>
+                                ) : null}
+                              </div>
                             </div>
-                          ) : null}
-                          <PromptInputFooter className="flex-wrap border-border/40 border-t bg-transparent px-5 py-2.5">
-                            <div className="flex min-w-0 flex-1 items-center gap-2 max-sm:w-full">
-                              <ModelSelector open={modelDialogOpen} onOpenChange={setModelDialogOpen}>
-                                <ModelSelectorTrigger asChild>
-                                  <Button
-                                    variant="outline"
-                                    className="app-control h-8 min-w-0 max-w-[190px] justify-between gap-2 rounded-[10px] border-0 px-2.5 text-[11px] shadow-none max-sm:w-full max-sm:max-w-none"
-                                  >
-                                    <div className="flex min-w-0 items-center gap-2">
-                                      {selectedModelData?.chefSlug ? (
-                                        <ModelSelectorLogo
-                                          className="size-3.5 shrink-0"
-                                          provider={selectedModelData.chefSlug}
-                                        />
-                                      ) : null}
-                                      <span className="truncate">
-                                        {selectedModelData?.name ?? "选择模型"}
-                                      </span>
-                                    </div>
-                                    <ChevronDownIcon className="size-3.5 shrink-0 text-muted-foreground" />
-                                  </Button>
-                                </ModelSelectorTrigger>
-                              </ModelSelector>
-                              <Tooltip>
-                                <TooltipTrigger asChild>
-                                  <Button
-                                    type="button"
-                                    variant="outline"
-                                    onClick={() => setTerminalExpanded((value) => !value)}
-                                    className="app-control h-8 w-8 shrink-0 rounded-[10px] border-0 px-0 shadow-none"
-                                    aria-label={terminalExpanded ? "隐藏终端" : "显示终端"}
-                                  >
-                                    <SquareTerminalIcon className="size-3.5" />
-                                  </Button>
-                                </TooltipTrigger>
-                                <TooltipContent side="top" sideOffset={8}>
-                                  {terminalExpanded ? "隐藏终端" : "显示终端"}
-                                </TooltipContent>
-                              </Tooltip>
-                            </div>
-                            <PromptInputTools className="shrink-0 gap-2 max-sm:ml-auto">
-                              <PromptInputActionMenu>
-                                <PromptInputActionMenuTrigger disabled={!canStartConversation} />
-                                <PromptInputActionMenuContent>
-                                  <PromptInputActionAddAttachments />
-                                </PromptInputActionMenuContent>
-                              </PromptInputActionMenu>
-                            </PromptInputTools>
-                            <PromptInputSubmit
-                              className="app-control size-9 shrink-0 rounded-[10px] border-0 shadow-none"
-                              disabled={!canSubmitChat && status !== "streaming"}
-                              onStop={handleStop}
-                              status={status}
-                            />
-                          </PromptInputFooter>
-                        </PromptInput>
+                          </div>
+                        );
+                      }
+
+                      return (
+                        <Message key={item.id} from={item.role}>
+                          <MessageContent>
+                            <MessageResponse>{item.content}</MessageResponse>
+                            {item.images?.length ? (
+                              <div className="grid gap-3 pt-2">
+                                {item.images.map((img, index) => (
+                                  <Image
+                                    key={`${item.id}-${index}`}
+                                    {...img}
+                                    alt=""
+                                  />
+                                ))}
+                              </div>
+                            ) : null}
+                            {item.role === "assistant" && item.usage ? (
+                              <div className="mt-3.5 flex flex-wrap items-center gap-2 text-[10px] text-muted-foreground/80">
+                                <Badge
+                                  variant="secondary"
+                                  className="rounded-full border border-amber-200/70 bg-amber-50/80 px-2 py-0.5 text-[10px] text-amber-700 dark:border-amber-900/50 dark:bg-amber-950/30 dark:text-amber-300"
+                                >
+                                  In {formatUsageTokens(item.usage.inputTokens)}
+                                </Badge>
+                                <Badge
+                                  variant="secondary"
+                                  className="rounded-full border border-emerald-200/70 bg-emerald-50/80 px-2 py-0.5 text-[10px] text-emerald-700 dark:border-emerald-900/50 dark:bg-emerald-950/30 dark:text-emerald-300"
+                                >
+                                  Out{" "}
+                                  {formatUsageTokens(item.usage.outputTokens)}
+                                </Badge>
+                                <Badge
+                                  variant="secondary"
+                                  className="rounded-full border border-stone-200/70 bg-stone-50/80 px-2 py-0.5 text-[10px] text-stone-700 dark:border-stone-700/60 dark:bg-stone-900/40 dark:text-stone-300"
+                                >
+                                  Total{" "}
+                                  {formatUsageTokens(item.usage.totalTokens)}
+                                </Badge>
+                                <span className="text-[10px] text-muted-foreground/80">
+                                  Cost{" "}
+                                  {formatUsageCost(
+                                    item.usage,
+                                    item.modelId,
+                                    item.usageCostUSD,
+                                  )}
+                                </span>
+                              </div>
+                            ) : null}
+                          </MessageContent>
+                        </Message>
+                      );
+                    })
+                  )}
+                </WorkspaceConversationPanel>
+              }
+              composer={
+                <WorkspaceComposerShell
+                  chatColumnClassName={CHAT_COLUMN_CLASS}
+                  activePlan={activePlan}
+                  queuedSubmissionPreview={queuedSubmissionPreview}
+                  queuedSubmissionSummary={
+                    queuedSubmissionPreview
+                      ? summarizeQueuedSubmission(queuedSubmissionPreview)
+                      : null
+                  }
+                  guideBanner={guideBanner}
+                  canStartConversation={canStartConversation}
+                  onPromoteQueuedSubmissionToGuide={() =>
+                    void promoteQueuedSubmissionToGuide()
+                  }
+                >
+                  <PromptInput
+                    className={cn(
+                      "border-0 bg-transparent p-0 shadow-none",
+                      activePlan || queuedSubmissionPreview || guideBanner
+                        ? "rounded-none"
+                        : "rounded-[16px]",
+                    )}
+                    globalDrop={canStartConversation}
+                    multiple
+                    onSubmit={handleChatSubmit}
+                  >
+                    <WorkspacePromptAttachments />
+                    <PromptInputBody>
+                      <FileMentionTextarea
+                        workspaceTree={desktopWorkspace?.tree ?? []}
+                        workspaceRoot={workspaceRoot}
+                        lastSubmittedMessage={lastSubmittedMessage}
+                        className="min-h-[64px] rounded-none border-0 bg-transparent px-5 py-3.5 text-[14px] leading-6 shadow-none focus-visible:ring-0"
+                        placeholder={
+                          canStartConversation || !shouldShowEmptyThreadHint
+                            ? "输入 @ 选择文件或技能，然后继续描述你的需求"
+                            : "请先创建或选择一个线程"
+                        }
+                        readOnly={!canStartConversation}
+                      />
+                    </PromptInputBody>
+                    {shouldShowEmptyThreadHint ? (
+                      <div className="border-border/35 border-t px-5 py-2.5 text-[12px] text-muted-foreground">
+                        {chatDisabledReason}
                       </div>
-                    </div>
-                  </PromptInputProvider>
-                </CardFooter>
-              </Card>
-              <BottomTerminalPanel
-                workspaceRoot={effectiveWorkspaceRoot}
-                isDesktopRuntime={isDesktopRuntime}
-                onOpenSystemTerminal={handleOpenWorkspaceTerminal}
-                expanded={terminalExpanded}
-                onExpandedChange={setTerminalExpanded}
-              />
-            </section>
+                    ) : !model ? (
+                      <div className="border-border/35 border-t px-5 py-2.5 text-[12px] text-muted-foreground">
+                        请先选择模型，然后再发送消息。
+                      </div>
+                    ) : null}
+                    <PromptInputFooter className="flex-wrap border-border/40 border-t bg-transparent px-5 py-2.5">
+                      <WorkspaceModelTerminalControls
+                        modelDialogOpen={modelDialogOpen}
+                        onModelDialogOpenChange={setModelDialogOpen}
+                        selectedModelData={selectedModelData ?? null}
+                        terminalExpanded={terminalExpanded}
+                        onToggleTerminal={() =>
+                          setTerminalExpanded((value) => !value)
+                        }
+                      />
+                      <PromptInputTools className="shrink-0 gap-2 max-sm:ml-auto">
+                        <PromptInputActionMenu>
+                          <PromptInputActionMenuTrigger
+                            disabled={!canStartConversation}
+                          />
+                          <PromptInputActionMenuContent>
+                            <PromptInputActionAddAttachments />
+                          </PromptInputActionMenuContent>
+                        </PromptInputActionMenu>
+                      </PromptInputTools>
+                      <PromptInputSubmit
+                        className="app-control size-9 shrink-0 rounded-[10px] border-0 shadow-none"
+                        disabled={!canSubmitChat && status !== "streaming"}
+                        onStop={handleStop}
+                        status={status}
+                      />
+                    </PromptInputFooter>
+                  </PromptInput>
+                </WorkspaceComposerShell>
+              }
+              terminal={
+                <BottomTerminalPanel
+                  workspaceRoot={effectiveWorkspaceRoot}
+                  isDesktopRuntime={isDesktopRuntime}
+                  onOpenSystemTerminal={handleOpenWorkspaceTerminal}
+                  expanded={terminalExpanded}
+                  onExpandedChange={setTerminalExpanded}
+                />
+              }
+            />
           </main>
         </div>
         <GitChangesDialog
