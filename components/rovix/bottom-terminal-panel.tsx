@@ -194,6 +194,13 @@ export function BottomTerminalPanel({
     [],
   );
 
+  const getSessionRecord = useCallback((path: string, sessionId: string) => {
+    const current = workspaceStatesRef.current[path];
+    return (
+      current?.sessions.find((item) => item.sessionId === sessionId) ?? null
+    );
+  }, []);
+
   const applyThemeToTerminal = useCallback(
     (sessionId: string) => {
       const terminal = terminalMapRef.current.get(sessionId);
@@ -284,24 +291,9 @@ export function BottomTerminalPanel({
     ],
   );
 
-  const setMountNode = useCallback(
-    (sessionId: string, node: HTMLDivElement | null) => {
-      if (!node) {
-        mountMapRef.current.delete(sessionId);
-        return;
-      }
-      const previousNode = mountMapRef.current.get(sessionId);
-      if (previousNode === node) {
-        return;
-      }
-      mountMapRef.current.set(sessionId, node);
-      void ensureTerminalInstance(sessionId);
-    },
-    [ensureTerminalInstance],
-  );
-
   const ensureSessionListener = useCallback(
     async (path: string, session: TerminalSessionRecord) => {
+      if (!terminalMapRef.current.has(session.sessionId)) return;
       if (unlistenMapRef.current.has(session.sessionId)) return;
       const unlisten = await listenDesktopTerminalOutput(
         session.sessionId,
@@ -328,6 +320,7 @@ export function BottomTerminalPanel({
   const hydrateSession = useCallback(
     async (path: string, session: TerminalSessionRecord) => {
       await ensureTerminalInstance(session.sessionId);
+      if (!terminalMapRef.current.has(session.sessionId)) return;
       await ensureSessionListener(path, session);
       const currentWorkspace = workspaceStatesRef.current[path];
       const currentSession =
@@ -356,6 +349,30 @@ export function BottomTerminalPanel({
       isExpanded,
       syncTerminalSize,
     ],
+  );
+
+  const setMountNode = useCallback(
+    (sessionId: string, node: HTMLDivElement | null) => {
+      if (!node) {
+        mountMapRef.current.delete(sessionId);
+        return;
+      }
+      const previousNode = mountMapRef.current.get(sessionId);
+      if (previousNode === node) {
+        return;
+      }
+      mountMapRef.current.set(sessionId, node);
+      const currentPath = workspaceRootRef.current;
+      const currentSession = currentPath
+        ? getSessionRecord(currentPath, sessionId)
+        : null;
+      if (currentPath && currentSession) {
+        void hydrateSession(currentPath, currentSession);
+        return;
+      }
+      void ensureTerminalInstance(sessionId);
+    },
+    [ensureTerminalInstance, getSessionRecord, hydrateSession],
   );
 
   const createSession = useCallback(
@@ -488,15 +505,11 @@ export function BottomTerminalPanel({
   useEffect(() => {
     if (!workspaceRoot) return;
     for (const session of workspaceState?.sessions ?? []) {
-      void ensureTerminalInstance(session.sessionId);
-      void ensureSessionListener(workspaceRoot, session);
+      if (mountMapRef.current.has(session.sessionId)) {
+        void hydrateSession(workspaceRoot, session);
+      }
     }
-  }, [
-    ensureSessionListener,
-    ensureTerminalInstance,
-    workspaceRoot,
-    workspaceState?.sessions,
-  ]);
+  }, [hydrateSession, workspaceRoot, workspaceState?.sessions]);
 
   useEffect(() => {
     for (const sessionId of terminalMapRef.current.keys()) {
