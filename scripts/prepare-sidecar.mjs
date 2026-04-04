@@ -8,16 +8,40 @@
  *   .next/static      → src-tauri/next-server/.next/static
  *   public/           → src-tauri/next-server/public  (if it exists)
  */
-import { cp, lstat, mkdir, readdir, readlink, rm } from "node:fs/promises";
+import { chmod, cp, copyFile, lstat, mkdir, readdir, readlink, rm } from "node:fs/promises";
 import { existsSync } from "node:fs";
+import { execFileSync } from "node:child_process";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const root = path.join(__dirname, "..");
 const target = path.join(root, "src-tauri/next-server");
+const runtimeTargetDir = path.join(root, "src-tauri/bin");
 const standaloneDir = path.join(root, ".next/standalone");
 const rootNodeModulesDir = path.join(root, "node_modules");
+
+const resolveBunBinary = () => {
+  const candidates = [];
+
+  try {
+    const resolved = execFileSync("bun", ["--print", "process.execPath"], {
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"],
+    }).trim();
+    if (resolved) candidates.push(resolved);
+  } catch {
+    // fall through to fixed-location probes
+  }
+
+  candidates.push(
+    "/opt/homebrew/bin/bun",
+    "/usr/local/bin/bun",
+    path.join(process.env.HOME ?? "", ".bun/bin/bun")
+  );
+
+  return candidates.find((candidate) => candidate && existsSync(candidate)) ?? null;
+};
 
 const resolveCopySource = (resolvedTarget) => {
   if (existsSync(resolvedTarget)) {
@@ -78,14 +102,25 @@ if (existsSync(target)) {
 }
 await mkdir(target, { recursive: true });
 
-// 1. Copy standalone output (server.js + minimal node_modules)
+// 1. Copy the minimal runtime subset from standalone output.
+// Next.js should only need server.js, package.json, .next, and node_modules at runtime.
+// Copying the whole standalone root is dangerous here because our current NFT trace is
+// over-broad and can pull the entire repository (including src-tauri build outputs) in.
 if (!existsSync(standaloneDir)) {
   console.error(
     "ERROR: .next/standalone not found. Run `bun run build` first."
   );
   process.exit(1);
 }
-await cp(standaloneDir, target, { recursive: true });
+
+const standaloneEntries = ["server.js", "package.json", ".next", "node_modules"];
+for (const entry of standaloneEntries) {
+  const source = path.join(standaloneDir, entry);
+  if (!existsSync(source)) continue;
+  const destination = path.join(target, entry);
+  await cp(source, destination, { recursive: true, force: true });
+}
+
 console.log("Materializing symlinks in standalone output…");
 await materializeSymlinks(target);
 
@@ -124,7 +159,22 @@ for (const pkg of nativePackages) {
   await cp(src, dest, { recursive: true, force: true });
   console.log(`  ✓ ${pkg}`);
 }
-// 5. Write .env into standalone from environment variables (injected by CI secrets).
+
+// 5. Bundle a Bun runtime so the shipped desktop app does not depend on the
+// user's machine having Node.js or Bun installed.
+const bunBinary = resolveBunBinary();
+if (!bunBinary) {
+  console.error("ERROR: Could not resolve a Bun runtime to bundle into the desktop app.");
+  console.error("Install Bun on the build machine before running the desktop build.");
+  process.exit(1);
+}
+
+await mkdir(runtimeTargetDir, { recursive: true });
+await copyFile(bunBinary, path.join(runtimeTargetDir, "bun"));
+await chmod(path.join(runtimeTargetDir, "bun"), 0o755);
+console.log(`  ✓ bundled bun runtime from ${bunBinary}`);
+
+// 6. Write .env into standalone from environment variables (injected by CI secrets).
 // This lets the bundled app run without users needing to configure anything.
 const envVars = ["OPENROUTER_API_KEY"];
 const envLines = envVars

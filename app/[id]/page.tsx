@@ -146,9 +146,12 @@ const formatRelativeUpdatedAt = (updatedAt: number) => {
   return `${diffDays}d ago`;
 };
 
-const summarizeQueuedSubmission = (submission: QueuedSubmission) => {
-  if (submission.text.trim()) return submission.text.trim();
-  const firstFilename = submission.files.find((file) => file.filename)?.filename;
+const summarizeQueuedSubmission = (submission: {
+  text?: string;
+  files?: Array<{ filename?: string | null } | null>;
+}) => {
+  if (submission.text?.trim()) return submission.text.trim();
+  const firstFilename = submission.files?.find((file) => file?.filename)?.filename;
   if (firstFilename) return firstFilename;
   return "待发送消息";
 };
@@ -209,19 +212,19 @@ const models = [
   },
   {
     id: "openrouter/minimax/minimax-m2.7",
-    name: "minimax 2.7",
+    name: "MiniMax 2.7",
     chef: "MiniMax",
     chefSlug: "minimax",
     providers: ["openrouter"],
   },
   {
     id: "openrouter/google/gemini-3.1-flash-lite-preview",
-    name: "Gemini 3.1 flash (Preview)",
+    name: "Gemini 3.1 Flash Lite (Preview)",
     chef: "Google",
     chefSlug: "google",
     providers: ["openrouter"],
   },
-];
+] as const;
 
 const createId = () => `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 const createThreadId = () =>
@@ -710,11 +713,17 @@ const getComputerUseToolSummary = (
     return keys ?? "hotkey";
   }
 
-  if (name === "computer_use_process_status" || name === "computer_use_restart_process") {
+  if (
+    name === "computer_use_process_status" ||
+    name === "computer_use_restart_process"
+  ) {
     return getString(args?.processName) ?? "process";
   }
 
-  if (name === "computer_use_get_process_logs" || name === "computer_use_get_process_errors") {
+  if (
+    name === "computer_use_get_process_logs" ||
+    name === "computer_use_get_process_errors"
+  ) {
     const processName = getString(args?.processName);
     return processName ? `${processName} logs` : "process logs";
   }
@@ -1078,27 +1087,69 @@ const getToolAction = (toolName: string): ActivityAction => {
 
 const getActivityVerb = (
   action: ActivityAction,
-  status: "pending" | "done" | "error"
+  status: "pending" | "done" | "error",
+  toolName?: string
 ) => {
-  const verb =
-    action === "browse"
-      ? "Browsing"
-      : action === "edit"
-        ? "Editing"
-          : action === "run"
-            ? "Running"
-            : action === "desktop"
-              ? "Using desktop"
-            : action === "search"
-              ? "Searching"
-            : action === "plan"
-              ? "Planning"
-              : action === "delegate"
-                ? "Delegating"
-                : "Processing";
-  if (status === "pending") return verb;
-  if (status === "done") return verb.replace(/ing$/, "ed");
-  return `${verb} failed`;
+  const normalizedToolName = toolName?.trim().toLowerCase() ?? "";
+
+  const baseVerb =
+    normalizedToolName === "read" || normalizedToolName === "cat"
+      ? "正在阅读"
+      : normalizedToolName === "list" ||
+          normalizedToolName === "glob" ||
+          normalizedToolName === "grep"
+        ? "正在浏览"
+        : action === "browse"
+          ? "正在浏览"
+          : action === "edit"
+            ? "正在编写"
+            : action === "run"
+              ? "正在运行"
+              : action === "desktop"
+                ? "正在操作桌面"
+                : action === "search"
+                  ? "正在搜索"
+                  : action === "plan"
+                    ? "正在规划"
+                    : action === "delegate"
+                      ? "正在委派"
+                      : "正在处理";
+
+  if (status === "error") {
+    return baseVerb.replace(/^正在/, "") + "失败";
+  }
+
+  return baseVerb;
+};
+
+const getToolDisplayText = (
+  displayTitle: { primary: string; secondary: string | null },
+  visibleToolName: string
+) => {
+  const normalizedToolName = visibleToolName.trim().toLowerCase();
+
+  if (
+    (normalizedToolName === "read" ||
+      normalizedToolName === "cat" ||
+      normalizedToolName === "list" ||
+      normalizedToolName === "glob" ||
+      normalizedToolName === "grep" ||
+      normalizedToolName === "edit" ||
+      normalizedToolName === "patch" ||
+      normalizedToolName === "write" ||
+      normalizedToolName === "writefiles" ||
+      normalizedToolName === "replace" ||
+      normalizedToolName === "mv" ||
+      normalizedToolName === "mkdir" ||
+      normalizedToolName === "chmod") &&
+    displayTitle.secondary
+  ) {
+    return displayTitle.secondary;
+  }
+
+  return displayTitle.secondary
+    ? `${displayTitle.primary} ${displayTitle.secondary}`
+    : displayTitle.primary;
 };
 
 const getToolPathTail = (item: Extract<ChatItem, { type: "tool" }>) => {
@@ -1559,8 +1610,6 @@ export default function Home() {
   const [modelDialogOpen, setModelDialogOpen] = useState(false);
   const [selectedAgent] = useState(DEFAULT_AGENT_ID);
   const [reasoningOpenState, setReasoningOpenState] = useState<Record<string, boolean>>({});
-  const [toolOpenState, setToolOpenState] = useState<Record<string, boolean>>({});
-  const previousToolStatusesRef = useRef<Record<string, "pending" | "done" | "error">>({});
   const previousThinkingStatusesRef = useRef<Record<string, "pending" | "done">>({});
   const params = useParams();
   const router = useRouter();
@@ -1732,29 +1781,6 @@ export default function Home() {
   }, [items]);
 
   useEffect(() => {
-    const currentStatuses: Record<string, "pending" | "done" | "error"> = {};
-    for (const item of items) {
-      if (item.type !== "tool" && item.type !== "agent") continue;
-      currentStatuses[item.id] = item.status;
-    }
-
-    setToolOpenState((previous) => {
-      const next = { ...previous };
-      let changed = false;
-
-      for (const id of Object.keys(currentStatuses)) {
-        if (!(id in next)) {
-          next[id] = false;
-          changed = true;
-        }
-      }
-
-      previousToolStatusesRef.current = currentStatuses;
-      return changed ? next : previous;
-    });
-  }, [items]);
-
-  useEffect(() => {
     const currentStatuses: Record<string, "pending" | "done"> = {};
     for (const item of items) {
       if (item.type !== "thinking") continue;
@@ -1848,8 +1874,6 @@ export default function Home() {
   });
 
   const resetThreadUiChrome = useCallback(() => {
-    setToolOpenState({});
-    previousToolStatusesRef.current = {};
     setReasoningOpenState({});
     previousThinkingStatusesRef.current = {};
     setThreadSessionError(null);
@@ -2165,16 +2189,6 @@ export default function Home() {
                                 entry.type === "tool" &&
                                 entry.parentToolCallId === item.parentToolCallId
                             );
-                            const runningCount = childTools.filter(
-                              (tool) => tool.status === "pending"
-                            ).length;
-                            const doneCount = childTools.filter(
-                              (tool) => tool.status === "done"
-                            ).length;
-                            const errorCount = childTools.filter(
-                              (tool) => tool.status === "error"
-                            ).length;
-                            const open = toolOpenState[item.id] ?? false;
                             const summaryText =
                               roundSummaryByFirstActivityId.get(item.id);
                             return (
@@ -2184,66 +2198,22 @@ export default function Home() {
                                     {summaryText}
                                   </div>
                                 ) : null}
-                                <Button
-                                  type="button"
-                                  variant="ghost"
-                                  onClick={() =>
-                                    setToolOpenState((previous) => ({
-                                      ...previous,
-                                      [item.id]: !open,
-                                    }))
-                                  }
+                                <div
                                   className={cn(
-                                    "app-tool-row h-auto w-full justify-start gap-2 rounded-[14px] px-2.5 py-2 text-left font-normal text-foreground/78 shadow-none hover:text-foreground",
-                                    open && "app-tool-row-open",
-                                    item.status === "error" &&
-                                      "text-destructive/80 hover:text-destructive"
+                                    "app-tool-row rounded-[14px] px-3 py-2 text-[12px] leading-5 text-foreground/82",
+                                    item.status === "error" && "text-destructive/90"
                                   )}
                                 >
-                                  <ChevronDownIcon
-                                    className={cn(
-                                      "mt-1 size-3.5 shrink-0 text-muted-foreground/75 transition-transform",
-                                      open && "rotate-180"
-                                    )}
-                                  />
-                                  <div className="min-w-0 pt-px">
-                                    <div className="flex items-center gap-1.5 text-[12px] leading-5">
-                                      <span className="truncate font-normal">
-                                        {getActivityVerb("delegate", item.status)}{" "}
-                                        {item.name}
-                                      </span>
-                                    </div>
-                                    <div className="flex items-center gap-1.5 text-[10px] text-muted-foreground/75">
-                                      <span>{childTools.length} child tools</span>
-                                      <span>·</span>
-                                      <span>{runningCount} running</span>
-                                      <span>·</span>
-                                      <span>{doneCount} completed</span>
-                                      {errorCount ? (
-                                        <>
-                                          <span>·</span>
-                                          <span className="text-destructive">
-                                            {errorCount} failed
-                                          </span>
-                                        </>
-                                      ) : null}
-                                    </div>
-                                  </div>
-                                </Button>
-                                {open ? (
-                                  <div className="app-tool-detail ml-3 space-y-1 px-3 py-2 text-[10px] leading-4.5 text-muted-foreground">
-                                    {item.content ? (
-                                      <div className="whitespace-pre-wrap text-muted-foreground">
-                                        {item.content}
-                                      </div>
-                                    ) : null}
-                                    {item.thinking ? (
-                                      <div className="whitespace-pre-wrap">
-                                        {item.thinking}
-                                      </div>
+                                  <div className="min-w-0 truncate">
+                                    <span className="text-muted-foreground/82">
+                                      {getActivityVerb("delegate", item.status)}
+                                    </span>{" "}
+                                    <span>{item.name}</span>
+                                    {childTools.length ? (
+                                      <span className="text-muted-foreground/68"> {childTools.length} 个工具</span>
                                     ) : null}
                                   </div>
-                                ) : null}
+                                </div>
                               </div>
                             );
                           }
@@ -2255,12 +2225,15 @@ export default function Home() {
                               visibleToolName
                             );
                             const action = getToolAction(visibleToolName);
-                            const verb = getActivityVerb(action, item.status);
-                            const resultCount = getResultCount(item.result);
-                            const runInfo = getRunInfo(item);
-                            const open = toolOpenState[item.id] ?? false;
-                            const standalonePreview = getToolStandalonePreview(item);
-                            const hideRawToolPayload = Boolean(standalonePreview);
+                            const verb = getActivityVerb(
+                              action,
+                              item.status,
+                              visibleToolName
+                            );
+                            const displayText = getToolDisplayText(
+                              displayTitle,
+                              visibleToolName
+                            );
                             const summaryText =
                               roundSummaryByFirstActivityId.get(item.id);
                             return (
@@ -2270,130 +2243,20 @@ export default function Home() {
                                     {summaryText}
                                   </div>
                                 ) : null}
-                                <Button
-                                  type="button"
-                                  variant="ghost"
-                                  onClick={() =>
-                                    setToolOpenState((previous) => ({
-                                      ...previous,
-                                      [item.id]: !open,
-                                    }))
-                                  }
+                                <div
                                   className={cn(
-                                    "group app-tool-row h-auto w-full justify-start gap-2 rounded-[14px] px-2.5 py-2 text-left font-normal text-foreground/78 shadow-none hover:text-foreground",
-                                    open && "app-tool-row-open",
-                                    item.status === "error" &&
-                                      "text-destructive/80 hover:text-destructive"
+                                    "app-tool-row rounded-[14px] px-3 py-2 text-[12px] leading-5 text-foreground/82",
+                                    item.status === "error" && "text-destructive/90"
                                   )}
                                 >
-                                  <ChevronDownIcon
-                                    className={cn(
-                                      "mt-1 size-3.5 shrink-0 text-muted-foreground/75 transition-transform",
-                                      open && "rotate-180"
-                                    )}
-                                  />
-                                  <div className="min-w-0 pt-px">
-                                    <div className="flex min-w-0 items-center gap-x-1.5 text-[12px] leading-5">
-                                      <span className="shrink-0 text-muted-foreground/80">
-                                        {verb}
-                                      </span>
-                                      <span className="shrink-0 font-mono text-foreground/86">
-                                        {displayTitle.primary}
-                                      </span>
-                                      {displayTitle.secondary ? (
-                                        <span className="min-w-0 truncate font-mono text-foreground/58">
-                                          {displayTitle.secondary}
-                                        </span>
-                                      ) : null}
-                                    </div>
-                                    <div className="mt-0.5 flex flex-wrap items-center gap-1.5 text-[10px] leading-4.5 text-muted-foreground/72">
-                                      {resultCount !== undefined ? (
-                                        <span>{resultCount} results</span>
-                                      ) : null}
-                                      {runInfo.durationMs !== undefined ? (
-                                        <span>
-                                          {(runInfo.durationMs / 1000).toFixed(1)}s
-                                        </span>
-                                      ) : null}
-                                      {runInfo.state ? <span>{runInfo.state}</span> : null}
-                                      {typeof item.costUSD === "number" ? (
-                                        <span>${(item.costUSD ?? 0).toFixed(4)}</span>
-                                      ) : null}
-                                      {item.errorText ? (
-                                        <span className="text-destructive">
-                                          {item.errorText}
-                                        </span>
-                                      ) : null}
-                                    </div>
-                                  </div>
-                                </Button>
-                                {open ? (
-                                  <div className="app-tool-detail ml-3 space-y-1.5 px-3 py-2 text-[10px]">
-                                    {!hideRawToolPayload ? (
-                                      <div className="space-y-0.5">
-                                        <div className="text-[9px] tracking-[0.08em] text-muted-foreground/60">
-                                          Args
-                                        </div>
-                                        <pre className="max-h-24 overflow-auto px-0 py-0 text-[9px] leading-4.5 text-muted-foreground/90">
-                                          {JSON.stringify(item.args ?? {}, null, 2)}
-                                        </pre>
-                                      </div>
-                                    ) : null}
-                                    {!hideRawToolPayload && item.steps?.length ? (
-                                      <div className="space-y-0.5">
-                                        <div className="text-[9px] tracking-[0.08em] text-muted-foreground/60">
-                                          Trace
-                                        </div>
-                                        {item.steps.slice(-6).map((step) => (
-                                          <div
-                                            key={step.id}
-                                            className={cn(
-                                              "px-0 py-0 text-[9px] leading-4.5",
-                                              getStepTone(step.status)
-                                            )}
-                                          >
-                                            <div className="flex flex-wrap items-center gap-x-2">
-                                              <span className="font-medium text-foreground/75">
-                                                {step.step}
-                                              </span>
-                                              {step.runState ? (
-                                                <span className="text-muted-foreground/70">
-                                                  {step.runState}
-                                                </span>
-                                              ) : null}
-                                              {step.durationMs ? (
-                                                <span className="text-muted-foreground/70">
-                                                  {(step.durationMs / 1000).toFixed(1)}s
-                                                </span>
-                                              ) : null}
-                                            </div>
-                                            {step.message ? (
-                                              <div className="whitespace-pre-wrap text-muted-foreground/80">
-                                                {step.message}
-                                              </div>
-                                            ) : null}
-                                          </div>
-                                        ))}
-                                      </div>
-                                    ) : null}
-                                    <ComputerUseToolPreview item={item} />
-                                    {standalonePreview ? (
-                                      <ToolResultPreview preview={standalonePreview} />
-                                    ) : null}
-                                    {!hideRawToolPayload && item.result ? (
-                                      <div className="space-y-0.5">
-                                        <div className="text-[9px] tracking-[0.08em] text-muted-foreground/60">
-                                          {isComputerUseTool(item.name)
-                                            ? "Raw result"
-                                            : "Result"}
-                                        </div>
-                                        <pre className="max-h-32 overflow-auto px-0 py-0 text-[9px] leading-4.5 text-muted-foreground/90">
-                                          {JSON.stringify(item.result, null, 2)}
-                                        </pre>
-                                      </div>
+                                  <div className="min-w-0 truncate">
+                                    <span className="text-muted-foreground/82">{verb}</span>{" "}
+                                    <span className="font-mono text-foreground/88">{displayText}</span>
+                                    {item.errorText ? (
+                                      <span className="text-destructive/90"> {item.errorText}</span>
                                     ) : null}
                                   </div>
-                                ) : null}
+                                </div>
                               </div>
                             );
                           }

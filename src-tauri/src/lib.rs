@@ -1,4 +1,5 @@
 use serde::Serialize;
+use rfd::{MessageDialog, MessageLevel};
 use std::{
   fs,
   path::{Path, PathBuf},
@@ -697,7 +698,12 @@ fn read_runtime_config() -> std::collections::HashMap<String, String> {
 
 /// Find the Node.js (or Bun) runtime binary, checking common macOS/Linux paths.
 #[cfg(not(debug_assertions))]
-fn find_node_binary() -> Option<PathBuf> {
+fn find_runtime_binary(resource_dir: &Path) -> Option<PathBuf> {
+  let bundled_bun = resource_dir.join("bin").join("bun");
+  if bundled_bun.exists() {
+    return Some(bundled_bun);
+  }
+
   let candidates = [
     // Homebrew (Apple Silicon)
     "/opt/homebrew/bin/bun",
@@ -715,6 +721,15 @@ fn find_node_binary() -> Option<PathBuf> {
     }
   }
   None
+}
+
+fn report_startup_failure(message: &str) {
+  eprintln!("{message}");
+  let _ = MessageDialog::new()
+    .set_title("Rovix 无法启动")
+    .set_description(message)
+    .set_level(MessageLevel::Error)
+    .show();
 }
 
 /// Claim a free TCP port from the OS (port 0 trick).
@@ -741,7 +756,7 @@ fn wait_for_server(addr: &str, timeout_secs: u64) -> bool {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-  tauri::Builder::default()
+  let app = tauri::Builder::default()
     .plugin(tauri_plugin_opener::init())
     .plugin(tauri_plugin_process::init())
     .manage(WorkspaceState(Mutex::new(None)))
@@ -803,15 +818,24 @@ pub fn run() {
       // ── Production build: spawn Next.js standalone server then open window ─
       #[cfg(not(debug_assertions))]
       {
-        let node_bin = find_node_binary().ok_or("Could not find node or bun – please install Node.js (https://nodejs.org) and restart the app.")?;
+        let resource_dir = app.path().resource_dir()?;
+        let runtime_bin = find_runtime_binary(&resource_dir).ok_or(
+          "Could not find a bundled or system Bun/Node runtime. Reinstall the app or install Bun/Node.js, then retry.",
+        )?;
 
         let port = find_free_port();
         let addr = format!("127.0.0.1:{port}");
         let server_url = format!("http://127.0.0.1:{port}");
 
-        let resource_dir = app.path().resource_dir()?;
         let server_dir = resource_dir.join("next-server");
         let server_js = server_dir.join("server.js");
+        if !server_js.exists() {
+          return Err(format!(
+            "Bundled Next.js server is missing: {}",
+            server_js.display()
+          )
+          .into());
+        }
 
         // Show a splash screen immediately while the server starts up so the
         // user always sees something rather than a blank OS window.
@@ -848,7 +872,7 @@ pub fn run() {
         // Read runtime config (API keys etc.) from ~/.coding-agent/config.json
         let runtime_config = read_runtime_config();
 
-        let mut server_cmd = std::process::Command::new(&node_bin);
+        let mut server_cmd = std::process::Command::new(&runtime_bin);
         server_cmd
           .arg(&server_js)
           .env("PORT", port.to_string())
@@ -931,6 +955,9 @@ pub fn run() {
 
       Ok(())
     })
-    .run(tauri::generate_context!())
-    .expect("error while running tauri application");
+    .run(tauri::generate_context!());
+
+  if let Err(error) = app {
+    report_startup_failure(&format!("{error}"));
+  }
 }
