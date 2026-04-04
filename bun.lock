@@ -102,7 +102,7 @@
     },
     "apps/site": {
       "name": "@rovix/site",
-      "version": "0.2.14",
+      "version": "0.2.17",
       "dependencies": {
         "hls.js": "^1.6.5",
         "react": "^18.3.1",
