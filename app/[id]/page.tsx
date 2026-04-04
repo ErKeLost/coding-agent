@@ -99,6 +99,7 @@ import {
   SidebarTrigger,
 } from "@/components/ui/sidebar";
 import { cn } from "@/lib/utils";
+import { modelSupportsImageInput } from "@/lib/model-capabilities";
 import {
   type DesktopWorkspaceNode,
   setStoredWorkspaceRoot,
@@ -1291,22 +1292,6 @@ const formatUsageCost = (
     minimumFractionDigits: 3,
     maximumFractionDigits: 3,
   }).format(computedCostUSD ?? 0);
-};
-
-const modelSupportsImageInput = (modelId?: string) => {
-  const id = (modelId ?? "").toLowerCase();
-  if (!id) return false;
-
-  return (
-    id.includes("gpt-4o") ||
-    id.includes("gpt-4.1") ||
-    id.includes("gpt-5") ||
-    id.includes("claude") ||
-    id.includes("gemini") ||
-    id.includes("glm-5v") ||
-    id.includes("glm-4.7") ||
-    id.includes("glm-5")
-  );
 };
 
 const dataUrlToGeneratedImage = (dataUrl: string, filename?: string) => {

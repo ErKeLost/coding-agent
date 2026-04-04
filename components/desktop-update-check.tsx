@@ -6,9 +6,96 @@ import { gooeyToast } from "goey-toast";
 import { isTauriDesktop } from "@/lib/desktop-workspace";
 
 const UPDATER_ENABLED = process.env.NEXT_PUBLIC_TAURI_UPDATER_ENABLED === "1";
+const CHUNK_RELOAD_GUARD_KEY = "desktop-chunk-reload-at";
+const CHUNK_RELOAD_COOLDOWN_MS = 30_000;
+
+const getErrorMessage = (value: unknown) => {
+  if (value instanceof Error) return value.message;
+  if (typeof value === "string") return value;
+  return "";
+};
+
+const isChunkLoadFailure = (message: string) => {
+  const normalized = message.toLowerCase();
+  return (
+    normalized.includes("chunkloaderror") ||
+    normalized.includes("failed to load chunk") ||
+    normalized.includes("loading chunk") ||
+    normalized.includes("/_next/static/chunks/")
+  );
+};
 
 export function DesktopUpdateCheck() {
   const hasCheckedRef = useRef(false);
+
+  useEffect(() => {
+    if (!isTauriDesktop()) {
+      return;
+    }
+
+    const recoverFromChunkFailure = () => {
+      let lastReloadAt = 0;
+      try {
+        lastReloadAt = Number(window.sessionStorage.getItem(CHUNK_RELOAD_GUARD_KEY) ?? "0");
+      } catch {
+        // Ignore storage errors.
+      }
+
+      if (Date.now() - lastReloadAt < CHUNK_RELOAD_COOLDOWN_MS) {
+        gooeyToast.error("界面资源加载失败", {
+          description: "检测到更新后的旧资源引用。请手动重启应用；如果只是前端资源未刷新，也可以先刷新界面。",
+          action: {
+            label: "刷新界面",
+            onClick: () => window.location.reload(),
+          },
+        });
+        return;
+      }
+
+      try {
+        window.sessionStorage.setItem(CHUNK_RELOAD_GUARD_KEY, String(Date.now()));
+      } catch {
+        // Ignore storage errors.
+      }
+
+      gooeyToast.info("检测到界面资源更新", {
+        description: "正在刷新界面以恢复最新资源。",
+        duration: 1800,
+      });
+
+      window.setTimeout(() => {
+        window.location.reload();
+      }, 120);
+    };
+
+    const handleWindowError = (event: ErrorEvent) => {
+      const message = event.message || getErrorMessage(event.error);
+      if (!isChunkLoadFailure(message)) {
+        return;
+      }
+
+      event.preventDefault();
+      recoverFromChunkFailure();
+    };
+
+    const handleUnhandledRejection = (event: PromiseRejectionEvent) => {
+      const message = getErrorMessage(event.reason);
+      if (!isChunkLoadFailure(message)) {
+        return;
+      }
+
+      event.preventDefault();
+      recoverFromChunkFailure();
+    };
+
+    window.addEventListener("error", handleWindowError);
+    window.addEventListener("unhandledrejection", handleUnhandledRejection);
+
+    return () => {
+      window.removeEventListener("error", handleWindowError);
+      window.removeEventListener("unhandledrejection", handleUnhandledRejection);
+    };
+  }, []);
 
   useEffect(() => {
     if (!UPDATER_ENABLED || !isTauriDesktop() || hasCheckedRef.current) {
@@ -76,11 +163,12 @@ export function DesktopUpdateCheck() {
                       } catch (error) {
                         gooeyToast.update(toastId, {
                           title: "自动重启失败",
-                          description:
-                            error instanceof Error
-                              ? error.message
-                              : "应用暂时无法自动重启，请手动退出后重新打开。",
+                          description: "更新已经安装，但应用暂时无法自动重启。可以先刷新界面；如果仍异常，请手动退出后重新打开。",
                           type: "error",
+                          action: {
+                            label: "刷新界面",
+                            onClick: () => window.location.reload(),
+                          },
                         });
 
                         if (process.env.NODE_ENV !== "production") {

@@ -1,127 +1,331 @@
+import { useEffect, useMemo, useState } from 'react';
+
 const heroVideoUrl =
   'https://d8j0ntlcm91z4.cloudfront.net/user_38xzZboKViGWJOttwIXH07lWA1P/hf_20260324_151826_c7218672-6e92-402c-9e45-f1e0f454bdc4.mp4';
 
-const releaseVersion = 'v0.2.14';
-const releaseUrl = 'https://github.com/ErKeLost/Rovix-Agent/releases/tag/v0.2.14';
-const macAppleSiliconUrl =
-  'https://github.com/ErKeLost/Rovix-Agent/releases/download/v0.2.14/Rovix_0.2.14_aarch64.dmg';
-const macIntelUrl =
-  'https://github.com/ErKeLost/Rovix-Agent/releases/download/v0.2.14/Rovix_0.2.14_x64.dmg';
+const owner = 'ErKeLost';
+const repo = 'Rovix-Agent';
+const fallbackReleasePage = `https://github.com/${owner}/${repo}/releases/latest`;
 
-const headerLinks = [
-  { label: 'Product', href: '#product' },
-  { label: 'Docs', href: '#docs' },
-  { label: 'Pricing', href: '#pricing' },
-  { label: 'Developers', href: '#developers' },
+type ReleaseAsset = {
+  name: string;
+  browser_download_url: string;
+};
+
+type LatestReleaseState = {
+  version: string;
+  pageUrl: string;
+  publishedAt?: string;
+  body?: string;
+  assets: ReleaseAsset[];
+};
+
+type DownloadTarget = {
+  label: string;
+  href: string;
+  note: string;
+  direct: boolean;
+};
+
+const formatReleaseDate = (value?: string) => {
+  if (!value) return 'Latest stable build';
+
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return 'Latest stable build';
+
+  return new Intl.DateTimeFormat('en-US', {
+    month: 'short',
+    day: 'numeric',
+    year: 'numeric',
+  }).format(date);
+};
+
+const matchAsset = (assets: ReleaseAsset[], predicates: Array<(name: string) => boolean>) => {
+  return (
+    assets.find((asset) => predicates.every((predicate) => predicate(asset.name.toLowerCase()))) ?? null
+  );
+};
+
+const getPlatform = () => {
+  if (typeof navigator === 'undefined') return 'unknown';
+  const platform = `${navigator.platform} ${navigator.userAgent}`.toLowerCase();
+
+  if (platform.includes('mac')) {
+    if (platform.includes('arm') || platform.includes('apple')) return 'mac-arm';
+    return 'mac-intel';
+  }
+
+  if (platform.includes('win')) return 'windows';
+  if (platform.includes('linux')) return 'linux';
+  return 'unknown';
+};
+
+const createFallbackTargets = (): DownloadTarget[] => [
+  {
+    label: 'macOS Apple Silicon',
+    href: fallbackReleasePage,
+    note: 'Open latest release',
+    direct: false,
+  },
+  {
+    label: 'macOS Intel',
+    href: fallbackReleasePage,
+    note: 'Open latest release',
+    direct: false,
+  },
+  {
+    label: 'Windows',
+    href: fallbackReleasePage,
+    note: 'Open latest release',
+    direct: false,
+  },
+  {
+    label: 'Linux',
+    href: fallbackReleasePage,
+    note: 'Open latest release',
+    direct: false,
+  },
 ];
 
-const platformLinks = [
-  { label: 'macOS Apple Silicon', href: macAppleSiliconUrl, direct: true },
-  { label: 'macOS Intel', href: macIntelUrl, direct: true },
-  { label: 'Windows', href: releaseUrl, direct: false },
-  { label: 'Linux', href: releaseUrl, direct: false },
-];
+const resolveTargets = (release: LatestReleaseState | null): DownloadTarget[] => {
+  if (!release) return createFallbackTargets();
+
+  const macArm = matchAsset(release.assets, [
+    (name) => name.endsWith('.dmg'),
+    (name) => name.includes('aarch64') || name.includes('arm64'),
+  ]);
+  const macIntel = matchAsset(release.assets, [
+    (name) => name.endsWith('.dmg'),
+    (name) => name.includes('x64') || name.includes('x86_64') || name.includes('intel'),
+  ]);
+  const windows =
+    matchAsset(release.assets, [
+      (name) => name.endsWith('.msi'),
+      (name) => name.includes('x64') || name.includes('x86_64') || name.includes('windows'),
+    ]) ??
+    matchAsset(release.assets, [
+      (name) => name.endsWith('.exe'),
+      (name) => name.includes('x64') || name.includes('x86_64') || name.includes('windows'),
+    ]);
+  const linux =
+    matchAsset(release.assets, [(name) => name.endsWith('.appimage')]) ??
+    matchAsset(release.assets, [(name) => name.endsWith('.deb')]) ??
+    matchAsset(release.assets, [(name) => name.endsWith('.rpm')]);
+
+  return [
+    {
+      label: 'macOS Apple Silicon',
+      href: macArm?.browser_download_url ?? release.pageUrl,
+      note: macArm ? 'Direct installer' : 'Open release assets',
+      direct: Boolean(macArm),
+    },
+    {
+      label: 'macOS Intel',
+      href: macIntel?.browser_download_url ?? release.pageUrl,
+      note: macIntel ? 'Direct installer' : 'Open release assets',
+      direct: Boolean(macIntel),
+    },
+    {
+      label: 'Windows',
+      href: windows?.browser_download_url ?? release.pageUrl,
+      note: windows ? 'Direct installer' : 'Open release assets',
+      direct: Boolean(windows),
+    },
+    {
+      label: 'Linux',
+      href: linux?.browser_download_url ?? release.pageUrl,
+      note: linux ? 'Direct installer' : 'Open release assets',
+      direct: Boolean(linux),
+    },
+  ];
+};
+
+const getPrimaryTarget = (targets: DownloadTarget[]) => {
+  const platform = getPlatform();
+
+  if (platform === 'mac-arm') {
+    return targets[0];
+  }
+  if (platform === 'mac-intel') {
+    return targets[1];
+  }
+  if (platform === 'windows') {
+    return targets[2];
+  }
+  if (platform === 'linux') {
+    return targets[3];
+  }
+
+  return targets[0] ?? targets[2] ?? targets[1];
+};
 
 export default function App() {
+  const [release, setRelease] = useState<LatestReleaseState | null>(null);
+  const [releaseError, setReleaseError] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const loadLatestRelease = async () => {
+      try {
+        const response = await fetch(`https://api.github.com/repos/${owner}/${repo}/releases/latest`, {
+          headers: {
+            Accept: 'application/vnd.github+json',
+          },
+        });
+
+        if (!response.ok) {
+          throw new Error('Failed to load latest release');
+        }
+
+        const payload = (await response.json()) as {
+          tag_name?: string;
+          html_url?: string;
+          published_at?: string;
+          body?: string;
+          assets?: Array<{ name?: string; browser_download_url?: string }>;
+        };
+
+        if (cancelled) return;
+
+        setRelease({
+          version: payload.tag_name?.trim() || 'Latest',
+          pageUrl: payload.html_url?.trim() || fallbackReleasePage,
+          publishedAt: payload.published_at,
+          body: payload.body,
+          assets: Array.isArray(payload.assets)
+            ? payload.assets
+                .filter(
+                  (asset): asset is { name: string; browser_download_url: string } =>
+                    typeof asset.name === 'string' && typeof asset.browser_download_url === 'string',
+                )
+                .map((asset) => ({
+                  name: asset.name,
+                  browser_download_url: asset.browser_download_url,
+                }))
+            : [],
+        });
+        setReleaseError(false);
+      } catch {
+        if (cancelled) return;
+        setReleaseError(true);
+      }
+    };
+
+    void loadLatestRelease();
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const targets = useMemo(() => resolveTargets(release), [release]);
+  const primaryTarget = useMemo(() => getPrimaryTarget(targets), [targets]);
+  const macTarget = targets[0] ?? primaryTarget;
+  const windowsTarget = targets[2] ?? primaryTarget;
+  const releaseLabel = release?.version ?? 'Latest release';
+  const releaseDateLabel = formatReleaseDate(release?.publishedAt);
+  const primaryLabel = releaseError ? 'Open latest release' : 'Latest stable build';
+  const releasePage = release?.pageUrl ?? fallbackReleasePage;
+
   return (
-    <main className="bg-[hsl(var(--background))] text-[hsl(var(--foreground))]">
-      <section className="relative isolate flex h-[100svh] max-h-[100vh] min-h-screen overflow-hidden bg-[hsl(var(--background))]">
-        <video
-          className="absolute inset-0 z-0 h-full w-full object-cover"
-          autoPlay
-          loop
-          muted
-          playsInline
-          preload="auto"
-          aria-hidden="true"
-        >
-          <source src={heroVideoUrl} type="video/mp4" />
-        </video>
+    <main className="site-shell">
+      <section className="hero-section">
+        <div className="hero-wash" aria-hidden="true" />
+        <div className="hero-grid" aria-hidden="true" />
 
-        <div className="absolute inset-0 z-[1] bg-black/42" aria-hidden="true" />
-        <div
-          className="absolute inset-x-0 bottom-0 z-[1] h-[44%] bg-gradient-to-t from-[rgba(4,6,12,0.96)] via-[rgba(4,6,12,0.56)] to-transparent"
-          aria-hidden="true"
-        />
-        <div
-          className="absolute inset-0 z-[1] bg-[radial-gradient(circle_at_18%_18%,rgba(255,255,255,0.12),transparent_24%),radial-gradient(circle_at_82%_20%,rgba(245,197,130,0.14),transparent_18%),radial-gradient(circle_at_50%_72%,rgba(124,154,255,0.12),transparent_28%)]"
-          aria-hidden="true"
-        />
+        <div className="hero-frame">
+          <a href={releasePage} target="_blank" rel="noreferrer" className="brand-lockup">
+            <img className="brand-logo" src="/logo.png" alt="Rovix logo" width="72" height="72" />
+            <span className="brand-copy">
+              <strong>Rovix</strong>
+              <span>AI coding workspace</span>
+            </span>
+          </a>
 
-        <div className="relative z-10 mx-auto flex w-full max-w-[76rem] flex-col px-4 pb-8 pt-4 sm:px-6 sm:pb-10 sm:pt-5 md:px-8 md:pb-12 md:pt-6">
-          <header className="animate-fade-rise mx-auto w-full max-w-[72rem]">
-            <nav className="header-shell flex items-center justify-between gap-4 rounded-[1.45rem] px-4 py-3 sm:px-5 md:px-6">
-              <a href={macAppleSiliconUrl} className="flex items-center gap-3 text-[hsl(var(--foreground))]">
-                <span className="text-[1.1rem] font-semibold tracking-[-0.03em]">Rovix</span>
-              </a>
-
-              <div className="hidden items-center gap-7 text-sm text-[hsl(var(--foreground-muted))] md:flex">
-                {headerLinks.map((link) => (
-                  <a key={link.label} href={link.href} className="header-link transition-colors duration-300 hover:text-[hsl(var(--foreground))]">
-                    {link.label}
-                  </a>
-                ))}
-              </div>
-
-              <a
-                href={macAppleSiliconUrl}
-                target="_blank"
-                rel="noreferrer"
-                className="header-download rounded-full px-4 py-2 text-sm font-medium transition-transform duration-300 hover:scale-[1.03] sm:px-5"
-              >
-                Download
-              </a>
-            </nav>
-          </header>
-
-          <div className="flex flex-1 items-center justify-center px-1 pb-6 pt-8 sm:px-3 sm:pb-8 sm:pt-10 md:pb-10 md:pt-14">
-            <div className="hero-stack mx-auto flex w-full max-w-[56rem] flex-col items-center text-center">
-              <p className="animate-fade-rise mb-5 text-[0.72rem] uppercase tracking-[0.34em] text-[hsl(var(--foreground-soft))] sm:mb-6">
-                Local-first AI coding workspace
+          <div className="hero-body">
+            <div className="hero-copy hero-copy-simple">
+              <p className="hero-kicker">Defaulting to dune light</p>
+              <h1 className="hero-heading hero-heading-simple">A calmer desktop for serious AI coding.</h1>
+              <p className="hero-description hero-description-simple">
+                Run agents, inspect files, steer plans, and ship patches in one warm, low-noise workspace built for long debugging sessions.
               </p>
 
-              <h1 className="animate-fade-rise hero-title max-w-[12ch] text-[clamp(3.6rem,8vw,7.2rem)] leading-[0.9] tracking-[-0.065em] text-[hsl(var(--foreground))]">
-                One place to
-                <br />
-                plan, patch, and ship.
-              </h1>
-
-              <p className="animate-fade-rise-delay mt-6 max-w-[44rem] text-balance text-[1rem] leading-[1.55] text-[hsl(var(--foreground-soft))] sm:text-[1.12rem]">
-                Plan, inspect, edit, and run your workspace in one quieter flow. Rovix keeps the whole coding loop close,
-                so you can move from idea to patch without losing context.
-              </p>
-
-              <div className="animate-fade-rise-delay-2 mt-10 flex flex-col items-center gap-3 sm:flex-row">
+              <div className="hero-actions hero-actions-simple">
                 <a
-                  href={macAppleSiliconUrl}
+                  href={macTarget.href}
                   target="_blank"
                   rel="noreferrer"
-                  className="hero-button inline-flex min-w-[13.5rem] items-center justify-center rounded-[1rem] px-6 py-3.5 text-sm font-semibold transition-transform duration-300 hover:scale-[1.02]"
+                  className="primary-download simple-download"
                 >
                   Download for Mac
                 </a>
                 <a
-                  href={releaseUrl}
+                  href={windowsTarget.href}
                   target="_blank"
                   rel="noreferrer"
-                  className="hero-outline inline-flex min-w-[13.5rem] items-center justify-center rounded-[1rem] px-6 py-3.5 text-sm font-semibold transition-colors duration-300"
+                  className="secondary-download simple-download"
                 >
                   Download for Windows
                 </a>
               </div>
 
-              <div id="platforms" className="animate-fade-rise-delay-2 mt-8 flex flex-wrap items-center justify-center gap-2.5 text-sm text-[hsl(var(--foreground-soft))]">
-                {platformLinks.map((platform) => (
+              <div className="release-meta release-meta-simple" aria-live="polite">
+                <span>{releaseLabel}</span>
+                <span className="meta-dot" aria-hidden="true">•</span>
+                <span>{releaseDateLabel}</span>
+                <span className="meta-dot" aria-hidden="true">•</span>
+                <span>{primaryLabel}</span>
+              </div>
+
+              <div className="platform-strip" aria-label="Available downloads">
+                {targets.map((target) => (
                   <a
-                    key={platform.label}
-                    href={platform.href}
+                    key={target.label}
+                    href={target.href}
                     target="_blank"
                     rel="noreferrer"
-                    className={platform.direct ? 'platform-pill' : 'platform-pill platform-pill-muted'}
+                    className={target.direct ? 'platform-pill' : 'platform-pill platform-pill-muted'}
                   >
-                    {platform.label}
+                    <span>{target.label}</span>
+                    <span>{target.note}</span>
                   </a>
                 ))}
+              </div>
+
+              {releaseError ? (
+                <p className="status-copy status-copy-simple">
+                  Release metadata is unavailable right now. Downloads fall back to the latest GitHub release page.
+                </p>
+              ) : null}
+
+              <a href={releasePage} target="_blank" rel="noreferrer" className="announcement-pill">
+                <span>Always latest</span>
+                <span className="announcement-muted">View release notes</span>
+              </a>
+            </div>
+
+            <div className="hero-preview" aria-hidden="true">
+              <div className="preview-card">
+                <div className="preview-toolbar">
+                  <span />
+                  <span />
+                  <span />
+                </div>
+                <div className="preview-copy">
+                  <p>Local-first workspace</p>
+                  <h2>Threads, tools, patches, one canvas.</h2>
+                </div>
+                <video
+                  className="preview-video"
+                  autoPlay
+                  loop
+                  muted
+                  playsInline
+                  preload="auto"
+                >
+                  <source src={heroVideoUrl} type="video/mp4" />
+                </video>
               </div>
             </div>
           </div>

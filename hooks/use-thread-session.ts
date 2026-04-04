@@ -4,7 +4,10 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import type { AppRouterInstance } from "next/dist/shared/lib/app-router-context.shared-runtime";
 import type { ReadonlyURLSearchParams } from "next/navigation";
 import type { ChatItem, PreviewLog } from "@/lib/stream-event-bus";
-import type { ThreadRecord } from "@/lib/thread-session";
+import {
+  LAST_ACTIVE_THREAD_STORAGE_KEY,
+  type ThreadRecord,
+} from "@/lib/thread-session";
 
 const PENDING_NEW_THREAD_STORAGE_KEY = "chat-pending-new-thread";
 
@@ -128,6 +131,20 @@ export function useThreadSession({
   }, [pendingNewThreadId]);
 
   useEffect(() => {
+    if (typeof window === "undefined") return;
+
+    try {
+      if (threadId) {
+        window.localStorage.setItem(LAST_ACTIVE_THREAD_STORAGE_KEY, threadId);
+      } else {
+        window.localStorage.removeItem(LAST_ACTIVE_THREAD_STORAGE_KEY);
+      }
+    } catch {
+      // Ignore storage errors.
+    }
+  }, [threadId]);
+
+  useEffect(() => {
     if (!threadId) {
       logWorkspaceDebug("hydrateThread:no-thread", {});
       setHydratedThreadId(null);
@@ -239,6 +256,16 @@ export function useThreadSession({
   useEffect(() => {
     if (!threadId || hydratedThreadId !== threadId) return;
 
+    const shouldPersistThread =
+      Boolean(activeThreadRecord) ||
+      Boolean(workspaceRoot) ||
+      items.length > 0 ||
+      Boolean(plan) ||
+      Boolean(previewUrl) ||
+      previewLogs.length > 0;
+
+    if (!shouldPersistThread) return;
+
     const timeout = window.setTimeout(() => {
       const latestUserMessage = [...items]
         .reverse()
@@ -275,6 +302,7 @@ export function useThreadSession({
     };
   }, [
     activeThreadRecord?.title,
+    activeThreadRecord,
     hydratedThreadId,
     items,
     plan,

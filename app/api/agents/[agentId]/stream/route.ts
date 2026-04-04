@@ -167,6 +167,90 @@ type AgentStreamRequest = {
   requestContext?: Record<string, unknown>;
 };
 
+type SystemLikeMessage = {
+  role?: unknown;
+  content?: unknown;
+};
+
+const isQwenModel = (modelId?: string) => {
+  const normalized = modelId?.trim().toLowerCase();
+  if (!normalized) return false;
+  return normalized.includes("qwen");
+};
+
+const normalizeSystemMessageContent = (value: unknown) => {
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    return trimmed || null;
+  }
+
+  if (!Array.isArray(value)) {
+    return null;
+  }
+
+  const text = value
+    .map((part) => {
+      if (!part || typeof part !== "object") {
+        return "";
+      }
+
+      const typedPart = part as { type?: unknown; text?: unknown };
+      if (typedPart.type === "text" && typeof typedPart.text === "string") {
+        return typedPart.text;
+      }
+
+      return "";
+    })
+    .join("\n")
+    .trim();
+
+  return text || null;
+};
+
+const normalizeQwenPrompt = <TMessage extends SystemLikeMessage>(args: {
+  messages: TMessage[];
+  systemMessages: TMessage[];
+}) => {
+  const extractedSystemContents: string[] = [];
+  const nonSystemMessages: TMessage[] = [];
+
+  for (const message of args.messages) {
+    if (message?.role === "system") {
+      const normalizedContent = normalizeSystemMessageContent(message.content);
+      if (normalizedContent) {
+        extractedSystemContents.push(normalizedContent);
+      }
+      continue;
+    }
+
+    nonSystemMessages.push(message);
+  }
+
+  const allSystemContents = [
+    ...args.systemMessages
+      .map((message) => normalizeSystemMessageContent(message?.content))
+      .filter((value): value is string => Boolean(value)),
+    ...extractedSystemContents,
+  ];
+
+  if (allSystemContents.length === 0) {
+    return {
+      messages: nonSystemMessages,
+      systemMessages: [] as TMessage[],
+    };
+  }
+
+  return {
+    messages: nonSystemMessages,
+    systemMessages: [
+      {
+        role: "system",
+        content: allSystemContents.join("\n\n"),
+      } as TMessage,
+    ],
+  };
+};
+
 const normalizeImageMessageParts = (messages: unknown) => {
   if (!Array.isArray(messages)) {
     return messages;
@@ -878,6 +962,7 @@ export async function POST(
           resource: "web",
         }
       : undefined);
+  const shouldNormalizeQwenPrompt = isQwenModel(payload.model);
 
   const startAgentStream = async (requestContextForAttempt: RequestContext) => {
     const streamResult = await agent.stream(messageInput as AgentStreamInput, {
@@ -886,6 +971,9 @@ export async function POST(
       providerOptions: tuning.providerOptions,
       memory,
       abortSignal: req.signal,
+      prepareStep: shouldNormalizeQwenPrompt
+        ? ({ messages, systemMessages }) => normalizeQwenPrompt({ messages, systemMessages })
+        : undefined,
       onIterationComplete: () => {
         if (!payload.threadId) return;
         const pendingSteers = consumeThreadSteers(payload.threadId);

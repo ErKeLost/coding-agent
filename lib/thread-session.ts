@@ -12,6 +12,8 @@ export type ThreadRecord = {
   workspaceRoot?: string | null;
 };
 
+export const LAST_ACTIVE_THREAD_STORAGE_KEY = "chat-last-active-thread";
+
 export type SerializablePlan = {
   title: string;
   todos: Array<{

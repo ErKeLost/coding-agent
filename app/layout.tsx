@@ -32,15 +32,20 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en" suppressHydrationWarning>
+    <html
+      lang="en"
+      suppressHydrationWarning
+      className="light"
+      data-color-theme="sand"
+    >
       <body
         className={`${geistSans.variable} ${geistMono.variable} ${spaceGrotesk.variable} antialiased transition-colors duration-300`}
         style={{
-          backgroundColor: "#0a0c11",
-          color: "#f4f7fb",
+          backgroundColor: "#f5efe5",
+          color: "#41352b",
         }}
       >
-        <ThemeProvider attribute="class" defaultTheme="system" enableSystem>
+        <ThemeProvider attribute="class" defaultTheme="light" enableSystem>
           {children}
           <DesktopUpdateCheck />
           <AppGooeyToaster />

@@ -1,6 +1,7 @@
 import { createTool } from '@mastra/core/tools';
 import { promises as fs } from 'node:fs';
 import { z } from 'zod';
+import { modelSupportsImageInput } from '@/lib/model-capabilities';
 import {
   HowOneResultSchema,
   loadText,
@@ -9,7 +10,6 @@ import {
   DEFAULT_READ_LIMIT,
   formatLineNumberedOutput,
   getWorkspaceFromToolContext,
-  modelSupportsImageInput,
   normalizeWorkspacePath,
   readPreviewAttachment,
   resolveWorkspaceFsPath,
