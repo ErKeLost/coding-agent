@@ -3,6 +3,14 @@ import type { NextConfig } from "next";
 const nextConfig: NextConfig = {
   output: "standalone",
   reactStrictMode: false,
+  outputFileTracingExcludes: {
+    "/*": [
+      "src-tauri/target/**/*",
+      "src-tauri/next-server/**/*",
+      "src-tauri/bin/**/*",
+      "desktop-dist/**/*",
+    ],
+  },
   serverExternalPackages: [
     "@mastra/fastembed",
     "fastembed",

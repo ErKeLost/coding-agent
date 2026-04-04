@@ -8,6 +8,7 @@ dist
 *.db-*
 .next
 .vercel
+src-tauri/bin/
 claude-code/*
 codex/*
 oh-my-opencode/*

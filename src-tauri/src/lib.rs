@@ -699,18 +699,24 @@ fn read_runtime_config() -> std::collections::HashMap<String, String> {
 /// Find the Node.js (or Bun) runtime binary, checking common macOS/Linux paths.
 #[cfg(not(debug_assertions))]
 fn find_runtime_binary(resource_dir: &Path) -> Option<PathBuf> {
+  let bundled_node = resource_dir.join("bin").join("node");
+  if bundled_node.exists() {
+    return Some(bundled_node);
+  }
+
   let bundled_bun = resource_dir.join("bin").join("bun");
   if bundled_bun.exists() {
     return Some(bundled_bun);
   }
 
   let candidates = [
+    // Homebrew / common Node locations first, since Next standalone targets Node.
+    "/opt/homebrew/bin/node",
+    "/usr/local/bin/node",
     // Homebrew (Apple Silicon)
     "/opt/homebrew/bin/bun",
-    "/opt/homebrew/bin/node",
     // Homebrew (Intel)
     "/usr/local/bin/bun",
-    "/usr/local/bin/node",
     // System
     "/usr/bin/node",
   ];

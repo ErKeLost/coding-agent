@@ -8,7 +8,7 @@
  *   .next/static      → src-tauri/next-server/.next/static
  *   public/           → src-tauri/next-server/public  (if it exists)
  */
-import { chmod, cp, copyFile, lstat, mkdir, readdir, readlink, rm } from "node:fs/promises";
+import { chmod, cp, copyFile, lstat, mkdir, readdir, readFile, readlink, rm } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { execFileSync } from "node:child_process";
 import path from "node:path";
@@ -21,20 +21,233 @@ const runtimeTargetDir = path.join(root, "src-tauri/bin");
 const standaloneDir = path.join(root, ".next/standalone");
 const rootNodeModulesDir = path.join(root, "node_modules");
 
-const shouldSkipRootNodeModulesEntry = (name) => {
-  return (
-    name === ".bin" ||
-    name === ".cache" ||
-    name === ".vite" ||
-    name === ".DS_Store"
-  );
+const packagePathSegments = (pkgName) =>
+  pkgName.startsWith("@") ? pkgName.split("/") : [pkgName];
+
+const packageDir = (baseDir, pkgName) =>
+  path.join(baseDir, ...packagePathSegments(pkgName));
+
+const readJson = async (filePath) => {
+  try {
+    return JSON.parse(await readFile(filePath, "utf8"));
+  } catch {
+    return null;
+  }
 };
 
-const resolveBunBinary = () => {
+const packageHasRuntimeFiles = async (dir) => {
+  if (!existsSync(dir)) return false;
+  const entries = await readdir(dir);
+  return entries.some((entry) => entry !== "package.json");
+};
+
+const dependencyNamesFromManifest = (manifest) => [
+  ...Object.keys(manifest?.dependencies ?? {}),
+  ...Object.keys(manifest?.optionalDependencies ?? {}),
+];
+
+const packageSourceCandidates = (pkgName) => [
+    packageDir(path.join(rootNodeModulesDir, ".bun", "node_modules"), pkgName),
+    packageDir(rootNodeModulesDir, pkgName),
+    packageDir(path.join(standaloneDir, "node_modules", ".bun", "node_modules"), pkgName),
+    packageDir(path.join(standaloneDir, "node_modules"), pkgName),
+  ];
+
+const listExternalizedPackages = async (dir) => {
+  if (!existsSync(dir)) return [];
+
+  const packages = [];
+  const entries = await readdir(dir, { withFileTypes: true });
+
+  for (const entry of entries) {
+    if (!entry.isDirectory()) continue;
+
+    if (entry.name.startsWith("@")) {
+      const scopeDir = path.join(dir, entry.name);
+      const scopeEntries = await readdir(scopeDir, { withFileTypes: true });
+      for (const scopeEntry of scopeEntries) {
+        if (!scopeEntry.isDirectory()) continue;
+        const manifest = await readJson(path.join(scopeDir, scopeEntry.name, "package.json"));
+        packages.push(manifest?.name ?? path.posix.join(entry.name, scopeEntry.name));
+      }
+      continue;
+    }
+
+    const manifest = await readJson(path.join(dir, entry.name, "package.json"));
+    packages.push(manifest?.name ?? entry.name);
+  }
+
+  return [...new Set(packages)];
+};
+
+const findBunPackageInstanceSource = async (pkgName, version) => {
+  const bunRoots = [
+    path.join(rootNodeModulesDir, ".bun"),
+    path.join(standaloneDir, "node_modules", ".bun"),
+  ];
+
+  for (const bunRoot of bunRoots) {
+    if (!existsSync(bunRoot)) continue;
+
+    const entries = await readdir(bunRoot, { withFileTypes: true });
+    for (const entry of entries) {
+      if (!entry.isDirectory()) continue;
+
+      const candidate = packageDir(path.join(bunRoot, entry.name, "node_modules"), pkgName);
+      if (!existsSync(candidate)) continue;
+
+      const manifest = await readJson(path.join(candidate, "package.json"));
+      if (manifest?.name === pkgName && (!version || manifest.version === version)) {
+        return candidate;
+      }
+    }
+  }
+
+  return null;
+};
+
+const copyPackageTree = async (sourceDir, destinationDir, seen = new Set()) => {
+  const manifest = await readJson(path.join(sourceDir, "package.json"));
+  const pkgName = manifest?.name ?? path.basename(destinationDir);
+  const pkgVersion = manifest?.version ?? "";
+  const key = `${pkgName}@${pkgVersion}:${destinationDir}`;
+
+  if (seen.has(key)) return;
+  seen.add(key);
+
+  await mkdir(path.dirname(destinationDir), { recursive: true });
+  await rm(destinationDir, { recursive: true, force: true });
+  await cp(sourceDir, destinationDir, {
+    recursive: true,
+    force: true,
+    dereference: true,
+  });
+};
+
+const copyNestedPackage = async (sourceDir, destinationDir) => {
+  await mkdir(path.dirname(destinationDir), { recursive: true });
+  await rm(destinationDir, { recursive: true, force: true });
+  await cp(sourceDir, destinationDir, {
+    recursive: true,
+    force: true,
+    dereference: true,
+  });
+};
+
+const patchLegacyNestedDeps = async (targetNodeModulesDir) => {
+  const minizlibSource = await findBunPackageInstanceSource("minizlib", "2.1.2");
+  const fsMinipassSource = await findBunPackageInstanceSource("fs-minipass", "2.1.0");
+  const tarSource = await findBunPackageInstanceSource("tar", "6.2.1");
+
+  if (minizlibSource) {
+    const minizlibDest = packageDir(targetNodeModulesDir, "minizlib");
+    await copyNestedPackage(minizlibSource, minizlibDest);
+    await copyNestedPackage(
+      packageDir(path.dirname(minizlibSource), "minipass"),
+      packageDir(path.join(minizlibDest, "node_modules"), "minipass")
+    );
+    await copyNestedPackage(
+      packageDir(path.dirname(minizlibSource), "yallist"),
+      packageDir(path.join(minizlibDest, "node_modules"), "yallist")
+    );
+  }
+
+  if (fsMinipassSource) {
+    const fsMinipassDest = packageDir(targetNodeModulesDir, "fs-minipass");
+    await copyNestedPackage(fsMinipassSource, fsMinipassDest);
+    await copyNestedPackage(
+      packageDir(path.dirname(fsMinipassSource), "minipass"),
+      packageDir(path.join(fsMinipassDest, "node_modules"), "minipass")
+    );
+  }
+
+  if (tarSource) {
+    const tarDest = packageDir(targetNodeModulesDir, "tar");
+    const tarDepRoot = path.dirname(tarSource);
+    await copyNestedPackage(tarSource, tarDest);
+    for (const depName of ["chownr", "mkdirp", "yallist", "minipass"]) {
+      const depSource = packageDir(tarDepRoot, depName);
+      if (!existsSync(depSource)) continue;
+      await copyNestedPackage(
+        depSource,
+        packageDir(path.join(tarDest, "node_modules"), depName)
+      );
+    }
+    if (fsMinipassSource) {
+      const nestedFsDest = packageDir(path.join(tarDest, "node_modules"), "fs-minipass");
+      await copyNestedPackage(fsMinipassSource, nestedFsDest);
+      await copyNestedPackage(
+        packageDir(path.dirname(fsMinipassSource), "minipass"),
+        packageDir(path.join(nestedFsDest, "node_modules"), "minipass")
+      );
+    }
+    if (minizlibSource) {
+      const nestedMinizlibDest = packageDir(path.join(tarDest, "node_modules"), "minizlib");
+      await copyNestedPackage(minizlibSource, nestedMinizlibDest);
+      await copyNestedPackage(
+        packageDir(path.dirname(minizlibSource), "minipass"),
+        packageDir(path.join(nestedMinizlibDest, "node_modules"), "minipass")
+      );
+      await copyNestedPackage(
+        packageDir(path.dirname(minizlibSource), "yallist"),
+        packageDir(path.join(nestedMinizlibDest, "node_modules"), "yallist")
+      );
+    }
+  }
+};
+
+const ensureRuntimeDependencies = async (targetNodeModulesDir, externalizedNodeModulesDir) => {
+  const queue = await listExternalizedPackages(externalizedNodeModulesDir);
+  const seen = new Set();
+
+  while (queue.length > 0) {
+    const pkgName = queue.shift();
+    if (!pkgName || seen.has(pkgName)) continue;
+    seen.add(pkgName);
+
+    const candidateDirs = packageSourceCandidates(pkgName).filter((candidate) => existsSync(candidate));
+    const sourceDir =
+      (await (async () => {
+        for (const candidate of candidateDirs) {
+          if (await packageHasRuntimeFiles(candidate)) {
+            return candidate;
+          }
+        }
+        return candidateDirs[0] ?? null;
+      })());
+
+    if (!sourceDir) {
+      console.warn(`  ⚠ Missing runtime package source for ${pkgName}`);
+      continue;
+    }
+
+    const destinationDir = packageDir(targetNodeModulesDir, pkgName);
+    const needsCopy = !(await packageHasRuntimeFiles(destinationDir));
+
+    if (needsCopy) {
+      await copyPackageTree(sourceDir, destinationDir);
+      console.log(`  ✓ runtime dep ${pkgName}`);
+    }
+
+    const manifest =
+      (await readJson(path.join(destinationDir, "package.json"))) ??
+      (await readJson(path.join(sourceDir, "package.json")));
+
+    const dependencyNames = dependencyNamesFromManifest(manifest);
+
+    for (const depName of dependencyNames) {
+      if (!seen.has(depName)) {
+        queue.push(depName);
+      }
+    }
+  }
+};
+
+const resolveNodeBinary = () => {
   const candidates = [];
 
   try {
-    const resolved = execFileSync("bun", ["--print", "process.execPath"], {
+    const resolved = execFileSync("which", ["node"], {
       encoding: "utf8",
       stdio: ["ignore", "pipe", "ignore"],
     }).trim();
@@ -44,9 +257,10 @@ const resolveBunBinary = () => {
   }
 
   candidates.push(
-    "/opt/homebrew/bin/bun",
-    "/usr/local/bin/bun",
-    path.join(process.env.HOME ?? "", ".bun/bin/bun")
+    process.execPath?.includes("/node") ? process.execPath : "",
+    "/opt/homebrew/bin/node",
+    "/usr/local/bin/node",
+    "/usr/bin/node"
   );
 
   return candidates.find((candidate) => candidate && existsSync(candidate)) ?? null;
@@ -103,27 +317,6 @@ const materializeSymlinks = async (dir) => {
   }
 };
 
-const copyRootNodeModulesSnapshot = async () => {
-  if (!existsSync(rootNodeModulesDir)) return;
-
-  const targetNodeModulesDir = path.join(target, "node_modules");
-  await mkdir(targetNodeModulesDir, { recursive: true });
-
-  const entries = await readdir(rootNodeModulesDir, { withFileTypes: true });
-  for (const entry of entries) {
-    if (shouldSkipRootNodeModulesEntry(entry.name)) continue;
-
-    const source = path.join(rootNodeModulesDir, entry.name);
-    const destination = path.join(targetNodeModulesDir, entry.name);
-    await rm(destination, { recursive: true, force: true });
-    await cp(source, destination, {
-      recursive: true,
-      force: true,
-      dereference: true,
-    });
-  }
-};
-
 console.log("Preparing Next.js standalone server for Tauri bundling…");
 
 // Clean and recreate target dir
@@ -154,8 +347,14 @@ for (const entry of standaloneEntries) {
 console.log("Materializing symlinks in standalone output…");
 await materializeSymlinks(target);
 
-console.log("Overlaying root node_modules runtime snapshot…");
-await copyRootNodeModulesSnapshot();
+console.log("Ensuring runtime dependency closure for externalized packages…");
+await ensureRuntimeDependencies(
+  path.join(target, "node_modules"),
+  path.join(target, ".next", "node_modules")
+);
+
+console.log("Patching legacy nested dependency trees…");
+await patchLegacyNestedDeps(path.join(target, "node_modules"));
 
 // 2. Copy static assets (.next/static is NOT included in standalone output)
 await cp(
@@ -176,6 +375,7 @@ if (existsSync(publicDir)) {
 const nativePackages = [
   "@anush008/tokenizers",
   "@anush008/tokenizers-darwin-universal",
+  "@anush008/tokenizers-darwin-arm64",
   "@anush008/tokenizers-linux-x64-gnu",
   "@anush008/tokenizers-linux-arm64-gnu",
   "onnxruntime-node",
@@ -187,27 +387,35 @@ const nativePackages = [
 
 console.log("Copying native packages…");
 for (const pkg of nativePackages) {
-  const src = path.join(root, "node_modules", pkg);
-  if (!existsSync(src)) continue;
+  const candidates = packageSourceCandidates(pkg).filter((candidate) => existsSync(candidate));
+  let src = null;
+  for (const candidate of candidates) {
+    if (await packageHasRuntimeFiles(candidate)) {
+      src = candidate;
+      break;
+    }
+  }
+  src ??= candidates[0] ?? null;
+  if (!src || !existsSync(src)) continue;
   const dest = path.join(target, "node_modules", pkg);
-  await rm(dest, { recursive: true, force: true });
-  await cp(src, dest, { recursive: true, force: true });
+  await copyPackageTree(src, dest);
   console.log(`  ✓ ${pkg}`);
 }
 
-// 5. Bundle a Bun runtime so the shipped desktop app does not depend on the
-// user's machine having Node.js or Bun installed.
-const bunBinary = resolveBunBinary();
-if (!bunBinary) {
-  console.error("ERROR: Could not resolve a Bun runtime to bundle into the desktop app.");
-  console.error("Install Bun on the build machine before running the desktop build.");
+// 5. Bundle a Node.js runtime so the shipped desktop app does not depend on the
+// user's machine having Node.js installed. Next.js standalone targets Node.
+const nodeBinary = resolveNodeBinary();
+if (!nodeBinary) {
+  console.error("ERROR: Could not resolve a Node.js runtime to bundle into the desktop app.");
+  console.error("Install Node.js on the build machine before running the desktop build.");
   process.exit(1);
 }
 
+await rm(runtimeTargetDir, { recursive: true, force: true });
 await mkdir(runtimeTargetDir, { recursive: true });
-await copyFile(bunBinary, path.join(runtimeTargetDir, "bun"));
-await chmod(path.join(runtimeTargetDir, "bun"), 0o755);
-console.log(`  ✓ bundled bun runtime from ${bunBinary}`);
+await copyFile(nodeBinary, path.join(runtimeTargetDir, "node"));
+await chmod(path.join(runtimeTargetDir, "node"), 0o755);
+console.log(`  ✓ bundled node runtime from ${nodeBinary}`);
 
 // 6. Write .env into standalone from environment variables (injected by CI secrets).
 // This lets the bundled app run without users needing to configure anything.
