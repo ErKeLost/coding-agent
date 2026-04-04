@@ -21,6 +21,15 @@ const runtimeTargetDir = path.join(root, "src-tauri/bin");
 const standaloneDir = path.join(root, ".next/standalone");
 const rootNodeModulesDir = path.join(root, "node_modules");
 
+const shouldSkipRootNodeModulesEntry = (name) => {
+  return (
+    name === ".bin" ||
+    name === ".cache" ||
+    name === ".vite" ||
+    name === ".DS_Store"
+  );
+};
+
 const resolveBunBinary = () => {
   const candidates = [];
 
@@ -94,6 +103,27 @@ const materializeSymlinks = async (dir) => {
   }
 };
 
+const copyRootNodeModulesSnapshot = async () => {
+  if (!existsSync(rootNodeModulesDir)) return;
+
+  const targetNodeModulesDir = path.join(target, "node_modules");
+  await mkdir(targetNodeModulesDir, { recursive: true });
+
+  const entries = await readdir(rootNodeModulesDir, { withFileTypes: true });
+  for (const entry of entries) {
+    if (shouldSkipRootNodeModulesEntry(entry.name)) continue;
+
+    const source = path.join(rootNodeModulesDir, entry.name);
+    const destination = path.join(targetNodeModulesDir, entry.name);
+    await rm(destination, { recursive: true, force: true });
+    await cp(source, destination, {
+      recursive: true,
+      force: true,
+      dereference: true,
+    });
+  }
+};
+
 console.log("Preparing Next.js standalone server for Tauri bundling…");
 
 // Clean and recreate target dir
@@ -124,6 +154,9 @@ for (const entry of standaloneEntries) {
 console.log("Materializing symlinks in standalone output…");
 await materializeSymlinks(target);
 
+console.log("Overlaying root node_modules runtime snapshot…");
+await copyRootNodeModulesSnapshot();
+
 // 2. Copy static assets (.next/static is NOT included in standalone output)
 await cp(
   path.join(root, ".next/static"),
@@ -149,6 +182,7 @@ const nativePackages = [
   "fastembed",
   "@mastra/fastembed",
   "@libsql/client",
+  "@libsql/core",
 ];
 
 console.log("Copying native packages…");
@@ -156,6 +190,7 @@ for (const pkg of nativePackages) {
   const src = path.join(root, "node_modules", pkg);
   if (!existsSync(src)) continue;
   const dest = path.join(target, "node_modules", pkg);
+  await rm(dest, { recursive: true, force: true });
   await cp(src, dest, { recursive: true, force: true });
   console.log(`  ✓ ${pkg}`);
 }
