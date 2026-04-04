@@ -848,7 +848,8 @@ export const PromptInputTextarea = ({
 }: PromptInputTextareaProps) => {
   const controller = useOptionalPromptInputController();
   const attachments = usePromptInputAttachments();
-  const [isComposing, setIsComposing] = useState(false);
+  const isComposingRef = useRef(false);
+  const justFinishedCompositionRef = useRef(false);
 
   const handleKeyDown: KeyboardEventHandler<HTMLTextAreaElement> = (e) => {
     // Call the external onKeyDown handler first
@@ -860,7 +861,21 @@ export const PromptInputTextarea = ({
     }
 
     if (e.key === "Enter") {
-      if (isComposing || e.nativeEvent.isComposing) {
+      const nativeEvent = e.nativeEvent as KeyboardEvent & {
+        isComposing?: boolean;
+        keyCode?: number;
+        which?: number;
+      };
+
+      const imeKeyCode = nativeEvent.keyCode ?? nativeEvent.which;
+
+      if (
+        isComposingRef.current ||
+        justFinishedCompositionRef.current ||
+        nativeEvent.isComposing ||
+        imeKeyCode === 229
+      ) {
+        justFinishedCompositionRef.current = false;
         return;
       }
       if (e.shiftKey) {
@@ -934,8 +949,18 @@ export const PromptInputTextarea = ({
     <InputGroupTextarea
       className={cn("field-sizing-content max-h-48 min-h-16", className)}
       name="message"
-      onCompositionEnd={() => setIsComposing(false)}
-      onCompositionStart={() => setIsComposing(true)}
+      onCompositionEnd={() => {
+        isComposingRef.current = false;
+        justFinishedCompositionRef.current = true;
+
+        window.setTimeout(() => {
+          justFinishedCompositionRef.current = false;
+        }, 0);
+      }}
+      onCompositionStart={() => {
+        isComposingRef.current = true;
+        justFinishedCompositionRef.current = false;
+      }}
       onKeyDown={handleKeyDown}
       onPaste={handlePaste}
       placeholder={placeholder}
