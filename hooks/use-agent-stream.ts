@@ -73,7 +73,6 @@ type UseAgentStreamOptions = {
     filename?: string;
     previewImage?: NonNullable<ChatItem["images"]>[number];
   }>;
-  modelSupportsImageInput: (modelId?: string) => boolean;
 };
 
 export function useAgentStream({
@@ -95,7 +94,6 @@ export function useAgentStream({
   createId,
   parseSseEvent,
   prepareAttachmentForModel,
-  modelSupportsImageInput,
 }: UseAgentStreamOptions) {
   const [status, setStatus] = useState<"submitted" | "streaming" | "ready" | "error">("ready");
   const [error, setError] = useState<string | null>(null);
@@ -128,7 +126,6 @@ export function useAgentStream({
           setPreviewLogs((prev) => [...prev.slice(-200), log]),
         getModelId: () => model,
         setPlan,
-        setWorkflowGraph: () => {},
       }),
     [createId, model, setItems, setPlan, setPreviewLogs, setPreviewUrl],
   );
@@ -142,17 +139,6 @@ export function useAgentStream({
     if (!text && attachments.length === 0) return;
     const mode = options?.mode ?? "default";
     const isGuide = mode === "guide";
-
-    const containsImageAttachment = attachments.some((file) =>
-      file.mediaType.startsWith("image/"),
-    );
-    if (containsImageAttachment && !modelSupportsImageInput(model)) {
-      setError(
-        `当前模型 ${selectedModelName ?? model} 不支持图片输入。请切换到支持多模态的模型后再上传图片。`,
-      );
-      setStatus("ready");
-      return;
-    }
 
     if (!isGuide) {
       setPlan(null);
@@ -304,7 +290,7 @@ export function useAgentStream({
     } catch (err) {
       const rawMessage = err instanceof Error ? err.message : "未知错误";
       const message = rawMessage.includes("No endpoints found that support image input")
-        ? `当前模型 ${selectedModelName ?? model} 不支持图片输入。请切换到支持多模态的模型后再试。`
+        ? `当前模型 ${selectedModelName ?? model} 返回了图片输入不支持错误。`
         : rawMessage;
       const aborted =
         controller.signal.aborted ||
@@ -336,7 +322,6 @@ export function useAgentStream({
   }, [
     createId,
     model,
-    modelSupportsImageInput,
     params,
     parseSseEvent,
     prepareAttachmentForModel,

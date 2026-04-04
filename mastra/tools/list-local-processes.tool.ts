@@ -1,6 +1,6 @@
 import { createTool } from '@mastra/core/tools';
 import z from 'zod';
-import { readProcessRegistry, removeMissingProcessState } from './local-process-registry';
+import { listManagedProcesses } from './local-process-manager';
 
 export const listLocalProcessesTool = createTool({
   id: 'listLocalProcesses',
@@ -11,22 +11,23 @@ export const listLocalProcessesTool = createTool({
     processes: z.array(
       z.object({
         id: z.string(),
-        kind: z.literal('dev-server'),
+        kind: z.enum(['dev-server', 'command', 'shell', 'unified-exec']),
         command: z.string(),
         workingDirectory: z.string(),
-        host: z.string(),
-        port: z.number(),
-        url: z.string(),
+        host: z.string().optional(),
+        port: z.number().optional(),
+        url: z.string().optional(),
         pid: z.number().optional(),
+        exitCode: z.number().optional(),
         logPath: z.string().optional(),
-        status: z.enum(['running', 'stopped']),
+        status: z.enum(['running', 'stopped', 'failed']),
         createdAt: z.string(),
         updatedAt: z.string(),
       }),
     ),
   }),
   execute: async () => {
-    const processes = readProcessRegistry().map(removeMissingProcessState);
+    const processes = listManagedProcesses();
     return { processes };
   },
 });

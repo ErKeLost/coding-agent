@@ -131,11 +131,10 @@ export const inferExecutionState = (
 ): ExecutionStateSnapshot => {
   const pendingPlan = getPendingPlan(state);
   const recentToolCount = countRecentToolItems(state.items);
-  const hasWorkflowTrace = Boolean(state.graph?.steps?.length);
   const hasPreview = Boolean(state.previewUrl);
   const lastUserGoal = getLastUserGoalFromItems(state.items, currentInputText);
   const isResumable = Boolean(
-    pendingPlan || recentToolCount > 0 || hasWorkflowTrace || hasPreview
+    pendingPlan || recentToolCount > 0 || hasPreview
   );
 
   return {

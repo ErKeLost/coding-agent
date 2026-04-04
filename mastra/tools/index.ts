@@ -1,6 +1,8 @@
 export { bashTool } from './bash.tool';
 export { applyPatchTool } from './apply-patch.tool';
+export { cleanBackgroundTerminalsTool } from './clean-background-terminals.tool';
 export { editTool } from './edit.tool';
+export { execCommandTool } from './exec-command.tool';
 export { imageGenerateTool } from './image-generate.tool';
 export { listTool } from './list.tool';
 export { listDirTool } from './list-dir.tool';
@@ -19,4 +21,5 @@ export { toolSuggestTool } from './tool-suggest.tool';
 export { unifiedExecTool } from './unified-exec.tool';
 export { webFetchTool } from './webfetch.tool';
 export { webSearchTool } from './websearch.tool';
+export { writeStdinTool } from './write-stdin.tool';
 export { writeTool } from './write.tool';

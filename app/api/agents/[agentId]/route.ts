@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { mastra } from "@/mastra";
 import { getModelTuning } from "@/lib/model-tuning";
 import { buildAgentRequestContext } from "@/lib/server/agent-request-context";
+import { normalizeAgentMessageInput } from "@/lib/server/agent-input";
 
 export const runtime = "nodejs";
 const BUILD_AGENT_ID = "build-agent";
@@ -27,7 +28,9 @@ export async function POST(
     return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
   }
 
-  const messageInput = payload.messages ?? payload.message;
+  const messageInput = payload.messages
+    ? normalizeAgentMessageInput(payload.messages)
+    : payload.message;
   if (!messageInput) {
     return NextResponse.json({ error: "message is required" }, { status: 400 });
   }

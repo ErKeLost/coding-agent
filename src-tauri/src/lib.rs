@@ -1,20 +1,54 @@
+use portable_pty::{native_pty_system, CommandBuilder, PtySize};
 use serde::Serialize;
 use rfd::{MessageDialog, MessageLevel};
 use std::{
   fs,
+  io::{Read, Write},
   path::{Path, PathBuf},
   process::Command,
-  sync::Mutex,
+  sync::{Arc, Mutex},
 };
 use std::{
   net::{TcpListener, TcpStream},
   time::{Duration, Instant},
 };
-use tauri::{State, WebviewUrl, WebviewWindowBuilder};
+use tauri::{AppHandle, Emitter, State, WebviewUrl, WebviewWindowBuilder};
 #[cfg(not(debug_assertions))]
 use tauri::Manager;
 
 struct WorkspaceState(Mutex<Option<PathBuf>>);
+struct TerminalState(Mutex<std::collections::HashMap<String, TerminalSession>>);
+
+struct TerminalSession {
+  master: Arc<Mutex<Box<dyn portable_pty::MasterPty + Send>>>,
+  writer: Arc<Mutex<Box<dyn Write + Send>>>,
+  output: Arc<Mutex<Vec<u8>>>,
+  child: Arc<Mutex<Box<dyn portable_pty::Child + Send + Sync>>>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct TerminalSessionPayload {
+  session_id: String,
+  cwd: String,
+  shell: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct TerminalOutputPayload {
+  session_id: String,
+  output: String,
+  next_offset: usize,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct TerminalOutputEventPayload {
+  session_id: String,
+  output: String,
+  next_offset: usize,
+}
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -51,6 +85,23 @@ struct WorkspaceBranchPayload {
   branches: Vec<String>,
   has_changes: bool,
   has_remote: bool,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct WorkspaceGitChange {
+  path: String,
+  staged_status: String,
+  unstaged_status: String,
+  is_untracked: bool,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct WorkspaceGitDiffPayload {
+  path: String,
+  staged: String,
+  unstaged: String,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -388,6 +439,289 @@ fn canonicalize_workspace_root(path: &str) -> Result<PathBuf, String> {
   Ok(canonical)
 }
 
+fn default_shell_program() -> String {
+  std::env::var("SHELL").unwrap_or_else(|_| "/bin/zsh".to_string())
+}
+
+#[tauri::command]
+async fn start_terminal_session(
+  path: String,
+  app_handle: AppHandle,
+  terminal_state: State<'_, TerminalState>,
+) -> Result<TerminalSessionPayload, String> {
+  let root = canonicalize_workspace_root(&path)?;
+  let pty_system = native_pty_system();
+  let pair = pty_system
+    .openpty(PtySize {
+      rows: 36,
+      cols: 140,
+      pixel_width: 0,
+      pixel_height: 0,
+    })
+    .map_err(|err| format!("failed to open pty: {err}"))?;
+
+  let shell = default_shell_program();
+  let mut cmd = CommandBuilder::new(&shell);
+  cmd.cwd(root.clone());
+  cmd.env("TERM", "xterm-256color");
+
+  let child = pair
+    .slave
+    .spawn_command(cmd)
+    .map_err(|err| format!("failed to spawn shell: {err}"))?;
+
+  let mut reader = pair
+    .master
+    .try_clone_reader()
+    .map_err(|err| format!("failed to clone pty reader: {err}"))?;
+  let writer = pair
+    .master
+    .take_writer()
+    .map_err(|err| format!("failed to take pty writer: {err}"))?;
+  let master = pair.master;
+
+  let session_id = format!("term-{}", uuid::Uuid::new_v4());
+  let output = Arc::new(Mutex::new(Vec::new()));
+  let output_for_thread = Arc::clone(&output);
+  let event_name = format!("terminal-output://{}", session_id);
+  let app_handle_for_thread = app_handle.clone();
+
+  std::thread::spawn(move || {
+    let mut buffer = [0_u8; 8192];
+    loop {
+      match reader.read(&mut buffer) {
+        Ok(0) => break,
+        Ok(size) => {
+          let chunk = &buffer[..size];
+          let mut next_offset = 0;
+          if let Ok(mut text) = output_for_thread.lock() {
+            text.extend_from_slice(chunk);
+            next_offset = text.len();
+          }
+          let payload = TerminalOutputEventPayload {
+            session_id: event_name
+              .strip_prefix("terminal-output://")
+              .unwrap_or_default()
+              .to_string(),
+            output: String::from_utf8_lossy(chunk).to_string(),
+            next_offset,
+          };
+          let _ = app_handle_for_thread.emit(&event_name, payload);
+        }
+        Err(_) => break,
+      }
+    }
+  });
+
+  let session = TerminalSession {
+    master: Arc::new(Mutex::new(master)),
+    writer: Arc::new(Mutex::new(writer)),
+    output,
+    child: Arc::new(Mutex::new(child)),
+  };
+
+  terminal_state
+    .0
+    .lock()
+    .map_err(|_| "failed to access terminal sessions".to_string())?
+    .insert(session_id.clone(), session);
+
+  Ok(TerminalSessionPayload {
+    session_id,
+    cwd: root.to_string_lossy().to_string(),
+    shell,
+  })
+}
+
+#[tauri::command]
+async fn read_terminal_session(
+  session_id: String,
+  offset: Option<usize>,
+  terminal_state: State<'_, TerminalState>,
+) -> Result<TerminalOutputPayload, String> {
+  let state = terminal_state
+    .0
+    .lock()
+    .map_err(|_| "failed to access terminal sessions".to_string())?;
+  let session = state
+    .get(&session_id)
+    .ok_or_else(|| "terminal session not found".to_string())?;
+  let output = session
+    .output
+    .lock()
+    .map_err(|_| "failed to read terminal output".to_string())?;
+  let start = offset.unwrap_or(0).min(output.len());
+  let chunk = String::from_utf8_lossy(&output[start..]).to_string();
+  let next_offset = output.len();
+  Ok(TerminalOutputPayload {
+    session_id,
+    output: chunk,
+    next_offset,
+  })
+}
+
+#[tauri::command]
+async fn write_terminal_session(
+  session_id: String,
+  input: String,
+  terminal_state: State<'_, TerminalState>,
+) -> Result<(), String> {
+  let state = terminal_state
+    .0
+    .lock()
+    .map_err(|_| "failed to access terminal sessions".to_string())?;
+  let session = state
+    .get(&session_id)
+    .ok_or_else(|| "terminal session not found".to_string())?;
+  let mut writer = session
+    .writer
+    .lock()
+    .map_err(|_| "failed to access terminal writer".to_string())?;
+  writer
+    .write_all(input.as_bytes())
+    .map_err(|err| format!("failed to write terminal input: {err}"))?;
+  writer
+    .flush()
+    .map_err(|err| format!("failed to flush terminal input: {err}"))?;
+  Ok(())
+}
+
+#[tauri::command]
+async fn resize_terminal_session(
+  session_id: String,
+  cols: u16,
+  rows: u16,
+  terminal_state: State<'_, TerminalState>,
+) -> Result<(), String> {
+  let state = terminal_state
+    .0
+    .lock()
+    .map_err(|_| "failed to access terminal sessions".to_string())?;
+  let session = state
+    .get(&session_id)
+    .ok_or_else(|| "terminal session not found".to_string())?;
+
+  let mut master = session
+    .master
+    .lock()
+    .map_err(|_| "failed to access terminal pty".to_string())?;
+
+  master
+    .resize(PtySize {
+      rows: rows.max(1),
+      cols: cols.max(1),
+      pixel_width: 0,
+      pixel_height: 0,
+    })
+    .map_err(|err| format!("failed to resize terminal session: {err}"))?;
+
+  Ok(())
+}
+
+#[tauri::command]
+async fn stop_terminal_session(
+  session_id: String,
+  terminal_state: State<'_, TerminalState>,
+) -> Result<(), String> {
+  let session = terminal_state
+    .0
+    .lock()
+    .map_err(|_| "failed to access terminal sessions".to_string())?
+    .remove(&session_id)
+    .ok_or_else(|| "terminal session not found".to_string())?;
+
+  let mut child = session
+    .child
+    .lock()
+    .map_err(|_| "failed to access terminal child process".to_string())?;
+  child
+    .kill()
+    .map_err(|err| format!("failed to stop terminal session: {err}"))?;
+  child
+    .wait()
+    .map_err(|err| format!("failed to wait for terminal shutdown: {err}"))?;
+
+  Ok(())
+}
+
+fn shell_single_quote(value: &str) -> String {
+  value.replace('\'', "'\\''")
+}
+
+#[cfg(target_os = "macos")]
+fn open_terminal_at_path(root: &Path) -> Result<(), String> {
+  let quoted_path = shell_single_quote(&root.to_string_lossy());
+  let shell_command = format!("cd '{}' && clear", quoted_path);
+  let apple_script = format!(
+    "tell application \"Terminal\" to activate\n\
+     tell application \"Terminal\" to do script \"{}\"\n\
+     end tell",
+    shell_command
+      .replace('\\', "\\\\")
+      .replace('\"', "\\\"")
+  );
+
+  Command::new("osascript")
+    .arg("-e")
+    .arg(apple_script)
+    .status()
+    .map_err(|err| format!("failed to launch Terminal: {err}"))
+    .and_then(|status| {
+      if status.success() {
+        Ok(())
+      } else {
+        Err("Terminal returned a non-zero exit status".to_string())
+      }
+    })
+}
+
+#[cfg(target_os = "windows")]
+fn open_terminal_at_path(root: &Path) -> Result<(), String> {
+  let path = root.to_string_lossy().to_string();
+  let windows_terminal = Command::new("cmd")
+    .args(["/C", "start", "", "wt", "-d", &path])
+    .status();
+
+  if let Ok(status) = windows_terminal {
+    if status.success() {
+      return Ok(());
+    }
+  }
+
+  Command::new("cmd")
+    .args(["/C", "start", "", "cmd", "/K", "cd", "/d", &path])
+    .status()
+    .map_err(|err| format!("failed to launch terminal: {err}"))
+    .and_then(|status| {
+      if status.success() {
+        Ok(())
+      } else {
+        Err("terminal returned a non-zero exit status".to_string())
+      }
+    })
+}
+
+#[cfg(target_os = "linux")]
+fn open_terminal_at_path(root: &Path) -> Result<(), String> {
+  let path = root.to_string_lossy().to_string();
+  let candidates: [(&str, Vec<&str>); 5] = [
+    ("x-terminal-emulator", vec!["--working-directory", &path]),
+    ("gnome-terminal", vec!["--working-directory", &path]),
+    ("konsole", vec!["--workdir", &path]),
+    ("xfce4-terminal", vec!["--working-directory", &path]),
+    ("alacritty", vec!["--working-directory", &path]),
+  ];
+
+  for (program, args) in candidates {
+    match Command::new(program).args(args).status() {
+      Ok(status) if status.success() => return Ok(()),
+      Ok(_) | Err(_) => continue,
+    }
+  }
+
+  Err("failed to find a supported terminal emulator".to_string())
+}
+
 fn run_git_command(root: &Path, args: &[&str]) -> Result<String, String> {
   let output = Command::new("git")
     .arg("-C")
@@ -406,6 +740,76 @@ fn run_git_command(root: &Path, args: &[&str]) -> Result<String, String> {
   }
 
   Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
+}
+
+fn parse_status_code(value: char) -> String {
+  match value {
+    'M' => "modified",
+    'A' => "added",
+    'D' => "deleted",
+    'R' => "renamed",
+    'C' => "copied",
+    'U' => "unmerged",
+    '?' => "untracked",
+    '!' => "ignored",
+    _ => "clean",
+  }
+  .to_string()
+}
+
+fn read_workspace_git_changes(root: &Path) -> Result<Vec<WorkspaceGitChange>, String> {
+  if !root.join(".git").exists() {
+    return Ok(Vec::new());
+  }
+
+  let output = run_git_command(root, &["status", "--porcelain=v1"])?;
+  let mut changes = Vec::new();
+
+  for line in output.lines() {
+    if line.len() < 4 {
+      continue;
+    }
+
+    let status_code = &line[..2];
+    let (staged_code, unstaged_code) = match status_code {
+      "??" => (' ', '?'),
+      "!!" => (' ', '!'),
+      _ => {
+        let mut chars = status_code.chars();
+        (chars.next().unwrap_or(' '), chars.next().unwrap_or(' '))
+      }
+    };
+    let raw_path = line[3..].trim();
+    let normalized_path = if let Some((_, to_path)) = raw_path.split_once(" -> ") {
+      to_path.trim()
+    } else {
+      raw_path
+    };
+
+    changes.push(WorkspaceGitChange {
+      path: normalized_path.replace('\\', "/"),
+      staged_status: parse_status_code(staged_code),
+      unstaged_status: parse_status_code(unstaged_code),
+      is_untracked: staged_code == '?' || unstaged_code == '?',
+    });
+  }
+
+  Ok(changes)
+}
+
+fn read_workspace_git_diff(root: &Path, file_path: &str) -> Result<WorkspaceGitDiffPayload, String> {
+  if !root.join(".git").exists() {
+    return Err("git repository is not initialized".to_string());
+  }
+
+  let staged = run_git_command(root, &["diff", "--cached", "--", file_path]).unwrap_or_default();
+  let unstaged = run_git_command(root, &["diff", "--", file_path]).unwrap_or_default();
+
+  Ok(WorkspaceGitDiffPayload {
+    path: file_path.to_string(),
+    staged,
+    unstaged,
+  })
 }
 
 fn read_workspace_branches(root: &Path) -> Result<WorkspaceBranchPayload, String> {
@@ -610,6 +1014,33 @@ async fn commit_workspace_changes(
 }
 
 #[tauri::command]
+async fn commit_workspace_staged_changes(
+  path: String,
+  message: String,
+) -> Result<WorkspaceBranchPayload, String> {
+  tauri::async_runtime::spawn_blocking(move || {
+    let root = canonicalize_workspace_root(&path)?;
+    let trimmed_message = message.trim();
+    if trimmed_message.is_empty() {
+      return Err("commit message is required".to_string());
+    }
+
+    if !root.join(".git").exists() {
+      return Err("git repository is not initialized".to_string());
+    }
+
+    let staged_status = run_git_command(&root, &["diff", "--cached", "--name-only"])?;
+    if staged_status.trim().is_empty() {
+      return Err("no staged changes to commit".to_string());
+    }
+    run_git_command(&root, &["commit", "-m", trimmed_message])?;
+    read_workspace_branches(&root)
+  })
+  .await
+  .map_err(|err| format!("failed to commit staged workspace changes: {err}"))?
+}
+
+#[tauri::command]
 async fn push_workspace_branch(path: String) -> Result<WorkspaceBranchPayload, String> {
   tauri::async_runtime::spawn_blocking(move || {
     let root = canonicalize_workspace_root(&path)?;
@@ -652,6 +1083,67 @@ async fn search_workspace_content(
   })
   .await
   .map_err(|err| format!("failed to search workspace content: {err}"))?
+}
+
+#[tauri::command]
+async fn open_workspace_terminal(path: String) -> Result<(), String> {
+  tauri::async_runtime::spawn_blocking(move || {
+    let root = canonicalize_workspace_root(&path)?;
+    open_terminal_at_path(&root)
+  })
+  .await
+  .map_err(|err| format!("failed to open workspace terminal: {err}"))?
+}
+
+#[tauri::command]
+async fn get_workspace_git_changes(path: String) -> Result<Vec<WorkspaceGitChange>, String> {
+  tauri::async_runtime::spawn_blocking(move || {
+    let root = canonicalize_workspace_root(&path)?;
+    read_workspace_git_changes(&root)
+  })
+  .await
+  .map_err(|err| format!("failed to read workspace git changes: {err}"))?
+}
+
+#[tauri::command]
+async fn get_workspace_git_diff(
+  path: String,
+  file_path: String,
+) -> Result<WorkspaceGitDiffPayload, String> {
+  tauri::async_runtime::spawn_blocking(move || {
+    let root = canonicalize_workspace_root(&path)?;
+    read_workspace_git_diff(&root, &file_path)
+  })
+  .await
+  .map_err(|err| format!("failed to read workspace git diff: {err}"))?
+}
+
+#[tauri::command]
+async fn stage_workspace_file(
+  path: String,
+  file_path: String,
+) -> Result<Vec<WorkspaceGitChange>, String> {
+  tauri::async_runtime::spawn_blocking(move || {
+    let root = canonicalize_workspace_root(&path)?;
+    run_git_command(&root, &["add", "--", &file_path])?;
+    read_workspace_git_changes(&root)
+  })
+  .await
+  .map_err(|err| format!("failed to stage workspace file: {err}"))?
+}
+
+#[tauri::command]
+async fn unstage_workspace_file(
+  path: String,
+  file_path: String,
+) -> Result<Vec<WorkspaceGitChange>, String> {
+  tauri::async_runtime::spawn_blocking(move || {
+    let root = canonicalize_workspace_root(&path)?;
+    run_git_command(&root, &["restore", "--staged", "--", &file_path])?;
+    read_workspace_git_changes(&root)
+  })
+  .await
+  .map_err(|err| format!("failed to unstage workspace file: {err}"))?
 }
 
 /// Read runtime config from ~/.coding-agent/config.json and ~/.coding-agent/.env
@@ -766,16 +1258,28 @@ pub fn run() {
     .plugin(tauri_plugin_opener::init())
     .plugin(tauri_plugin_process::init())
     .manage(WorkspaceState(Mutex::new(None)))
+    .manage(TerminalState(Mutex::new(std::collections::HashMap::new())))
     .invoke_handler(tauri::generate_handler![
       load_workspace,
       read_workspace_file,
       pick_workspace_directory,
       pick_workspace_file,
+      start_terminal_session,
+      read_terminal_session,
+      write_terminal_session,
+      resize_terminal_session,
+      stop_terminal_session,
       get_workspace_branches,
       switch_workspace_branch,
       commit_workspace_changes,
+      commit_workspace_staged_changes,
       push_workspace_branch,
-      search_workspace_content
+      search_workspace_content,
+      open_workspace_terminal,
+      get_workspace_git_changes,
+      get_workspace_git_diff,
+      stage_workspace_file,
+      unstage_workspace_file
     ])
     .setup(|app| {
       #[cfg(desktop)]
@@ -818,7 +1322,6 @@ pub fn run() {
           let _ = sw.close();
         }
 
-        window.open_devtools();
       }
 
       // ── Production build: spawn Next.js standalone server then open window ─

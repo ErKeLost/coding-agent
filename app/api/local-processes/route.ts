@@ -1,11 +1,11 @@
 import { NextResponse } from "next/server";
-import { readProcessRegistry, removeMissingProcessState } from "@/mastra/tools/local-process-registry";
+import { listManagedProcesses } from "@/mastra/tools/local-process-manager";
 
 export const runtime = "nodejs";
 
 export async function GET() {
   try {
-    const processes = readProcessRegistry().map(removeMissingProcessState);
+    const processes = listManagedProcesses();
     return NextResponse.json({ processes });
   } catch (error) {
     const message =

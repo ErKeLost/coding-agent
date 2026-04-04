@@ -6,7 +6,6 @@ import type {
   MutableRefObject,
   SetStateAction,
 } from "react";
-import type { WorkflowGraphSnapshot } from "@/lib/workflow-graph";
 
 export type ToolStep = {
   id: string;
@@ -144,7 +143,6 @@ type StreamEventPayload =
         | "tool.call.failed"
         | "usage.updated"
         | "session.updated"
-        | "workflow.graph.updated"
         | "agent.stream.delta"
         | "agent.handoff.started"
         | "agent.handoff.completed";
@@ -166,7 +164,6 @@ type EventBusParams = {
     title: string;
     todos: Array<{ id: string; label: string; status: "pending" | "in_progress" | "completed" | "cancelled"; description?: string }>;
   } | null) => void;
-  setWorkflowGraph?: (graph: WorkflowGraphSnapshot | null) => void;
 };
 
 const extractTextFromParts = (
@@ -435,7 +432,6 @@ export const createStreamEventBus = ({
   appendPreviewLog,
   getModelId,
   setPlan,
-  setWorkflowGraph,
 }: EventBusParams) => {
   const appendAssistantText = (text: string) => {
     if (!text) return;
@@ -1008,13 +1004,6 @@ export const createStreamEventBus = ({
       if (codexEvent.eventName === "session.updated") {
         if (typeof codexEvent.previewUrl === "string" && codexEvent.previewUrl) {
           setPreviewUrl(codexEvent.previewUrl);
-        }
-        return;
-      }
-      if (codexEvent.eventName === "workflow.graph.updated") {
-        const graph = (codexEvent as { graph?: WorkflowGraphSnapshot }).graph;
-        if (graph) {
-          setWorkflowGraph?.(graph);
         }
         return;
       }

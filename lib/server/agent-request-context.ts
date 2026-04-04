@@ -17,6 +17,11 @@ import {
 import { getThreadSession, upsertThreadSession } from "@/lib/server/thread-session-store";
 import { extractCurrentInputText, inferContinuationContext } from "@/lib/continuation";
 import type { ThreadSession } from "@/lib/thread-session";
+import {
+  currentTurnIncludesImageInput,
+  deriveAgentInputMode,
+  normalizeAgentMessageInput,
+} from "@/lib/server/agent-input";
 
 type AgentRequestPayload = {
   threadId?: string;
@@ -38,44 +43,10 @@ const summarizeWorkspaceRoot = (value: string) => {
   return segments.at(-1) ?? normalized;
 };
 
-const currentTurnIncludesImageInput = (input: unknown) => {
-  if (!Array.isArray(input)) {
-    return false;
-  }
-
-  return input.some((message) => {
-    if (!message || typeof message !== "object") {
-      return false;
-    }
-
-    const content = (message as { content?: unknown }).content;
-    if (!Array.isArray(content)) {
-      return false;
-    }
-
-    return content.some((part) => {
-      if (!part || typeof part !== "object") {
-        return false;
-      }
-
-      const typedPart = part as {
-        type?: unknown;
-        mediaType?: unknown;
-      };
-
-      return (
-        typedPart.type === "image" ||
-        (typedPart.type === "file" &&
-          typeof typedPart.mediaType === "string" &&
-          typedPart.mediaType.startsWith("image/"))
-      );
-    });
-  });
-};
-
 export async function buildAgentRequestContext(
   payload: AgentRequestPayload,
 ): Promise<BuiltAgentRequestContext> {
+  const normalizedMessages = normalizeAgentMessageInput(payload.messages);
   const requestContext = new RequestContext();
   if (payload.requestContext && typeof payload.requestContext === "object") {
     for (const [key, value] of Object.entries(payload.requestContext)) {
@@ -144,7 +115,7 @@ export async function buildAgentRequestContext(
       requestContext.set("enabledSkillIds", JSON.stringify(enabledSkillIds));
     }
 
-    const currentInputText = extractCurrentInputText(payload.messages ?? payload.message);
+    const currentInputText = extractCurrentInputText(normalizedMessages ?? payload.message);
     if (currentInputText) {
       const mentionedSkillMetadata = selectSkillsByMentionText(
         discovery.skills,
@@ -172,10 +143,11 @@ export async function buildAgentRequestContext(
     }
   }
 
-  const currentMessageText = extractCurrentInputText(payload.messages ?? payload.message);
-  if (currentTurnIncludesImageInput(payload.messages)) {
+  const currentMessageText = extractCurrentInputText(normalizedMessages ?? payload.message);
+  if (currentTurnIncludesImageInput(normalizedMessages)) {
     requestContext.set("currentTurnIncludesImages", "1");
   }
+  requestContext.set("inputMode", deriveAgentInputMode(normalizedMessages ?? payload.message));
   const continuationContext = inferContinuationContext(threadSession, currentMessageText);
   if (continuationContext.isContinuation) {
     requestContext.set("continuationMode", "resume");

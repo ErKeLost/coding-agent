@@ -1,12 +1,9 @@
-import { randomUUID } from 'node:crypto';
-import { spawn } from 'node:child_process';
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { readFileSync } from 'node:fs';
 import net from 'node:net';
-import os from 'node:os';
 import path from 'node:path';
 import { createTool } from '@mastra/core/tools';
 import z from 'zod';
-import { upsertProcessRecord } from './local-process-registry';
+import { resolveManagedProcessRecord, startManagedProcess } from './local-process-manager';
 
 const DEFAULT_HOST = '127.0.0.1';
 const DEFAULT_PORT = 3000;
@@ -42,7 +39,7 @@ function readLogTail(logPath: string) {
 }
 
 async function waitForServerReady(options: {
-  child: ReturnType<typeof spawn>;
+  child: { exitCode: number | null };
   host: string;
   port: number;
   timeoutMs: number;
@@ -117,62 +114,41 @@ export const startLocalDevServerTool = createTool({
       };
     }
 
-    const logDir = path.join(os.homedir(), '.coding-agent', 'logs');
-    mkdirSync(logDir, { recursive: true });
-    const logPath = path.join(logDir, `dev-server-${Date.now()}.log`);
-    writeFileSync(logPath, '');
-
-    const child = spawn(command, {
+    const managed = startManagedProcess({
+      kind: 'dev-server',
+      command,
       cwd: workingDirectory,
-      detached: true,
-      env: {
-        ...process.env,
+      metadata: {
+        host,
+        port,
+        url,
       },
-      shell: true,
-      stdio: ['ignore', 'pipe', 'pipe'],
     });
-
-    child.stdout?.on('data', chunk => {
-      writeFileSync(logPath, chunk, { flag: 'a' });
-    });
-    child.stderr?.on('data', chunk => {
-      writeFileSync(logPath, chunk, { flag: 'a' });
-    });
-    child.unref();
+    const record = resolveManagedProcessRecord(managed.processId);
+    const logPath = managed.logPath;
 
     await waitForServerReady({
-      child,
+      child: {
+        get exitCode() {
+          const current = resolveManagedProcessRecord(managed.processId);
+          if (!current || current.status === 'running') return null;
+          return current.status === 'stopped' ? 0 : 1;
+        },
+      } as { exitCode: number | null },
       host,
       port,
       timeoutMs: inputData.startupTimeoutMs ?? DEFAULT_TIMEOUT_MS,
       logPath,
     });
 
-    const now = new Date().toISOString();
-    const processId = `dev-${randomUUID()}`;
-    upsertProcessRecord({
-      id: processId,
-      kind: 'dev-server',
-      command,
-      workingDirectory,
-      host,
-      port,
-      url,
-      pid: child.pid ?? undefined,
-      logPath,
-      status: 'running',
-      createdAt: now,
-      updatedAt: now,
-    });
-
     return {
-      processId,
+      processId: managed.processId,
       url,
       command,
       workingDirectory,
       host,
       port,
-      pid: child.pid ?? undefined,
+      pid: record?.pid ?? managed.pid,
       reused: false,
       logPath,
     };

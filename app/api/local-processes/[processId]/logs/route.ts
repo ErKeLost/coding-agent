@@ -1,12 +1,7 @@
-import { readFileSync } from "node:fs";
 import { NextResponse } from "next/server";
-import { findProcessRecord, removeMissingProcessState } from "@/mastra/tools/local-process-registry";
+import { readManagedProcessLogs } from "@/mastra/tools/local-process-manager";
 
 export const runtime = "nodejs";
-
-function tailText(text: string, lines: number) {
-  return text.split(/\r?\n/).slice(-lines).join("\n").trim();
-}
 
 export async function GET(
   req: Request,
@@ -15,24 +10,14 @@ export async function GET(
   const { processId } = await params;
   const { searchParams } = new URL(req.url);
   const lines = Number(searchParams.get("lines") ?? "80");
+  const waitForMs = Number(searchParams.get("waitForMs") ?? "0");
 
   try {
-    const record = findProcessRecord(processId);
-    if (!record) {
-      return NextResponse.json({ error: "Process not found" }, { status: 404 });
-    }
-
-    const current = removeMissingProcessState(record);
-    const output = current.logPath
-      ? tailText(readFileSync(current.logPath, "utf8"), Number.isFinite(lines) ? lines : 80)
-      : "";
-
-    return NextResponse.json({
-      processId: current.id,
-      status: current.status,
-      logPath: current.logPath,
-      output,
+    const payload = await readManagedProcessLogs(processId, {
+      lines: Number.isFinite(lines) ? lines : 80,
+      waitForMs: Number.isFinite(waitForMs) ? waitForMs : 0,
     });
+    return NextResponse.json(payload);
   } catch (error) {
     const message =
       error instanceof Error ? error.message : "Failed to read local process logs";

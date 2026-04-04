@@ -6,6 +6,8 @@ import { buildAgentMemory } from '../memory';
 import {
   applyPatchTool,
   bashTool,
+  cleanBackgroundTerminalsTool,
+  execCommandTool,
   editTool,
   imageGenerateTool,
   listDirTool,
@@ -24,6 +26,7 @@ import {
   unifiedExecTool,
   webFetchTool,
   webSearchTool,
+  writeStdinTool,
   writeTool,
 } from '../tools';
 import { selectBuildInstructions } from './prompts/build-prompts';
@@ -36,23 +39,26 @@ import { ContinuationProcessor } from './processors/continuation-processor';
 const staticTools = {
   apply_patch: applyPatchTool,
   bash: bashTool,
+  clean_background_terminals: cleanBackgroundTerminalsTool,
   edit: editTool,
+  exec_command: execCommandTool,
   imageGenerate: imageGenerateTool,
   list: listTool,
-  // listLocalProcesses: listLocalProcessesTool,
+  listLocalProcesses: listLocalProcessesTool,
   read: readTool,
-  // readLocalProcessLogs: readLocalProcessLogsTool,
+  readLocalProcessLogs: readLocalProcessLogsTool,
   shell: shellTool,
   skill: skillTool,
-  // startLocalDevServer: startLocalDevServerTool,
-  // stopLocalProcess: stopLocalProcessTool,
+  startLocalDevServer: startLocalDevServerTool,
+  stopLocalProcess: stopLocalProcessTool,
   todoread: todoReadTool,
   todowrite: todoWriteTool,
-  // tool_search: toolSearchTool,
-  // tool_suggest: toolSuggestTool,
+  tool_search: toolSearchTool,
+  tool_suggest: toolSuggestTool,
   unified_exec: unifiedExecTool,
   webfetch: webFetchTool,
   websearch: webSearchTool,
+  write_stdin: writeStdinTool,
   write: writeTool,
 };
 
@@ -89,6 +95,7 @@ const buildInstructions = ({ requestContext }: { requestContext: RequestContext 
   const guideMode = getRequestContextString(requestContext, 'guideMode');
   const guideText = getRequestContextString(requestContext, 'guideText');
   const emptyTurnRetry = getRequestContextString(requestContext, 'emptyTurnRetry');
+  const inputMode = getRequestContextString(requestContext, 'inputMode');
   const currentTurnIncludesImages = getRequestContextString(
     requestContext,
     'currentTurnIncludesImages',
@@ -101,10 +108,12 @@ const buildInstructions = ({ requestContext }: { requestContext: RequestContext 
 - Use write/edit/ast_edit only after you understand the target files.
 - Use bash for validation or project commands.
 - Use shell or unified_exec when a Codex-style command execution surface is more appropriate.
+- Prefer exec_command + write_stdin for long-running or interactive background terminal sessions.
 - Use list_dir for Codex-style directory listing and apply_patch for unified diff patch application.
 - Use tool_search or tool_suggest when you need to discover the right tool quickly.
 - Use startLocalDevServer for long-running dev servers such as bun dev, npm run dev, pnpm dev, or yarn dev.
 - Use listLocalProcesses, readLocalProcessLogs, and stopLocalProcess to manage long-running services after they start.
+- Use clean_background_terminals when you want to terminate all still-running background terminal sessions.
 - Do not use getProcessOutput with wait=true to watch a long-running dev server.
 - Use todowrite for multi-step implementation work.`,
   ];
@@ -135,12 +144,13 @@ ${guideText ? `- Active guidance: ${guideText}` : ''}`.trim());
 - This retry must begin with action, not acknowledgement or meta commentary.`);
   }
 
-  if (currentTurnIncludesImages === '1') {
-    runtimeDirectives.push(`Multimodal policy:
+  if (currentTurnIncludesImages === '1' || inputMode === 'image-analysis') {
+    runtimeDirectives.push(`Image analysis policy:
 - The current user turn includes one or more uploaded images.
-- Analyze the uploaded image content directly before browsing the workspace or searching the repository.
-- Do not reinterpret an uploaded image as a request to search the project for image files unless the user explicitly asks about repository images.
-- Base your first response on what you can observe in the attached image, then use tools only if the user asks for project-specific follow-up.`);
+- The primary task for this turn is to analyze the uploaded image, not the workspace.
+- Resolve phrases like "this image", "this picture", or "analyze it" against the uploaded attachment.
+- Your first response must describe and answer based on the visible image content.
+- Do not switch to repository, workspace, or project analysis unless the user explicitly asks for that.`);
   }
 
   runtimeDirectives.push(

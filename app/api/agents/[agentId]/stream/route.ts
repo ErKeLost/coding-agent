@@ -8,16 +8,12 @@ import {
   upsertThreadSession,
 } from "@/lib/server/thread-session-store";
 import {
-  createWorkflowGraphSnapshot,
-  inferWorkflowAgentLabel,
-  summarizeThreadTitle,
-  type WorkflowGraphSnapshot,
-  type WorkflowTraceStep,
-} from "@/lib/workflow-graph";
-import {
   buildAgentRequestContext,
 } from "@/lib/server/agent-request-context";
 import { consumeThreadSteers } from "@/lib/server/steer-queue";
+import {
+  normalizeAgentMessageInput,
+} from "@/lib/server/agent-input";
 
 export const runtime = "nodejs";
 const BUILD_AGENT_ID = "build-agent";
@@ -39,17 +35,6 @@ const normalizeToolName = (value?: string | null) => {
 const isGenericToolName = (value?: string | null) => {
   const normalized = normalizeToolName(value)?.toLowerCase();
   return normalized ? GENERIC_TOOL_NAMES.has(normalized) : false;
-};
-
-const pickPreferredToolName = (...candidates: Array<string | undefined>) => {
-  const normalizedCandidates = candidates
-    .map((candidate) => normalizeToolName(candidate))
-    .filter((candidate): candidate is string => Boolean(candidate));
-
-  const specificCandidate = normalizedCandidates.find(
-    (candidate) => !isGenericToolName(candidate)
-  );
-  return specificCandidate ?? normalizedCandidates[0];
 };
 
 type StreamEvent =
@@ -121,11 +106,6 @@ type StreamEvent =
       type: "stream.event";
       eventName: "session.updated";
       previewUrl?: string;
-    }
-  | {
-      type: "stream.event";
-      eventName: "workflow.graph.updated";
-      graph: WorkflowGraphSnapshot;
     }
   | {
       type: "stream.event";
@@ -251,58 +231,6 @@ const normalizeQwenPrompt = <TMessage extends SystemLikeMessage>(args: {
   };
 };
 
-const normalizeImageMessageParts = (messages: unknown) => {
-  if (!Array.isArray(messages)) {
-    return messages;
-  }
-
-  return messages.map((message) => {
-    if (!message || typeof message !== "object") {
-      return message;
-    }
-
-    const typedMessage = message as {
-      role?: unknown;
-      content?: unknown;
-    };
-
-    if (!Array.isArray(typedMessage.content)) {
-      return message;
-    }
-
-    return {
-      ...typedMessage,
-      content: typedMessage.content.map((part) => {
-        if (!part || typeof part !== "object") {
-          return part;
-        }
-
-        const typedPart = part as {
-          type?: unknown;
-          mediaType?: unknown;
-          data?: unknown;
-          filename?: unknown;
-        };
-
-        if (
-          typedPart.type === "file" &&
-          typeof typedPart.mediaType === "string" &&
-          typedPart.mediaType.startsWith("image/") &&
-          typeof typedPart.data === "string"
-        ) {
-          return {
-            type: "image" as const,
-            mediaType: typedPart.mediaType,
-            image: typedPart.data,
-          };
-        }
-
-        return part;
-      }),
-    };
-  });
-};
-
 const summarizeIncomingMessageInput = (input: unknown) => {
   if (!Array.isArray(input)) {
     return {
@@ -367,7 +295,7 @@ export async function POST(
   }
 
   const messageInput = payload.messages
-    ? normalizeImageMessageParts(payload.messages)
+    ? normalizeAgentMessageInput(payload.messages)
     : payload.message;
   if (!messageInput) {
     return NextResponse.json({ error: "message is required" }, { status: 400 });
@@ -947,12 +875,8 @@ export async function POST(
   let lastSessionStateKey: string | undefined;
   let lastUsageKey: string | undefined;
   let latestPreviewUrl: string | undefined;
-  const executionSteps = new Map<string, WorkflowTraceStep>();
-  const executionOrder: string[] = [];
-  let latestGraph: WorkflowGraphSnapshot | null = null;
   let streamOutcome: "idle" | "streaming" | "done" | "error" = "idle";
   let activeAgentLabel: string | undefined = agent.name;
-  let activeAgentMeta: string | undefined;
   const pendingAppliedSteers: string[] = [];
   const memory =
     payload.memory ??
@@ -988,59 +912,6 @@ export async function POST(
       },
     });
     return streamResult.fullStream.getReader();
-  };
-
-  const getThreadTitle = () =>
-    typeof payload.message === "string" && payload.message.trim()
-      ? summarizeThreadTitle(payload.message)
-      : payload.threadId
-        ? payload.threadId
-        : "Thread";
-
-  const buildGraphSnapshot = (streamStatus: "idle" | "streaming" | "done" | "error") =>
-    createWorkflowGraphSnapshot({
-      threadId: payload.threadId,
-      title: getThreadTitle(),
-      previewUrl: latestPreviewUrl,
-      status: streamStatus,
-      activeAgentLabel,
-      activeAgentMeta,
-      steps: executionOrder
-        .map((toolCallId) => executionSteps.get(toolCallId))
-        .filter((step): step is WorkflowTraceStep => Boolean(step)),
-    });
-
-  const syncGraph = (
-    controller: ReadableStreamDefaultController<Uint8Array>,
-    streamStatus: "idle" | "streaming" | "done" | "error"
-  ) => {
-    const graph = buildGraphSnapshot(streamStatus);
-    streamOutcome = streamStatus;
-    latestGraph = graph;
-    enqueueJson(controller, {
-      type: "stream.event",
-      eventName: "workflow.graph.updated",
-      graph,
-    } satisfies StreamEvent);
-  };
-
-  const upsertExecutionStep = (toolCallId: string, patch: Partial<WorkflowTraceStep>) => {
-    const existing = executionSteps.get(toolCallId);
-    const toolName =
-      pickPreferredToolName(patch.toolName, existing?.toolName) ?? "未命名工具";
-    if (!existing) {
-      executionOrder.push(toolCallId);
-    }
-    executionSteps.set(toolCallId, {
-      toolCallId,
-      toolName,
-      agentLabel:
-        patch.agentLabel ??
-        existing?.agentLabel ??
-        inferWorkflowAgentLabel(toolName),
-      status: patch.status ?? existing?.status ?? "pending",
-      meta: patch.meta ?? existing?.meta,
-    });
   };
 
   const extractUsage = (value: unknown): LanguageModelUsage | undefined => {
@@ -1152,37 +1023,10 @@ export async function POST(
     if (event.eventName === "tool.call.started") {
       if (emittedToolStarts.has(event.toolCallId)) return;
       emittedToolStarts.add(event.toolCallId);
-      upsertExecutionStep(event.toolCallId, {
-        toolName: event.toolName,
-        agentLabel: activeAgentLabel,
-        status: "pending",
-        meta: "starting",
-      });
     }
     if (event.eventName === "tool.call.completed") {
       if (emittedToolCompletions.has(event.toolCallId)) return;
       emittedToolCompletions.add(event.toolCallId);
-      const result = event.result as
-        | {
-            previewUrl?: unknown;
-            deploymentUrl?: unknown;
-            url?: unknown;
-            sessionId?: unknown;
-          }
-        | undefined;
-      upsertExecutionStep(event.toolCallId, {
-        toolName: event.toolName,
-        agentLabel: activeAgentLabel,
-        status: "done",
-        meta:
-          typeof result?.previewUrl === "string" ||
-          typeof result?.deploymentUrl === "string" ||
-          typeof result?.url === "string"
-            ? "preview available"
-            : typeof result?.sessionId === "string"
-              ? `session ${String(result.sessionId).slice(0, 18)}`
-              : "completed",
-      });
     }
     if (event.eventName === "session.updated") {
       const sessionStateKey = `${event.previewUrl ?? ""}`;
@@ -1190,69 +1034,14 @@ export async function POST(
       lastSessionStateKey = sessionStateKey;
       latestPreviewUrl = event.previewUrl ?? latestPreviewUrl;
     }
-    if (event.eventName === "tool.call.progress" && event.toolCallId) {
-      upsertExecutionStep(event.toolCallId, {
-        toolName: event.toolName,
-        agentLabel: activeAgentLabel,
-        status:
-          event.runState === "failed" || event.runState === "timed_out"
-            ? "error"
-            : event.runState === "completed"
-              ? "done"
-              : "pending",
-        meta:
-          event.previewUrl
-            ? "preview available"
-            : event.stderr
-              ? "stderr emitted"
-              : event.stdout
-                ? "stdout emitted"
-                : event.message ?? event.step ?? event.status ?? "running",
-      });
-    }
-    if (event.eventName === "tool.call.failed") {
-      const failureId =
-        event.toolCallId ??
-        `${pickPreferredToolName(event.toolName) ?? "unnamed"}-${executionOrder.length + 1}`;
-      upsertExecutionStep(failureId, {
-        toolName: event.toolName,
-        agentLabel: activeAgentLabel,
-        status: "error",
-        meta: event.error,
-      });
-    }
     if (event.eventName === "agent.handoff.started") {
       activeAgentLabel =
         event.targetType === "agent"
           ? event.targetName ?? event.targetId
           : activeAgentLabel;
-      activeAgentMeta =
-        event.selectionReason ??
-        (event.targetType === "workflow"
-          ? `executing workflow ${event.targetName ?? event.targetId}`
-          : event.targetType === "tool"
-            ? `delegating tool ${event.targetName ?? event.targetId}`
-            : "delegated by routing agent");
-    }
-    if (event.eventName === "agent.handoff.completed") {
-      activeAgentMeta = "handoff completed";
     }
 
     enqueueJson(controller, event);
-    if (
-      event.eventName === "agent.handoff.started" ||
-      event.eventName === "agent.handoff.completed" ||
-      event.eventName === "tool.call.started" ||
-      event.eventName === "tool.call.progress" ||
-      event.eventName === "tool.call.completed" ||
-      event.eventName === "tool.call.failed" ||
-      event.eventName === "session.updated"
-    ) {
-      syncGraph(
-        controller,
-        event.eventName === "tool.call.failed" ? "error" : "streaming"
-      );
-    }
   };
 
   const emitUsageIfNeeded = (
@@ -1408,8 +1197,6 @@ export async function POST(
           });
         }
 
-        syncGraph(controller, "idle");
-
         const streamReader = await startAgentStream(cloneRequestContext(requestContext));
 
         while (true) {
@@ -1448,33 +1235,22 @@ export async function POST(
           error: error instanceof Error ? error.message : "Stream error",
         };
         enqueueJson(controller, errorPayload);
-        syncGraph(controller, "error");
       } finally {
         const finalStatus =
-          streamOutcome === "error" ||
-          executionOrder.some((toolCallId) => executionSteps.get(toolCallId)?.status === "error")
+          streamOutcome === "error"
             ? "error"
-            : executionOrder.length > 0
+            : emittedToolCompletions.size > 0 || latestPreviewUrl
               ? "done"
-              : latestPreviewUrl
-                ? "done"
-                : "idle";
+              : "idle";
         logger?.info("Mastra stream finished", {
           routeAgentId: agentId,
           threadId: payload.threadId ?? null,
           model: payload.model ?? null,
           workspaceRoot: effectiveWorkspaceRoot ?? null,
           status: finalStatus,
-          toolCalls: executionOrder.length,
+          toolCalls: emittedToolStarts.size,
           previewUrl: latestPreviewUrl ?? null,
         });
-        const finalGraph = buildGraphSnapshot(finalStatus);
-        latestGraph = finalGraph;
-        enqueueJson(controller, {
-          type: "stream.event",
-          eventName: "workflow.graph.updated",
-          graph: finalGraph,
-        } satisfies StreamEvent);
         if (payload.threadId) {
           try {
             await upsertThreadSession({
@@ -1482,7 +1258,6 @@ export async function POST(
               subtitle: payload.model,
               state: {
                 previewUrl: latestPreviewUrl,
-                graph: latestGraph ?? finalGraph,
               },
             });
           } catch {

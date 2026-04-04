@@ -65,8 +65,11 @@ import {
 import { Image } from "@/components/ai-elements/image";
 import { Plan } from "@/components/tool-ui/plan";
 import { AppSidebar } from "@/components/app-sidebar";
+import { BranchPicker } from "@/components/rovix/branch-picker";
+import { BottomTerminalPanel } from "@/components/rovix/bottom-terminal-panel";
 import { DiffFilePreview } from "@/components/rovix/diff-file-preview";
 import { FileMentionTextarea } from "@/components/rovix/file-mention-textarea";
+import { GitChangesDialog } from "@/components/rovix/git-changes-dialog";
 import { ShikiFilePreview } from "@/components/rovix/shiki-file-preview";
 import { WorkspaceSearchDialog } from "@/components/rovix/workspace-search-dialog";
 
@@ -87,19 +90,12 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Button } from "@/components/ui/button";
 import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
-import {
   SidebarInset,
   SidebarProvider,
   SidebarTrigger,
 } from "@/components/ui/sidebar";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
-import { modelSupportsImageInput } from "@/lib/model-capabilities";
 import {
   type DesktopWorkspaceNode,
   setStoredWorkspaceRoot,
@@ -120,6 +116,7 @@ import {
   SearchIcon,
   Settings2Icon,
   SparklesIcon,
+  SquareTerminalIcon,
   UploadIcon,
 } from "lucide-react";
 import { gooeyToast } from "goey-toast";
@@ -128,9 +125,6 @@ import {
   type ChatItem,
   type ToolStep,
 } from "@/lib/stream-event-bus";
-import {
-  summarizeThreadTitle as summarizeThreadTitleFromGraph,
-} from "@/lib/workflow-graph";
 import { useDesktopWorkspace } from "@/hooks/use-desktop-workspace";
 import { useThreadSession } from "@/hooks/use-thread-session";
 import { useAgentStream } from "@/hooks/use-agent-stream";
@@ -163,8 +157,11 @@ const summarizeWorkspaceRoot = (value: string | null | undefined) => {
   return segments.at(-1) ?? normalized;
 };
 
-const summarizeThreadTitle = (value?: string | null) =>
-  summarizeThreadTitleFromGraph(value ?? "");
+const summarizeThreadTitle = (value?: string | null) => {
+  const normalized = (value ?? "").replace(/\s+/g, " ").trim();
+  if (!normalized) return "Untitled thread";
+  return normalized.length > 42 ? `${normalized.slice(0, 39)}...` : normalized;
+};
 
 const ThreadHistoryLoadingState = () => (
   <div className="flex min-h-[240px] flex-1 items-center justify-center px-6 py-8">
@@ -1411,16 +1408,7 @@ const prepareAttachmentForModel = async (
 };
 
 const serializeItemsForThread = (items: ChatItem[]): ChatItem[] => {
-  return items.map((item) => {
-    if (item.type !== "message" || !item.images?.length) {
-      return item;
-    }
-
-    return {
-      ...item,
-      images: [],
-    };
-  });
+  return items;
 };
 
 // ─── File tree components (Editor view) ───────────────────────────────────
@@ -1621,6 +1609,8 @@ export default function Home() {
   const [threadSessionError, setThreadSessionError] = useState<string | null>(null);
   const [lastSubmittedMessage, setLastSubmittedMessage] =
     useState<PromptInputMessage | null>(null);
+  const [gitDialogOpen, setGitDialogOpen] = useState(false);
+  const [terminalExpanded, setTerminalExpanded] = useState(false);
 
   useEffect(() => {
     if (!hasMounted || !model) return;
@@ -1692,7 +1682,6 @@ export default function Home() {
     createId,
     parseSseEvent,
     prepareAttachmentForModel,
-    modelSupportsImageInput,
   });
 
   useEffect(() => {
@@ -1860,9 +1849,10 @@ export default function Home() {
     workspaceBranchLoading,
     handleOpenWorkspaceFile,
     handleChangeWorkspaceRoot,
+    handleRefreshDesktopWorkspace,
     handleSwitchWorkspaceBranch,
-    handleCommitWorkspace,
     handlePushWorkspaceBranch,
+    handleOpenWorkspaceTerminal,
   } = useDesktopWorkspace({
     hasMounted,
     recentThreadCount: recentThreads.length,
@@ -1947,7 +1937,7 @@ export default function Home() {
 
   const handleCreateBranch = useCallback(async () => {
     if (!isDesktopRuntime) return;
-    const branchName = window.prompt("新分支名称", "feature/");
+    const branchName = window.prompt("新分支名称", "main");
     if (!branchName?.trim()) return;
     await handleHeaderBranchChange(branchName.trim());
   }, [handleHeaderBranchChange, isDesktopRuntime]);
@@ -1995,8 +1985,15 @@ export default function Home() {
         </ModelSelector>
         <div className="app-shell flex h-screen min-w-0 w-full flex-col overflow-hidden bg-transparent text-foreground">
           <main className="min-h-0 flex-1 overflow-hidden">
-            <section className="flex h-full min-h-0 min-w-0 flex-col border-l border-border/50 bg-transparent">
-              <Card className="flex min-h-0 flex-1 flex-col gap-0 rounded-none border-0 bg-transparent pt-0 shadow-none">
+            <section
+              className="grid h-full min-h-0 min-w-0 border-l border-border/50 bg-transparent"
+              style={{
+                gridTemplateRows: terminalExpanded
+                  ? "minmax(0, 1fr) 372px"
+                  : "minmax(0, 1fr) 0px",
+              }}
+            >
+              <Card className="flex min-h-0 min-w-0 flex-col gap-0 overflow-hidden rounded-none border-0 bg-transparent pt-0 shadow-none">
                 <CardHeader className="border-border/50 border-b px-0 py-3">
                   <div
                     className={cn(
@@ -2040,30 +2037,13 @@ export default function Home() {
                       {workspaceBranches?.hasGit ? (
                         <>
                           <div className="flex h-9 max-w-full items-center overflow-hidden rounded-[14px] border border-border/60 bg-background/75 p-1 shadow-[0_8px_20px_rgba(0,0,0,0.07)] backdrop-blur-xl dark:bg-background/55">
-                            <div className="relative">
-                              <GitBranchIcon className="pointer-events-none absolute left-2.5 top-1/2 z-10 size-3 -translate-y-1/2 text-muted-foreground/80" />
-                              <Select
-                                value={workspaceBranches.currentBranch ?? ""}
-                                onValueChange={(value) => {
-                                  void handleHeaderBranchChange(value);
-                                }}
-                                disabled={workspaceBranchLoading}
-                              >
-                                <SelectTrigger
-                                  size="sm"
-                                  className="h-7 min-w-[112px] max-w-[180px] rounded-[10px] border-0 bg-transparent pl-8 pr-2 text-[11px] font-medium text-foreground/86 shadow-none outline-none ring-0 focus-visible:ring-0 dark:bg-transparent dark:hover:bg-transparent lg:min-w-[132px]"
-                                >
-                                  <SelectValue placeholder="选择分支" />
-                                </SelectTrigger>
-                                <SelectContent align="start" className="min-w-[180px]">
-                                  {workspaceBranches.branches.map((branch) => (
-                                    <SelectItem key={branch} value={branch} className="text-[12px]">
-                                      {branch}
-                                    </SelectItem>
-                                  ))}
-                                </SelectContent>
-                              </Select>
-                            </div>
+                            <BranchPicker
+                              branches={workspaceBranches.branches}
+                              currentBranch={workspaceBranches.currentBranch}
+                              loading={workspaceBranchLoading}
+                              onSelect={handleHeaderBranchChange}
+                              onCreate={handleHeaderBranchChange}
+                            />
                             <div className="mx-1 h-4 w-px bg-border/55" />
                             <DropdownMenu>
                               <DropdownMenuTrigger asChild>
@@ -2086,7 +2066,7 @@ export default function Home() {
                                   Git 操作
                                 </DropdownMenuLabel>
                                 <DropdownMenuItem
-                                  onClick={() => void handleCommitWorkspace()}
+                                  onClick={() => setGitDialogOpen(true)}
                                   disabled={workspaceBranchLoading || !workspaceBranches.hasChanges}
                                   className="rounded-[8px] px-2 py-1.5 text-[11px] font-medium"
                                 >
@@ -2121,7 +2101,7 @@ export default function Home() {
                           className="app-control h-9 rounded-lg border-0 px-3 text-[12px] font-normal text-foreground/78 shadow-none transition-colors hover:text-foreground"
                         >
                           <GitBranchIcon className="size-4" />
-                          初始化分支
+                          初始化 main
                         </Button>
                       )}
                     </div>
@@ -2443,6 +2423,22 @@ export default function Home() {
                                   </Button>
                                 </ModelSelectorTrigger>
                               </ModelSelector>
+                              <Tooltip>
+                                <TooltipTrigger asChild>
+                                  <Button
+                                    type="button"
+                                    variant="outline"
+                                    onClick={() => setTerminalExpanded((value) => !value)}
+                                    className="app-control h-8 w-8 shrink-0 rounded-[10px] border-0 px-0 shadow-none"
+                                    aria-label={terminalExpanded ? "隐藏终端" : "显示终端"}
+                                  >
+                                    <SquareTerminalIcon className="size-3.5" />
+                                  </Button>
+                                </TooltipTrigger>
+                                <TooltipContent side="top" sideOffset={8}>
+                                  {terminalExpanded ? "隐藏终端" : "显示终端"}
+                                </TooltipContent>
+                              </Tooltip>
                             </div>
                             <PromptInputTools className="shrink-0 gap-2 max-sm:ml-auto">
                               <PromptInputActionMenu>
@@ -2465,9 +2461,27 @@ export default function Home() {
                   </PromptInputProvider>
                 </CardFooter>
               </Card>
+              <BottomTerminalPanel
+                workspaceRoot={effectiveWorkspaceRoot}
+                isDesktopRuntime={isDesktopRuntime}
+                onOpenSystemTerminal={handleOpenWorkspaceTerminal}
+                expanded={terminalExpanded}
+                onExpandedChange={setTerminalExpanded}
+              />
             </section>
           </main>
         </div>
+        <GitChangesDialog
+          open={gitDialogOpen}
+          onOpenChange={setGitDialogOpen}
+          workspaceRoot={effectiveWorkspaceRoot}
+          branchState={workspaceBranches}
+          onCommitComplete={async () => {
+            setGitDialogOpen(false);
+            await handleRefreshDesktopWorkspace();
+          }}
+          onPush={handlePushWorkspace}
+        />
         <WorkspaceSearchDialog
           open={workspaceSearchOpen}
           onOpenChange={setWorkspaceSearchOpen}

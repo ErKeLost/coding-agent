@@ -105,6 +105,13 @@
   --app-specular-soft: rgba(255, 255, 255, 0.28);
   --app-glow-a: rgba(191, 167, 126, 0.1);
   --app-glow-b: rgba(212, 185, 146, 0.08);
+  --terminal-panel-bg: color-mix(in srgb, var(--app-panel-bg) 90%, var(--background));
+  --terminal-surface: color-mix(in srgb, var(--app-soft-fill) 78%, var(--background));
+  --terminal-header-bg: color-mix(in srgb, var(--app-soft-fill-strong) 84%, var(--background));
+  --terminal-border: color-mix(in srgb, var(--app-panel-border) 92%, transparent);
+  --terminal-text: color-mix(in srgb, var(--foreground) 92%, var(--primary) 8%);
+  --terminal-muted: color-mix(in srgb, var(--muted-foreground) 88%, transparent);
+  --terminal-accent: color-mix(in srgb, var(--primary) 82%, var(--foreground) 18%);
   --diffs-font-family: var(--font-geist-mono), ui-monospace, SFMono-Regular,
     Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
   --diffs-header-font-family: var(--font-geist-sans), ui-sans-serif, system-ui,
@@ -166,6 +173,13 @@
   --app-specular-soft: rgba(255, 255, 255, 0.05);
   --app-glow-a: rgba(161, 126, 76, 0.18);
   --app-glow-b: rgba(120, 92, 58, 0.12);
+  --terminal-panel-bg: color-mix(in srgb, var(--app-panel-bg) 92%, var(--background));
+  --terminal-surface: color-mix(in srgb, var(--app-soft-fill) 84%, var(--background));
+  --terminal-header-bg: color-mix(in srgb, var(--app-control-bg) 88%, var(--background));
+  --terminal-border: color-mix(in srgb, var(--app-panel-border) 92%, transparent);
+  --terminal-text: color-mix(in srgb, var(--foreground) 92%, var(--primary) 8%);
+  --terminal-muted: color-mix(in srgb, var(--muted-foreground) 88%, transparent);
+  --terminal-accent: color-mix(in srgb, var(--primary) 84%, var(--foreground) 16%);
 }
 
 :root[data-color-theme="ocean"] {
@@ -210,6 +224,13 @@
   --app-hairline: rgba(88, 150, 186, 0.16);
   --app-glow-a: rgba(65, 157, 214, 0.12);
   --app-glow-b: rgba(84, 197, 182, 0.08);
+  --terminal-panel-bg: color-mix(in srgb, var(--app-panel-bg) 90%, var(--background));
+  --terminal-surface: color-mix(in srgb, var(--app-soft-fill) 78%, var(--background));
+  --terminal-header-bg: color-mix(in srgb, var(--app-soft-fill-strong) 84%, var(--background));
+  --terminal-border: color-mix(in srgb, var(--app-panel-border) 92%, transparent);
+  --terminal-text: color-mix(in srgb, var(--foreground) 90%, var(--primary) 10%);
+  --terminal-muted: color-mix(in srgb, var(--muted-foreground) 88%, transparent);
+  --terminal-accent: color-mix(in srgb, var(--primary) 84%, var(--foreground) 16%);
 }
 
 .dark[data-color-theme="ocean"] {
@@ -252,6 +273,32 @@
   --app-panel-border: rgba(88, 162, 210, 0.14);
   --app-glow-a: rgba(61, 145, 202, 0.18);
   --app-glow-b: rgba(54, 194, 188, 0.12);
+  --terminal-panel-bg: color-mix(in srgb, var(--app-panel-bg) 92%, var(--background));
+  --terminal-surface: color-mix(in srgb, var(--app-soft-fill) 84%, var(--background));
+  --terminal-header-bg: color-mix(in srgb, var(--app-control-bg) 88%, var(--background));
+  --terminal-border: color-mix(in srgb, var(--app-panel-border) 92%, transparent);
+  --terminal-text: color-mix(in srgb, var(--foreground) 92%, var(--primary) 8%);
+  --terminal-muted: color-mix(in srgb, var(--muted-foreground) 88%, transparent);
+  --terminal-accent: color-mix(in srgb, var(--primary) 84%, var(--foreground) 16%);
+}
+
+.bottom-terminal-panel .xterm {
+  height: 100%;
+  background: var(--terminal-surface) !important;
+  padding: 6px 8px 16px;
+  font-size: 11px;
+}
+
+.bottom-terminal-panel .xterm-viewport {
+  background: var(--terminal-surface) !important;
+  scrollbar-gutter: stable;
+}
+
+.bottom-terminal-panel .xterm-screen,
+.bottom-terminal-panel .xterm-rows,
+.bottom-terminal-panel .xterm-scroll-area {
+  background: var(--terminal-surface) !important;
+  margin-left: 0 !important;
 }
 
 :root[data-color-theme="forest"] {
@@ -295,6 +342,13 @@
   --app-hairline: rgba(102, 143, 111, 0.16);
   --app-glow-a: rgba(80, 156, 116, 0.11);
   --app-glow-b: rgba(132, 166, 84, 0.08);
+  --terminal-panel-bg: color-mix(in srgb, var(--app-panel-bg) 90%, var(--background));
+  --terminal-surface: color-mix(in srgb, var(--app-soft-fill) 78%, var(--background));
+  --terminal-header-bg: color-mix(in srgb, var(--app-soft-fill-strong) 84%, var(--background));
+  --terminal-border: color-mix(in srgb, var(--app-panel-border) 92%, transparent);
+  --terminal-text: color-mix(in srgb, var(--foreground) 90%, var(--primary) 10%);
+  --terminal-muted: color-mix(in srgb, var(--muted-foreground) 88%, transparent);
+  --terminal-accent: color-mix(in srgb, var(--primary) 84%, var(--foreground) 16%);
 }
 
 .dark[data-color-theme="forest"] {
@@ -337,6 +391,13 @@
   --app-panel-border: rgba(104, 164, 124, 0.13);
   --app-glow-a: rgba(78, 164, 118, 0.18);
   --app-glow-b: rgba(142, 170, 77, 0.12);
+  --terminal-panel-bg: color-mix(in srgb, var(--app-panel-bg) 92%, var(--background));
+  --terminal-surface: color-mix(in srgb, var(--app-soft-fill) 84%, var(--background));
+  --terminal-header-bg: color-mix(in srgb, var(--app-control-bg) 88%, var(--background));
+  --terminal-border: color-mix(in srgb, var(--app-panel-border) 92%, transparent);
+  --terminal-text: color-mix(in srgb, var(--foreground) 92%, var(--primary) 8%);
+  --terminal-muted: color-mix(in srgb, var(--muted-foreground) 88%, transparent);
+  --terminal-accent: color-mix(in srgb, var(--primary) 84%, var(--foreground) 16%);
 }
 
 :root[data-color-theme="rose"] {
@@ -380,6 +441,13 @@
   --app-hairline: rgba(164, 109, 124, 0.16);
   --app-glow-a: rgba(193, 93, 117, 0.1);
   --app-glow-b: rgba(214, 151, 99, 0.08);
+  --terminal-panel-bg: color-mix(in srgb, var(--app-panel-bg) 90%, var(--background));
+  --terminal-surface: color-mix(in srgb, var(--app-soft-fill) 78%, var(--background));
+  --terminal-header-bg: color-mix(in srgb, var(--app-soft-fill-strong) 84%, var(--background));
+  --terminal-border: color-mix(in srgb, var(--app-panel-border) 92%, transparent);
+  --terminal-text: color-mix(in srgb, var(--foreground) 90%, var(--primary) 10%);
+  --terminal-muted: color-mix(in srgb, var(--muted-foreground) 88%, transparent);
+  --terminal-accent: color-mix(in srgb, var(--primary) 84%, var(--foreground) 16%);
 }
 
 .dark[data-color-theme="rose"] {
@@ -422,6 +490,30 @@
   --app-panel-border: rgba(188, 108, 133, 0.13);
   --app-glow-a: rgba(188, 92, 121, 0.18);
   --app-glow-b: rgba(205, 137, 90, 0.12);
+  --terminal-panel-bg: color-mix(in srgb, var(--app-panel-bg) 92%, var(--background));
+  --terminal-surface: color-mix(in srgb, var(--app-soft-fill) 84%, var(--background));
+  --terminal-header-bg: color-mix(in srgb, var(--app-control-bg) 88%, var(--background));
+  --terminal-border: color-mix(in srgb, var(--app-panel-border) 92%, transparent);
+  --terminal-text: color-mix(in srgb, var(--foreground) 92%, var(--primary) 8%);
+  --terminal-muted: color-mix(in srgb, var(--muted-foreground) 88%, transparent);
+  --terminal-accent: color-mix(in srgb, var(--primary) 84%, var(--foreground) 16%);
+}
+
+:root,
+.dark,
+:root[data-color-theme="ocean"],
+.dark[data-color-theme="ocean"],
+:root[data-color-theme="forest"],
+.dark[data-color-theme="forest"],
+:root[data-color-theme="rose"],
+.dark[data-color-theme="rose"] {
+  --terminal-panel-bg: color-mix(in srgb, var(--card) 74%, var(--background));
+  --terminal-surface: color-mix(in srgb, var(--card) 88%, var(--background));
+  --terminal-header-bg: color-mix(in srgb, var(--card) 94%, var(--background));
+  --terminal-border: color-mix(in srgb, var(--app-panel-border) 92%, transparent);
+  --terminal-text: color-mix(in srgb, var(--foreground) 96%, var(--primary) 4%);
+  --terminal-muted: color-mix(in srgb, var(--muted-foreground) 90%, transparent);
+  --terminal-accent: color-mix(in srgb, var(--primary) 72%, var(--foreground) 28%);
 }
 
 @layer base {

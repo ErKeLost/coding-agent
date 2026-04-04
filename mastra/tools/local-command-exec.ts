@@ -1,18 +1,16 @@
-import { randomUUID } from 'node:crypto';
 import { spawn } from 'node:child_process';
-import { mkdirSync, writeFileSync } from 'node:fs';
-import os from 'node:os';
-import path from 'node:path';
-import { upsertProcessRecord } from './local-process-registry';
+import { startManagedProcess } from './local-process-manager';
 
 const DEFAULT_TIMEOUT_MS = 120_000;
+
+export type ExecuteLocalCommandKind = 'command' | 'shell' | 'unified-exec';
 
 type ExecuteLocalCommandOptions = {
   command: string;
   cwd: string;
   timeout?: number;
   background?: boolean;
-  kind?: 'command' | 'shell' | 'unified-exec';
+  kind?: ExecuteLocalCommandKind;
 };
 
 type ExecuteLocalCommandResult = {
@@ -28,12 +26,6 @@ type ExecuteLocalCommandResult = {
   logPath?: string;
 };
 
-function ensureLogDir() {
-  const logDir = path.join(os.homedir(), '.coding-agent', 'logs');
-  mkdirSync(logDir, { recursive: true });
-  return logDir;
-}
-
 export async function executeLocalCommand({
   command,
   cwd,
@@ -44,38 +36,10 @@ export async function executeLocalCommand({
   const startedAt = Date.now();
 
   if (background) {
-    const logDir = ensureLogDir();
-    const logPath = path.join(logDir, `${kind}-${Date.now()}.log`);
-    writeFileSync(logPath, '');
-
-    const child = spawn(command, {
-      cwd,
-      detached: true,
-      env: { ...process.env },
-      shell: true,
-      stdio: ['ignore', 'pipe', 'pipe'],
-    });
-
-    child.stdout?.on('data', chunk => {
-      writeFileSync(logPath, chunk, { flag: 'a' });
-    });
-    child.stderr?.on('data', chunk => {
-      writeFileSync(logPath, chunk, { flag: 'a' });
-    });
-    child.unref();
-
-    const processId = `${kind}-${randomUUID()}`;
-    const now = new Date().toISOString();
-    upsertProcessRecord({
-      id: processId,
+    const managed = startManagedProcess({
       kind,
       command,
-      workingDirectory: cwd,
-      pid: child.pid ?? undefined,
-      logPath,
-      status: 'running',
-      createdAt: now,
-      updatedAt: now,
+      cwd,
     });
 
     return {
@@ -85,9 +49,9 @@ export async function executeLocalCommand({
       stderr: '',
       command,
       executionTime: Date.now() - startedAt,
-      pid: child.pid ?? undefined,
-      processId,
-      logPath,
+      pid: managed.pid,
+      processId: managed.processId,
+      logPath: managed.logPath,
     };
   }
 

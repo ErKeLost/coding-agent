@@ -7,6 +7,7 @@ import {
   getWorkspaceBranches,
   isTauriDesktop,
   loadDesktopWorkspace,
+  openWorkspaceTerminal,
   pickWorkspaceDirectory,
   pushWorkspaceBranch,
   readDesktopWorkspaceFile,
@@ -230,6 +231,11 @@ export function useDesktopWorkspace({
     }
   }, [isDesktopRuntime, loadDesktopWorkspaceFromPath, workspaceRoot]);
 
+  const handleOpenWorkspaceTerminal = useCallback(async () => {
+    if (!isDesktopRuntime || !workspaceRoot) return;
+    await openWorkspaceTerminal(workspaceRoot);
+  }, [isDesktopRuntime, workspaceRoot]);
+
   return {
     isDesktopRuntime,
     desktopWorkspace,
@@ -256,5 +262,6 @@ export function useDesktopWorkspace({
     handleSwitchWorkspaceBranch,
     handleCommitWorkspace,
     handlePushWorkspaceBranch,
+    handleOpenWorkspaceTerminal,
   };
 }
