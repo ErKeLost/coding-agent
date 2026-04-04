@@ -231,25 +231,35 @@ export default function App() {
   return (
     <main className="site-shell">
       <section className="hero-section">
+        <video
+          className="hero-video"
+          autoPlay
+          loop
+          muted
+          playsInline
+          preload="auto"
+          aria-hidden="true"
+        >
+          <source src={heroVideoUrl} type="video/mp4" />
+        </video>
+
         <div className="hero-wash" aria-hidden="true" />
         <div className="hero-grid" aria-hidden="true" />
 
         <div className="hero-frame">
-          <a href={releasePage} target="_blank" rel="noreferrer" className="brand-lockup">
-            <img className="brand-logo" src="/logo.png" alt="Rovix logo" width="72" height="72" />
-            <span className="brand-copy">
-              <strong>Rovix</strong>
-              <span>AI coding workspace</span>
-            </span>
-          </a>
-
           <div className="hero-body">
             <div className="hero-copy hero-copy-simple">
-              <p className="hero-kicker">Defaulting to dune light</p>
-              <h1 className="hero-heading hero-heading-simple">A calmer desktop for serious AI coding.</h1>
-              <p className="hero-description hero-description-simple">
-                Run agents, inspect files, steer plans, and ship patches in one warm, low-noise workspace built for long debugging sessions.
-              </p>
+              <a href={releasePage} target="_blank" rel="noreferrer" className="brand-mark">
+                <span className="brand-halo" aria-hidden="true" />
+                <img className="brand-logo hero-brand-logo" src="/logo.png" alt="Rovix logo" width="120" height="120" />
+                <span className="brand-copy hero-brand-copy">
+                  <strong>Rovix</strong>
+                  <span>{releaseLabel}</span>
+                </span>
+              </a>
+
+              <h1 className="hero-heading hero-heading-simple">Your shortcut to AI coding.</h1>
+              <p className="hero-description hero-description-simple">One workspace. Agent to patch.</p>
 
               <div className="hero-actions hero-actions-simple">
                 <a
@@ -271,26 +281,9 @@ export default function App() {
               </div>
 
               <div className="release-meta release-meta-simple" aria-live="polite">
-                <span>{releaseLabel}</span>
-                <span className="meta-dot" aria-hidden="true">•</span>
                 <span>{releaseDateLabel}</span>
                 <span className="meta-dot" aria-hidden="true">•</span>
                 <span>{primaryLabel}</span>
-              </div>
-
-              <div className="platform-strip" aria-label="Available downloads">
-                {targets.map((target) => (
-                  <a
-                    key={target.label}
-                    href={target.href}
-                    target="_blank"
-                    rel="noreferrer"
-                    className={target.direct ? 'platform-pill' : 'platform-pill platform-pill-muted'}
-                  >
-                    <span>{target.label}</span>
-                    <span>{target.note}</span>
-                  </a>
-                ))}
               </div>
 
               {releaseError ? (
@@ -298,35 +291,6 @@ export default function App() {
                   Release metadata is unavailable right now. Downloads fall back to the latest GitHub release page.
                 </p>
               ) : null}
-
-              <a href={releasePage} target="_blank" rel="noreferrer" className="announcement-pill">
-                <span>Always latest</span>
-                <span className="announcement-muted">View release notes</span>
-              </a>
-            </div>
-
-            <div className="hero-preview" aria-hidden="true">
-              <div className="preview-card">
-                <div className="preview-toolbar">
-                  <span />
-                  <span />
-                  <span />
-                </div>
-                <div className="preview-copy">
-                  <p>Local-first workspace</p>
-                  <h2>Threads, tools, patches, one canvas.</h2>
-                </div>
-                <video
-                  className="preview-video"
-                  autoPlay
-                  loop
-                  muted
-                  playsInline
-                  preload="auto"
-                >
-                  <source src={heroVideoUrl} type="video/mp4" />
-                </video>
-              </div>
             </div>
           </div>
         </div>
