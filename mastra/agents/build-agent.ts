@@ -105,6 +105,7 @@ const buildInstructions = ({ requestContext }: { requestContext: RequestContext 
 - For coding work, prefer concrete tool actions before explanatory prose.
 - Start by reading or locating the relevant files with read/list/grep when context is incomplete.
 - Use write/edit only after you understand the target files.
+- Avoid re-reading the same file with the same intent unless the file changed, the first read was incomplete, or you need a different range for verification.
 - Use bash for validation or project commands.
 - Use shell or unified_exec when a Codex-style command execution surface is more appropriate.
 - Prefer exec_command + write_stdin for long-running or interactive background terminal sessions.

@@ -68,6 +68,7 @@ import { WorkspaceComposerShell } from "@/components/rovix/workspace/workspace-c
 import { WorkspaceModelTerminalControls } from "@/components/rovix/workspace/workspace-model-terminal-controls";
 import { WorkspacePageLayout } from "@/components/rovix/workspace/workspace-page-layout";
 import { WorkspacePromptAttachments } from "@/components/rovix/workspace/workspace-prompt-attachments";
+import { AvatarCornerWidget } from "@/components/avatar/avatar-corner-widget";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -84,6 +85,7 @@ import { type ChatItem, type ToolStep } from "@/lib/stream-event-bus";
 import { useDesktopWorkspace } from "@/hooks/use-desktop-workspace";
 import { useThreadSession } from "@/hooks/use-thread-session";
 import { useAgentStream } from "@/hooks/use-agent-stream";
+import { useAvatarDirector } from "@/hooks/use-avatar-director";
 
 const formatRelativeUpdatedAt = (updatedAt: number) => {
   if (!updatedAt) return "workspace";
@@ -255,6 +257,13 @@ const getNumber = (value: unknown) =>
   typeof value === "number" ? value : undefined;
 
 const toDisplayPath = (value: string) => value.replace(/^\/workspace\//, "");
+
+const toDisplayLeaf = (value: string) => {
+  const normalized = toDisplayPath(value).replace(/\/+$/, "");
+  if (!normalized) return value;
+  const segments = normalized.split("/").filter(Boolean);
+  return segments.at(-1) ?? normalized;
+};
 
 const truncateText = (value: string, max = 80) =>
   value.length > max ? `${value.slice(0, max - 3)}...` : value;
@@ -1185,7 +1194,7 @@ const formatToolMeta = (item: Extract<ChatItem, { type: "tool" }>) => {
   const command = getString(args.command);
 
   if (name === "write" && filePath) {
-    return `file: ${toDisplayPath(filePath)}`;
+    return toDisplayLeaf(filePath);
   }
   if (name === "writeFiles") {
     const files = Array.isArray(args.files)
@@ -1194,13 +1203,13 @@ const formatToolMeta = (item: Extract<ChatItem, { type: "tool" }>) => {
           .filter((entry): entry is string => Boolean(entry))
           .map(toDisplayPath)
       : [];
-    return files.length ? `files: ${formatList(files)}` : null;
+    return files.length ? formatList(files.map(toDisplayLeaf)) : null;
   }
   if (name === "read" && filePath) {
-    return `file: ${toDisplayPath(filePath)}`;
+    return toDisplayLeaf(filePath);
   }
   if (name === "list") {
-    return `path: ${toDisplayPath(path ?? ".")}`;
+    return toDisplayPath(path ?? ".");
   }
   if (name === "glob" && pattern) {
     return `pattern: ${truncateText(pattern, 60)}${
@@ -1225,7 +1234,7 @@ const formatToolMeta = (item: Extract<ChatItem, { type: "tool" }>) => {
   }
   if (name === "edit" && filePath) {
     const replaceAll = args.replaceAll ? " | replace all" : "";
-    return `file: ${toDisplayPath(filePath)}${replaceAll}`;
+    return `${toDisplayLeaf(filePath)}${replaceAll}`;
   }
   if (name === "patch") {
     const files = getPatchFilesFromItem(item);
@@ -1278,7 +1287,7 @@ const formatToolMeta = (item: Extract<ChatItem, { type: "tool" }>) => {
           .filter((entry): entry is string => typeof entry === "string")
           .map(toDisplayPath)
       : [];
-    return paths.length ? `paths: ${formatList(paths)}` : null;
+    return paths.length ? formatList(paths.map(toDisplayLeaf)) : null;
   }
   if (name === "mv") {
     const source = getString(args.source);
@@ -1289,13 +1298,13 @@ const formatToolMeta = (item: Extract<ChatItem, { type: "tool" }>) => {
   }
   if (name === "rm" && path) {
     const recursive = args.recursive ? " | recursive" : "";
-    return `path: ${toDisplayPath(path)}${recursive}`;
+    return `${toDisplayPath(path)}${recursive}`;
   }
   if (name === "mkdir" && path) {
-    return `path: ${toDisplayPath(path)}`;
+    return toDisplayPath(path);
   }
   if (name === "chmod" && path) {
-    return `path: ${toDisplayPath(path)}`;
+    return toDisplayPath(path);
   }
   if (name === "ast_grep_search") {
     const lang = getString(args.lang);
@@ -1316,8 +1325,8 @@ const formatToolMeta = (item: Extract<ChatItem, { type: "tool" }>) => {
     }${lang ? ` | lang ${lang}` : ""}`;
   }
 
-  if (filePath) return `file: ${toDisplayPath(filePath)}`;
-  if (path) return `path: ${toDisplayPath(path)}`;
+  if (filePath) return toDisplayLeaf(filePath);
+  if (path) return toDisplayPath(path);
   if (query) return `query: ${truncateText(query, 80)}`;
   if (pattern) return `pattern: ${truncateText(pattern, 60)}`;
   if (command) return `command: ${command}`;
@@ -2048,6 +2057,15 @@ export default function Home() {
   }, [items]);
 
   const activeError = error ?? threadSessionError;
+  const { directive: avatarDirective, thinking: avatarThinking } =
+    useAvatarDirector({
+      threadId,
+      threadTitle: activeThreadRecord?.title ?? null,
+      workspaceLabel: activeWorkspaceLabel,
+      model,
+      streamStatus: status,
+      items,
+    });
 
   useEffect(() => {
     if (!activeError) return;
@@ -2226,7 +2244,7 @@ export default function Home() {
         recentThreads={recentThreads}
         workspaceRoot={effectiveWorkspaceRoot}
       />
-      <SidebarInset className="app-shell min-w-0 overflow-hidden border-l border-border/55 bg-transparent">
+      <SidebarInset className="app-shell relative min-w-0 overflow-hidden border-l border-border/55 bg-transparent">
         <ModelSelector open={modelDialogOpen} onOpenChange={setModelDialogOpen}>
           <ModelSelectorContent
             className="max-w-[430px] rounded-[22px]"
@@ -2693,6 +2711,7 @@ export default function Home() {
             void handleSelectEditorFile(path);
           }}
         />
+        <AvatarCornerWidget directive={avatarDirective} thinking={avatarThinking} />
       </SidebarInset>
     </SidebarProvider>
   );
