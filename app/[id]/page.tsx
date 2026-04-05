@@ -12,6 +12,7 @@ import { getUsage } from "tokenlens";
 import type { LanguageModelUsage } from "ai";
 import type { FileUIPart } from "ai";
 import { useParams, useRouter } from "next/navigation";
+import { Icon } from "@iconify/react";
 
 import {
   Conversation,
@@ -76,21 +77,6 @@ import {
   type DesktopWorkspaceNode,
   setStoredWorkspaceRoot,
 } from "@/lib/desktop-workspace";
-import {
-  AppWindowIcon,
-  CameraIcon,
-  CheckIcon,
-  ChevronRightIcon,
-  FileCode2Icon,
-  FolderIcon,
-  GitBranchIcon,
-  KeyboardIcon,
-  LoaderCircleIcon,
-  MonitorIcon,
-  MousePointer2Icon,
-  SparklesIcon,
-  UploadIcon,
-} from "lucide-react";
 import { gooeyToast } from "goey-toast";
 
 import { type ChatItem, type ToolStep } from "@/lib/stream-event-bus";
@@ -136,7 +122,11 @@ const summarizeThreadTitle = (value?: string | null) => {
 
 const ThreadHistoryLoadingState = () => (
   <div className="flex min-h-[240px] flex-1 items-center justify-center px-6 py-8">
-    <LoaderCircleIcon className="size-5 animate-spin text-muted-foreground/70" />
+    <Icon
+      icon="solar:refresh-linear"
+      className="size-5 animate-spin text-muted-foreground/70"
+      aria-hidden="true"
+    />
   </div>
 );
 
@@ -174,6 +164,13 @@ const models = [
   {
     id: "openrouter/openai/gpt-5.4-mini",
     name: "GPT-5.4 mini",
+    chef: "OpenAI",
+    chefSlug: "openai",
+    providers: ["openrouter"],
+  },
+  {
+    id: "openrouter/openai/gpt-5.4-nano",
+    name: "GPT-5.4 nano",
     chef: "OpenAI",
     chefSlug: "openai",
     providers: ["openrouter"],
@@ -281,6 +278,165 @@ const extractPatchFiles = (patchText: string) => {
   return Array.from(files);
 };
 
+const getToolRawTextArg = (value: unknown, keys: string[]) => {
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    return trimmed || undefined;
+  }
+
+  if (!isRecord(value)) return undefined;
+
+  for (const key of keys) {
+    const direct = getString(value[key])?.trim();
+    if (direct) return direct;
+  }
+
+  if (isRecord(value.input)) {
+    for (const key of keys) {
+      const nested = getString(value.input[key])?.trim();
+      if (nested) return nested;
+    }
+  }
+
+  if (isRecord(value.payload)) {
+    for (const key of keys) {
+      const nested = getString(value.payload[key])?.trim();
+      if (nested) return nested;
+    }
+    if (isRecord(value.payload.input)) {
+      for (const key of keys) {
+        const nested = getString(value.payload.input[key])?.trim();
+        if (nested) return nested;
+      }
+    }
+  }
+
+  return undefined;
+};
+
+const getPatchTextFromArgs = (value: unknown) =>
+  getToolRawTextArg(value, ["patchText", "patch", "input", "text"]);
+
+const getCommandTextFromArgs = (value: unknown) =>
+  getToolRawTextArg(value, ["command", "cmd", "script"]);
+
+const getPatchLineStats = (patchText: string) => {
+  let additions = 0;
+  let deletions = 0;
+
+  for (const line of patchText.split("\n")) {
+    if (
+      !line ||
+      line.startsWith("+++ ") ||
+      line.startsWith("--- ") ||
+      line.startsWith("@@") ||
+      line.startsWith("*** ")
+    ) {
+      continue;
+    }
+    if (line.startsWith("+")) additions += 1;
+    if (line.startsWith("-")) deletions += 1;
+  }
+
+  return { additions, deletions };
+};
+
+const normalizeInlineText = (value: string) =>
+  value.replace(/\s+/g, " ").trim();
+
+const getResultFileList = (value: unknown) => {
+  if (!Array.isArray(value)) return [];
+  const files = value
+    .map((entry) => {
+      if (typeof entry === "string") return entry;
+      if (!isRecord(entry)) return undefined;
+      return (
+        getString(entry.path) ??
+        getString(entry.filePath) ??
+        getString(entry.relativePath) ??
+        getString(entry.file)
+      );
+    })
+    .filter((entry): entry is string => Boolean(entry))
+    .map(toDisplayPath);
+  return Array.from(new Set(files));
+};
+
+const getToolExtraDetails = (item: Extract<ChatItem, { type: "tool" }>) => {
+  const normalizedName = item.name.trim().toLowerCase();
+  const args = getToolArgsRecord(item.args);
+  const result = getToolResultRecord(item);
+  const metadata = getToolResultMetadata(item);
+  const details: string[] = [];
+
+  if (normalizedName === "patch" || normalizedName === "apply_patch") {
+    const patchText = getPatchTextFromArgs(item.args);
+    const patchFiles = patchText
+      ? extractPatchFiles(patchText).map(toDisplayPath)
+      : [];
+    const resultFiles = getResultFileList(result?.files);
+    const metadataFiles = getResultFileList(metadata?.files);
+    const changedFiles = getResultFileList(metadata?.changedFiles);
+    const fallbackFiles =
+      resultFiles.length > 0
+        ? resultFiles
+        : metadataFiles.length > 0
+          ? metadataFiles
+          : changedFiles;
+    const files = patchFiles.length > 0 ? patchFiles : fallbackFiles;
+    const patchStats = patchText ? getPatchLineStats(patchText) : null;
+    if (files.length > 0 || patchStats) {
+      const fileSummary =
+        files.length > 0 ? formatList(files, 4) : "inline patch";
+      const statSummary =
+        patchStats && (patchStats.additions > 0 || patchStats.deletions > 0)
+          ? ` | +${patchStats.additions} -${patchStats.deletions}`
+          : "";
+      details.push(`改动: ${fileSummary}${statSummary}`);
+    }
+  }
+
+  const isRunTool =
+    normalizedName === "runcommand" ||
+    normalizedName === "bash" ||
+    normalizedName === "exec_command" ||
+    normalizedName === "unified_exec" ||
+    normalizedName === "shell_command";
+  if (isRunTool) {
+    const command =
+      getString(args?.command) ??
+      getCommandTextFromArgs(item.args) ??
+      getString(result?.command) ??
+      getString(metadata?.command);
+    const exitCode =
+      getNumber(result?.exitCode) ??
+      getNumber(metadata?.exitCode) ??
+      getNumber(result?.code);
+    if (command) {
+      details.push(
+        `运行: ${truncateText(normalizeInlineText(command), 88)}${
+          exitCode !== undefined ? ` | exit ${exitCode}` : ""
+        }`,
+      );
+    }
+
+    const stepOutput = [...(item.steps ?? [])]
+      .reverse()
+      .map((step) => step.stderr ?? step.stdout)
+      .find((entry) => typeof entry === "string" && entry.trim().length > 0);
+    const output =
+      getString(result?.stderr) ??
+      getString(result?.stdout) ??
+      getString(result?.output) ??
+      stepOutput;
+    if (output) {
+      details.push(`输出: ${truncateText(normalizeInlineText(output), 96)}`);
+    }
+  }
+
+  return details;
+};
+
 const getToolArgsRecord = (value: unknown) => {
   if (typeof value === "string") {
     try {
@@ -327,6 +483,9 @@ const TOOL_LABELS: Record<string, string> = {
   glob: "glob",
   bash: "bash",
   runcommand: "runCommand",
+  exec_command: "runCommand",
+  unified_exec: "runCommand",
+  write_stdin: "writeStdin",
   webfetch: "webFetch",
   websearch: "webSearch",
   codesearch: "codeSearch",
@@ -408,6 +567,8 @@ const getLanguageFromPath = (filePath?: string | null) => {
   if (normalized.endsWith(".md")) return "markdown";
   if (normalized.endsWith(".css")) return "css";
   if (normalized.endsWith(".html")) return "html";
+  if (normalized.endsWith(".vue")) return "vue";
+  if (normalized.endsWith(".svelte")) return "svelte";
   if (normalized.endsWith(".yml") || normalized.endsWith(".yaml"))
     return "yaml";
   if (normalized.endsWith(".sh")) return "bash";
@@ -728,15 +889,27 @@ const ComputerUseToolPreview = ({
   const toolName = item.name.toLowerCase();
 
   const icon = toolName.includes("screenshot") ? (
-    <CameraIcon className="size-3.5" />
+    <Icon icon="solar:camera-linear" className="size-3.5" aria-hidden="true" />
   ) : toolName.includes("keyboard") ? (
-    <KeyboardIcon className="size-3.5" />
+    <Icon
+      icon="solar:keyboard-linear"
+      className="size-3.5"
+      aria-hidden="true"
+    />
   ) : toolName.includes("window") ? (
-    <AppWindowIcon className="size-3.5" />
+    <Icon
+      icon="solar:window-frame-linear"
+      className="size-3.5"
+      aria-hidden="true"
+    />
   ) : toolName.includes("display") ? (
-    <MonitorIcon className="size-3.5" />
+    <Icon icon="solar:monitor-linear" className="size-3.5" aria-hidden="true" />
   ) : (
-    <MousePointer2Icon className="size-3.5" />
+    <Icon
+      icon="solar:cursor-linear"
+      className="size-3.5"
+      aria-hidden="true"
+    />
   );
 
   return (
@@ -815,7 +988,11 @@ const ComputerUseToolPreview = ({
                 className="rounded-xl border border-border/40 bg-muted/15 px-3 py-2 text-[10px]"
               >
                 <div className="flex items-center gap-2">
-                  <MonitorIcon className="size-3.5 text-foreground/65" />
+                  <Icon
+                    icon="solar:monitor-linear"
+                    className="size-3.5 text-foreground/65"
+                    aria-hidden="true"
+                  />
                   <span className="font-medium text-foreground/85">
                     {width && height
                       ? `${width}x${height}`
@@ -840,9 +1017,16 @@ const ComputerUseToolPreview = ({
 };
 
 const formatToolMeta = (item: Extract<ChatItem, { type: "tool" }>) => {
+  const name = item.name;
+  if (name === "apply_patch") {
+    const patchText = getPatchTextFromArgs(item.args);
+    if (!patchText) return "patch";
+    const files = extractPatchFiles(patchText).map(toDisplayPath);
+    return files.length ? `patch: ${formatList(files)}` : "patch";
+  }
+
   const args = getToolArgsRecord(item.args);
   if (!args) return null;
-  const name = item.name;
   if (isComputerUseTool(name)) {
     return getComputerUseToolSummary(item);
   }
@@ -923,8 +1107,19 @@ const formatToolMeta = (item: Extract<ChatItem, { type: "tool" }>) => {
     const files = extractPatchFiles(patchText).map(toDisplayPath);
     return files.length ? `patch: ${formatList(files)}` : "patch";
   }
-  if (name === "runCommand" || name === "bash") {
+  if (name === "runCommand" || name === "bash" || name === "shell_command") {
     return command ? `command: ${command}` : null;
+  }
+  if (name === "exec_command" || name === "unified_exec") {
+    return command ? `command: ${command}` : "run command";
+  }
+  if (name === "write_stdin") {
+    const sessionId = getString(args.sessionId);
+    const input = getString(args.input);
+    if (input) {
+      return `stdin: ${truncateText(input.replace(/\s+/g, " ").trim(), 72)}`;
+    }
+    return sessionId ? `session: ${truncateText(sessionId, 48)}` : "stdin";
   }
   if (name === "startLocalDevServer") {
     const port = typeof args.port === "number" ? args.port : null;
@@ -1044,6 +1239,7 @@ const getToolAction = (toolName: string): ActivityAction => {
     name === "writefiles" ||
     name === "edit" ||
     name === "patch" ||
+    name === "apply_patch" ||
     name === "replace" ||
     name === "mv" ||
     name === "rm" ||
@@ -1052,7 +1248,16 @@ const getToolAction = (toolName: string): ActivityAction => {
   ) {
     return "edit";
   }
-  if (name === "runcommand" || name === "bash" || name.includes("devserver")) {
+  if (
+    name === "runcommand" ||
+    name === "bash" ||
+    name === "shell_command" ||
+    name === "exec_command" ||
+    name === "unified_exec" ||
+    name === "write_stdin" ||
+    name === "writestdin" ||
+    name.includes("devserver")
+  ) {
     return "run";
   }
   if (name.startsWith("computer_use_")) {
@@ -1074,7 +1279,7 @@ const getActivityVerb = (
 ) => {
   const normalizedToolName = toolName?.trim().toLowerCase() ?? "";
 
-  const baseVerb =
+  const pendingVerb =
     normalizedToolName === "read" || normalizedToolName === "cat"
       ? "正在阅读"
       : normalizedToolName === "list" ||
@@ -1098,10 +1303,30 @@ const getActivityVerb = (
                       : "正在处理";
 
   if (status === "error") {
-    return baseVerb.replace(/^正在/, "") + "失败";
+    return pendingVerb.replace(/^正在/, "") + "失败";
   }
 
-  return baseVerb;
+  if (status === "done") {
+    if (normalizedToolName === "read" || normalizedToolName === "cat") {
+      return "已阅读";
+    }
+    if (
+      normalizedToolName === "write" ||
+      normalizedToolName === "writefiles" ||
+      normalizedToolName === "edit" ||
+      normalizedToolName === "patch" ||
+      normalizedToolName === "apply_patch" ||
+      normalizedToolName === "replace" ||
+      normalizedToolName === "mv" ||
+      normalizedToolName === "mkdir" ||
+      normalizedToolName === "chmod"
+    ) {
+      return "已编辑";
+    }
+    return pendingVerb.replace(/^正在/, "已");
+  }
+
+  return pendingVerb;
 };
 
 const getToolDisplayText = (
@@ -1118,12 +1343,20 @@ const getToolDisplayText = (
       normalizedToolName === "grep" ||
       normalizedToolName === "edit" ||
       normalizedToolName === "patch" ||
+      normalizedToolName === "apply_patch" ||
       normalizedToolName === "write" ||
       normalizedToolName === "writefiles" ||
       normalizedToolName === "replace" ||
       normalizedToolName === "mv" ||
       normalizedToolName === "mkdir" ||
-      normalizedToolName === "chmod") &&
+      normalizedToolName === "chmod" ||
+      normalizedToolName === "runcommand" ||
+      normalizedToolName === "bash" ||
+      normalizedToolName === "shell_command" ||
+      normalizedToolName === "exec_command" ||
+      normalizedToolName === "unified_exec" ||
+      normalizedToolName === "write_stdin" ||
+      normalizedToolName === "writestdin") &&
     displayTitle.secondary
   ) {
     return displayTitle.secondary;
@@ -1434,13 +1667,19 @@ const FileTreeNodeItem = ({
           style={{ paddingLeft: `${indent}px` }}
           className="h-auto w-full justify-start gap-1.5 rounded px-0 py-1 pr-2 text-[11.5px] font-normal text-[#56657d] shadow-none transition-colors hover:bg-[#111c2e] hover:text-white"
         >
-          <ChevronRightIcon
+          <Icon
+            icon="solar:alt-arrow-right-linear"
             className={cn(
               "size-2.5 shrink-0 transition-transform",
               expanded && "rotate-90",
             )}
+            aria-hidden="true"
           />
-          <FolderIcon className="size-3 shrink-0 text-amber-500/70" />
+          <Icon
+            icon="solar:folder-with-files-linear"
+            className="size-3 shrink-0 text-amber-500/70"
+            aria-hidden="true"
+          />
           {node.name}
         </Button>
         {expanded &&
@@ -1470,7 +1709,11 @@ const FileTreeNodeItem = ({
           : "text-[#56657d] hover:text-white hover:bg-[#111c2e]",
       )}
     >
-      <FileCode2Icon className="size-3 shrink-0 text-indigo-400/70" />
+      <Icon
+        icon="solar:file-code-linear"
+        className="size-3 shrink-0 text-indigo-400/70"
+        aria-hidden="true"
+      />
       <span className="truncate">{node.name}</span>
     </Button>
   );
@@ -1501,7 +1744,11 @@ const ModelSelectorItemRow = ({
         ))}
       </ModelSelectorLogoGroup>
       {selected ? (
-        <CheckIcon className="ml-auto size-3.5" />
+        <Icon
+          icon="solar:check-circle-linear"
+          className="ml-auto size-3.5"
+          aria-hidden="true"
+        />
       ) : (
         <div className="ml-auto size-3.5" />
       )}
@@ -1632,94 +1879,6 @@ export default function Home() {
   useEffect(() => {
     void drainSubmissionQueue();
   }, [drainSubmissionQueue]);
-
-  const roundSummaryByFirstActivityId = useMemo(() => {
-    const summary = new Map<string, string>();
-    type RoundCounts = Record<
-      ActivityAction,
-      { pending: number; done: number; error: number }
-    >;
-    const freshCounts = (): RoundCounts => ({
-      browse: { pending: 0, done: 0, error: 0 },
-      edit: { pending: 0, done: 0, error: 0 },
-      run: { pending: 0, done: 0, error: 0 },
-      search: { pending: 0, done: 0, error: 0 },
-      plan: { pending: 0, done: 0, error: 0 },
-      desktop: { pending: 0, done: 0, error: 0 },
-      delegate: { pending: 0, done: 0, error: 0 },
-      other: { pending: 0, done: 0, error: 0 },
-    });
-
-    let firstActivityId: string | null = null;
-    let inRound = false;
-    let counts = freshCounts();
-
-    const flush = () => {
-      if (!firstActivityId) return;
-      const actionOrder: ActivityAction[] = [
-        "browse",
-        "edit",
-        "run",
-        "search",
-        "plan",
-        "desktop",
-        "delegate",
-        "other",
-      ];
-      const labelByAction: Record<ActivityAction, string> = {
-        browse: "浏览",
-        edit: "编辑",
-        run: "运行",
-        search: "搜索",
-        plan: "计划",
-        desktop: "桌面",
-        delegate: "委托",
-        other: "处理",
-      };
-      const chunks: string[] = [];
-      for (const action of actionOrder) {
-        const stat = counts[action];
-        if (stat.pending > 0)
-          chunks.push(`正在${labelByAction[action]} ${stat.pending}`);
-        if (stat.done > 0)
-          chunks.push(`已${labelByAction[action]} ${stat.done}`);
-        if (stat.error > 0)
-          chunks.push(`${labelByAction[action]}失败 ${stat.error}`);
-      }
-      if (chunks.length) {
-        summary.set(firstActivityId, chunks.join("，"));
-      }
-    };
-
-    for (const item of items) {
-      if (item.type === "message" && item.role === "user") {
-        flush();
-        inRound = true;
-        firstActivityId = null;
-        counts = freshCounts();
-        continue;
-      }
-      if (item.type === "message" && item.role === "assistant") {
-        flush();
-        inRound = false;
-        firstActivityId = null;
-        counts = freshCounts();
-        continue;
-      }
-      if (!inRound) continue;
-      if (item.type === "thinking") continue;
-      if (item.type === "tool" && item.parentToolCallId) continue;
-      if (item.type !== "tool" && item.type !== "agent") continue;
-
-      if (!firstActivityId) firstActivityId = item.id;
-      const action =
-        item.type === "agent" ? "delegate" : getToolAction(item.name);
-      counts[action][item.status] += 1;
-    }
-
-    flush();
-    return summary;
-  }, [items]);
 
   useEffect(() => {
     const currentStatuses: Record<string, "pending" | "done"> = {};
@@ -2030,16 +2189,8 @@ export default function Home() {
                             entry.type === "tool" &&
                             entry.parentToolCallId === item.parentToolCallId,
                         );
-                        const summaryText = roundSummaryByFirstActivityId.get(
-                          item.id,
-                        );
                         return (
-                          <div key={item.id} className="space-y-1">
-                            {summaryText ? (
-                              <div className="pl-5.5 text-[10px] leading-4.5 text-muted-foreground/75">
-                                {summaryText}
-                              </div>
-                            ) : null}
+                          <div key={item.id}>
                             <div
                               className={cn(
                                 "app-tool-row rounded-[14px] px-3 py-2 text-[12px] leading-5 text-foreground/82",
@@ -2080,38 +2231,109 @@ export default function Home() {
                           displayTitle,
                           visibleToolName,
                         );
-                        const summaryText = roundSummaryByFirstActivityId.get(
-                          item.id,
-                        );
+                        const extraDetails = getToolExtraDetails(item);
+                        const preview =
+                          item.status === "done"
+                            ? getToolStandalonePreview(item)
+                            : null;
+                        const normalizedToolName = visibleToolName
+                          .trim()
+                          .toLowerCase();
+                        const previewEnabled =
+                          item.status === "done" &&
+                          (normalizedToolName === "read" ||
+                            normalizedToolName === "cat" ||
+                            normalizedToolName === "edit" ||
+                            normalizedToolName === "write") &&
+                          Boolean(preview);
                         return (
-                          <div key={item.id} className="space-y-1">
-                            {summaryText ? (
-                              <div className="pl-5.5 text-[10px] leading-4.5 text-muted-foreground/75">
-                                {summaryText}
-                              </div>
-                            ) : null}
-                            <div
-                              className={cn(
-                                "app-tool-row rounded-[14px] px-3 py-2 text-[12px] leading-5 text-foreground/82",
-                                item.status === "error" &&
-                                  "text-destructive/90",
-                              )}
-                            >
-                              <div className="min-w-0 truncate">
-                                <span className="text-muted-foreground/82">
-                                  {verb}
-                                </span>{" "}
-                                <span className="font-mono text-foreground/88">
-                                  {displayText}
-                                </span>
-                                {item.errorText ? (
-                                  <span className="text-destructive/90">
-                                    {" "}
-                                    {item.errorText}
+                          <div key={item.id}>
+                            {previewEnabled && preview ? (
+                              <details className="group">
+                                <summary
+                                  className={cn(
+                                    "app-tool-row list-none rounded-[11px] px-3 py-0.5 text-[12px] leading-5 text-foreground/82 hover:bg-transparent hover:border-transparent hover:shadow-none [&::-webkit-details-marker]:hidden",
+                                    item.status === "error" &&
+                                      "text-destructive/90",
+                                    "cursor-pointer",
+                                  )}
+                                >
+                                  <div className="flex min-w-0 items-center gap-1.5">
+                                    <span className="text-muted-foreground/82">
+                                      {verb}
+                                    </span>
+                                    <span className="font-mono text-foreground/88 truncate">
+                                      {displayText}
+                                    </span>
+                                    <Icon
+                                      icon="lucide:chevron-right"
+                                      className="ml-0.5 size-3 shrink-0 text-muted-foreground/70 group-open:hidden"
+                                      aria-hidden="true"
+                                    />
+                                    <Icon
+                                      icon="lucide:chevron-down"
+                                      className="ml-0.5 hidden size-3 shrink-0 text-muted-foreground/70 group-open:inline"
+                                      aria-hidden="true"
+                                    />
+                                  </div>
+                                  {item.errorText ? (
+                                    <div className="pt-0.5 text-destructive/90">
+                                      {item.errorText}
+                                    </div>
+                                  ) : null}
+                                  {extraDetails.length > 0 ? (
+                                    <div className="pt-0.5 text-[11px] leading-4 text-muted-foreground/74">
+                                      {extraDetails.map((detail, index) => (
+                                        <div
+                                          key={`${item.id}-detail-${index}`}
+                                          className="font-mono"
+                                        >
+                                          {detail}
+                                        </div>
+                                      ))}
+                                    </div>
+                                  ) : null}
+                                </summary>
+                                <div className="pt-0.5">
+                                  <ToolResultPreview preview={preview} />
+                                </div>
+                              </details>
+                            ) : (
+                              <div
+                                className={cn(
+                                  "app-tool-row rounded-[11px] px-3 py-1.5 text-[12px] leading-5 text-foreground/82 hover:bg-transparent hover:border-transparent hover:shadow-none",
+                                  item.status === "error" &&
+                                    "text-destructive/90",
+                                )}
+                              >
+                                <div className="min-w-0 truncate">
+                                  <span className="text-muted-foreground/82">
+                                    {verb}
+                                  </span>{" "}
+                                  <span className="font-mono text-foreground/88">
+                                    {displayText}
                                   </span>
+                                  {item.errorText ? (
+                                    <span className="text-destructive/90">
+                                      {" "}
+                                      {item.errorText}
+                                    </span>
+                                  ) : null}
+                                </div>
+                                {extraDetails.length > 0 ? (
+                                  <div className="mt-0.5 text-[11px] leading-4 text-muted-foreground/74">
+                                    {extraDetails.map((detail, index) => (
+                                      <div
+                                        key={`${item.id}-detail-${index}`}
+                                        className="font-mono"
+                                      >
+                                        {detail}
+                                      </div>
+                                    ))}
+                                  </div>
                                 ) : null}
                               </div>
-                            </div>
+                            )}
                           </div>
                         );
                       }

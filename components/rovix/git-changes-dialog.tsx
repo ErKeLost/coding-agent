@@ -1,14 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import {
-  CheckIcon,
-  GitCommitHorizontalIcon,
-  LoaderCircleIcon,
-  MinusIcon,
-  PlusIcon,
-  UploadIcon,
-} from "lucide-react";
+import { Icon } from "@iconify/react";
 import {
   commitWorkspaceStagedChanges,
   getWorkspaceGitChanges,
@@ -23,6 +16,7 @@ import { Button } from "@/components/ui/button";
 import {
   Dialog,
   DialogContent,
+  DialogDescription,
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
@@ -212,6 +206,9 @@ export function GitChangesDialog({
               <DialogTitle className="text-[15px] font-semibold tracking-tight text-foreground/92">
                 提交改动
               </DialogTitle>
+              <DialogDescription className="sr-only">
+                查看当前工作区改动、暂存文件并提交到 Git。
+              </DialogDescription>
               <div className="mt-1 text-[11px] text-muted-foreground/76">
                 {branchState?.currentBranch ?? "main"} · 已暂存 {stagedCount} 个文件
               </div>
@@ -224,7 +221,7 @@ export function GitChangesDialog({
                 disabled={!branchState?.hasRemote}
                 className="h-9 rounded-[12px] px-3 text-[12px]"
               >
-                <UploadIcon className="size-3.5" />
+                <Icon icon="solar:upload-linear" className="size-3.5" aria-hidden="true" />
                 推送
               </Button>
               <Button
@@ -234,9 +231,9 @@ export function GitChangesDialog({
                 className="h-9 rounded-[12px] px-3 text-[12px]"
               >
                 {committing ? (
-                  <LoaderCircleIcon className="size-3.5 animate-spin" />
+                  <Icon icon="solar:refresh-linear" className="size-3.5 animate-spin" aria-hidden="true" />
                 ) : (
-                  <GitCommitHorizontalIcon className="size-3.5" />
+                  <Icon icon="solar:code-square-linear" className="size-3.5" aria-hidden="true" />
                 )}
                 提交已暂存
               </Button>
@@ -252,7 +249,7 @@ export function GitChangesDialog({
             <div className="max-h-full overflow-auto px-2 py-2">
               {loading ? (
                 <div className="flex items-center justify-center py-10 text-muted-foreground">
-                  <LoaderCircleIcon className="size-4 animate-spin" />
+                  <Icon icon="solar:refresh-linear" className="size-4 animate-spin" aria-hidden="true" />
                 </div>
               ) : changes.length === 0 ? (
                 <div className="px-3 py-6 text-[12px] text-muted-foreground">
@@ -300,15 +297,15 @@ export function GitChangesDialog({
                           className="h-7 rounded-[9px] px-2 text-[11px]"
                         >
                           {actionPath === change.path ? (
-                            <LoaderCircleIcon className="size-3.5 animate-spin" />
+                            <Icon icon="solar:refresh-linear" className="size-3.5 animate-spin" aria-hidden="true" />
                           ) : staged ? (
                             <>
-                              <MinusIcon className="size-3.5" />
+                              <Icon icon="solar:minus-circle-linear" className="size-3.5" aria-hidden="true" />
                               取消暂存
                             </>
                           ) : (
                             <>
-                              <PlusIcon className="size-3.5" />
+                              <Icon icon="solar:add-circle-linear" className="size-3.5" aria-hidden="true" />
                               暂存
                             </>
                           )}
@@ -337,7 +334,7 @@ export function GitChangesDialog({
               {selectedChange ? (
                 diffLoading ? (
                   <div className="flex h-full items-center justify-center text-muted-foreground">
-                    <LoaderCircleIcon className="size-4 animate-spin" />
+                    <Icon icon="solar:refresh-linear" className="size-4 animate-spin" aria-hidden="true" />
                   </div>
                 ) : (
                   <div className="flex h-full min-h-0 flex-col overflow-hidden rounded-[20px] border border-[color:var(--app-panel-border)] bg-[color:var(--app-panel-bg)]">

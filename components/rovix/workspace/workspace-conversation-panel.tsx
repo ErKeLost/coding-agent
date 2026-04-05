@@ -22,7 +22,7 @@ export function WorkspaceConversationPanel({
       <ConversationContent
         className={cn(
           chatColumnClassName,
-          "min-h-0 flex-1 gap-4 overflow-y-auto pt-5 pb-4 sm:pt-6 sm:pb-5",
+          "min-h-0 flex-1 gap-2 overflow-y-auto pt-5 pb-4 sm:pt-6 sm:pb-5",
         )}
       >
         {children}

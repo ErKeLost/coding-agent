@@ -21,13 +21,7 @@ import {
   searchWorkspaceContent,
 } from "@/lib/desktop-workspace";
 import { cn } from "@/lib/utils";
-import {
-  ArrowUpRightIcon,
-  FileCode2Icon,
-  LoaderCircleIcon,
-  SearchIcon,
-  SparklesIcon,
-} from "lucide-react";
+import { Icon } from "@iconify/react";
 import { useEffect, useMemo, useState } from "react";
 
 type WorkspaceSearchDialogProps = {
@@ -226,7 +220,7 @@ export function WorkspaceSearchDialog({
         >
           <DialogTitle className="flex items-center gap-1.5 text-[13px] font-semibold text-foreground">
             <span className="app-control inline-flex size-7 items-center justify-center rounded-lg text-foreground/78">
-              <SearchIcon className="size-3.5" />
+              <Icon icon="solar:magnifer-linear" className="size-3.5" aria-hidden="true" />
             </span>
             搜索
           </DialogTitle>
@@ -240,7 +234,11 @@ export function WorkspaceSearchDialog({
           style={{ borderColor: "color-mix(in srgb, var(--app-panel-border) 76%, transparent)" }}
         >
           <div className="app-control relative rounded-[12px] px-0.5 py-0.5">
-            <SearchIcon className="pointer-events-none absolute left-2.5 top-1/2 size-3 -translate-y-1/2 text-muted-foreground/70" />
+            <Icon
+              icon="solar:magnifer-linear"
+              className="pointer-events-none absolute left-2.5 top-1/2 size-3 -translate-y-1/2 text-muted-foreground/70"
+              aria-hidden="true"
+            />
             <Input
               autoFocus
               value={query}
@@ -293,7 +291,7 @@ export function WorkspaceSearchDialog({
               {!query.trim() ? (
                 <div className="flex h-full min-h-[240px] flex-col items-center justify-center gap-2 px-5 text-center">
                   <span className="app-control inline-flex size-10 items-center justify-center rounded-xl text-muted-foreground/80">
-                    <SparklesIcon className="size-4" />
+                    <Icon icon="solar:magic-stick-3-linear" className="size-4" aria-hidden="true" />
                   </span>
                   <div className="text-[12px] font-medium text-foreground/86">
                     搜索当前目录里的代码与配置
@@ -304,7 +302,7 @@ export function WorkspaceSearchDialog({
                 </div>
               ) : loading ? (
                 <div className="flex h-full min-h-[240px] flex-col items-center justify-center gap-2 px-5 text-center text-muted-foreground/72">
-                  <LoaderCircleIcon className="size-4 animate-spin" />
+                  <Icon icon="solar:refresh-linear" className="size-4 animate-spin" aria-hidden="true" />
                   <div className="text-[11px]">正在搜索...</div>
                 </div>
               ) : visibleResults.length === 0 ? (
@@ -341,7 +339,7 @@ export function WorkspaceSearchDialog({
                           className="h-auto w-full justify-start items-start gap-2 px-2.5 py-2 text-left shadow-none transition-colors hover:bg-transparent"
                         >
                           <span className="mt-0.5 flex size-7 items-center justify-center rounded-lg text-muted-foreground/72">
-                            <FileCode2Icon className="size-3.5" />
+                            <Icon icon="solar:file-code-linear" className="size-3.5" aria-hidden="true" />
                           </span>
                           <div className="min-w-0 flex-1">
                             <div className="flex items-center gap-2">
@@ -412,7 +410,7 @@ export function WorkspaceSearchDialog({
                 </div>
               ) : previewLoading ? (
                 <div className="flex h-full min-h-[240px] items-center justify-center text-muted-foreground/72">
-                  <LoaderCircleIcon className="size-4 animate-spin" />
+                  <Icon icon="solar:refresh-linear" className="size-4 animate-spin" aria-hidden="true" />
                 </div>
               ) : previewFile ? (
                 <ShikiFilePreview

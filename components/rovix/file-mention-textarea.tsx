@@ -9,7 +9,7 @@ import {
 } from "@/components/ai-elements/prompt-input";
 import type { DesktopWorkspaceNode } from "@/lib/desktop-workspace";
 import { cn } from "@/lib/utils";
-import { FileCode2Icon, SparklesIcon } from "lucide-react";
+import { Icon } from "@iconify/react";
 import { useEffect, useMemo, useRef, useState } from "react";
 
 type FileMentionCandidate = {
@@ -330,7 +330,11 @@ export function FileMentionTextarea({
                             )}
                           >
                             <span className="flex size-6 shrink-0 items-center justify-center rounded-md border border-primary/18 bg-primary/[0.07] text-primary/90">
-                              <SparklesIcon className="size-3" />
+                              <Icon
+                                icon="solar:magic-stick-3-linear"
+                                className="size-3"
+                                aria-hidden="true"
+                              />
                             </span>
                             <span className="min-w-0 flex-1">
                               <span className="block truncate text-[11.5px] font-medium leading-5 text-foreground">
@@ -367,7 +371,11 @@ export function FileMentionTextarea({
                             )}
                           >
                             <span className="flex size-6 shrink-0 items-center justify-center rounded-md border border-primary/18 bg-primary/[0.07] text-primary/90">
-                              <FileCode2Icon className="size-3" />
+                              <Icon
+                                icon="solar:file-code-linear"
+                                className="size-3"
+                                aria-hidden="true"
+                              />
                             </span>
                             <span className="min-w-0 flex-1">
                               <span className="block truncate text-[11.5px] font-medium leading-5 text-foreground">

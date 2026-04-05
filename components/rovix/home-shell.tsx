@@ -1,20 +1,6 @@
 "use client";
 
-import {
-  ChevronDownIcon,
-  CircleUserRoundIcon,
-  Code2Icon,
-  FileCode2Icon,
-  FolderIcon,
-  MessageSquareTextIcon,
-  PlusIcon,
-  RefreshCwIcon,
-  SearchIcon,
-  Settings2Icon,
-  SparklesIcon,
-  SquareTerminalIcon,
-  ZapIcon,
-} from "lucide-react";
+import { Icon } from "@iconify/react";
 
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
@@ -97,12 +83,12 @@ export function RovixHomeShell({
             onClick={onNewSession}
             className="mt-14 h-[64px] rounded-[20px] bg-[linear-gradient(135deg,#87b3ff_0%,#6e9bf0_100%)] text-[18px] font-semibold tracking-[-0.03em] text-[#19345d] shadow-[0_12px_40px_rgba(103,145,255,0.28)] hover:brightness-105"
           >
-            <PlusIcon className="size-5" />
+            <Icon icon="solar:add-circle-linear" className="size-5" aria-hidden="true" />
             New Session
           </Button>
 
           <div className="mt-12 flex items-center gap-3 px-2 text-white/58">
-            <RefreshCwIcon className="size-5" />
+            <Icon icon="solar:refresh-linear" className="size-5" aria-hidden="true" />
             <span className="text-[16px] tracking-[-0.02em]">Sessions</span>
           </div>
 
@@ -121,9 +107,13 @@ export function RovixHomeShell({
                 )}
               >
                 {index === 0 ? (
-                  <MessageSquareTextIcon className="size-5" />
+                  <Icon
+                    icon="solar:chat-round-dots-linear"
+                    className="size-5"
+                    aria-hidden="true"
+                  />
                 ) : (
-                  <Code2Icon className="size-5" />
+                  <Icon icon="solar:code-linear" className="size-5" aria-hidden="true" />
                 )}
                 {session.title}
               </Button>
@@ -168,7 +158,7 @@ export function RovixHomeShell({
             variant="ghost"
             className="mt-5 h-12 justify-start rounded-[16px] px-3 text-[16px] text-white/58 hover:bg-white/[0.04] hover:text-white"
           >
-            <Settings2Icon className="size-5" />
+            <Icon icon="solar:settings-linear" className="size-5" aria-hidden="true" />
             Settings
           </Button>
 
@@ -185,7 +175,11 @@ export function RovixHomeShell({
                 </div>
                 <div className="text-[13px] text-white/42">Pro Plan</div>
               </div>
-              <ChevronDownIcon className="size-4 text-white/38" />
+              <Icon
+                icon="solar:alt-arrow-down-linear"
+                className="size-4 text-white/38"
+                aria-hidden="true"
+              />
             </CardContent>
           </Card>
         </aside>
@@ -206,7 +200,7 @@ export function RovixHomeShell({
               className="h-[54px] w-[510px] justify-between rounded-full border border-white/[0.06] bg-white/[0.03] px-6 text-[17px] text-white/40 hover:bg-white/[0.05] hover:text-white/70"
             >
               <span className="flex items-center gap-4">
-                <SearchIcon className="size-5" />
+                <Icon icon="solar:magnifer-linear" className="size-5" aria-hidden="true" />
                 Search codebase...
               </span>
               <span className="font-mono text-[11px] uppercase tracking-[0.24em] text-white/22">
@@ -215,9 +209,9 @@ export function RovixHomeShell({
             </Button>
 
             <div className="flex items-center gap-7 text-white/72">
-              <SquareTerminalIcon className="size-6" />
-              <ZapIcon className="size-6" />
-              <CircleUserRoundIcon className="size-6" />
+              <Icon icon="solar:terminal-2-linear" className="size-6" aria-hidden="true" />
+              <Icon icon="solar:bolt-linear" className="size-6" aria-hidden="true" />
+              <Icon icon="solar:user-circle-linear" className="size-6" aria-hidden="true" />
             </div>
           </header>
 
@@ -237,7 +231,7 @@ export function RovixHomeShell({
             <div className="relative z-10 mt-16 max-w-[900px]">
               <div className="flex items-center gap-7">
                 <div className="flex size-12 items-center justify-center rounded-[16px] border border-white/[0.06] bg-[#1a202b] text-[#8eaaff]">
-                  <SparklesIcon className="size-5" />
+                  <Icon icon="solar:magic-stick-3-linear" className="size-5" aria-hidden="true" />
                 </div>
                 <div className="text-[24px] font-semibold tracking-[-0.04em] text-[#8eaaff]">
                   Refactor Analysis
@@ -300,7 +294,7 @@ export function RovixHomeShell({
                       size="icon"
                       className="mb-2 size-10 rounded-full text-white/30 hover:bg-white/[0.06] hover:text-white/62"
                     >
-                      <PlusIcon className="size-5" />
+                      <Icon icon="solar:add-circle-linear" className="size-5" aria-hidden="true" />
                     </Button>
                     <Textarea
                       value=""
@@ -317,7 +311,7 @@ export function RovixHomeShell({
                         size="icon-lg"
                         className="size-[54px] rounded-[18px] bg-[linear-gradient(135deg,#8caeff_0%,#7e9ff5_100%)] text-[#17325d] shadow-[0_16px_36px_rgba(126,159,245,0.24)] hover:brightness-105"
                       >
-                        <ZapIcon className="size-5" />
+                        <Icon icon="solar:bolt-linear" className="size-5" aria-hidden="true" />
                       </Button>
                     </div>
                   </div>
@@ -360,7 +354,7 @@ export function RovixHomeShell({
                       Node.js v20.11.0
                     </div>
                   </div>
-                  <Settings2Icon className="size-7 text-white/40" />
+                  <Icon icon="solar:settings-linear" className="size-7 text-white/40" aria-hidden="true" />
                 </div>
                 <div className="mt-6 h-1.5 rounded-full bg-black">
                   <div className="h-full w-[40%] rounded-full bg-[#61f0bf]" />
@@ -386,9 +380,17 @@ export function RovixHomeShell({
                       style={{ paddingLeft: `${index * 22}px` }}
                     >
                       {index === projectTree.length - 1 ? (
-                        <FileCode2Icon className="size-5 text-[#8eaaff]" />
+                        <Icon
+                          icon="solar:file-code-linear"
+                          className="size-5 text-[#8eaaff]"
+                          aria-hidden="true"
+                        />
                       ) : (
-                        <FolderIcon className="size-5 text-white/34" />
+                        <Icon
+                          icon="solar:folder-with-files-linear"
+                          className="size-5 text-white/34"
+                          aria-hidden="true"
+                        />
                       )}
                       <span className={cn(index === projectTree.length - 1 && "text-white")}>
                         {segment}
@@ -402,7 +404,7 @@ export function RovixHomeShell({
             <Card className="gap-0 rounded-[26px] border border-[#2f4d88] bg-[linear-gradient(180deg,rgba(34,43,62,0.94)_0%,rgba(23,28,38,0.96)_100%)] py-0 shadow-none">
               <CardContent className="px-7 py-7">
                 <div className="flex items-center gap-3 text-[#8eaaff]">
-                  <SparklesIcon className="size-4" />
+                  <Icon icon="solar:magic-stick-3-linear" className="size-4" aria-hidden="true" />
                   <div className="text-[15px] font-semibold uppercase tracking-[0.16em]">
                     Rovix Insight
                   </div>

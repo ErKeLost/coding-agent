@@ -163,6 +163,16 @@ export const openWorkspaceTerminal = async (path: string) => {
   return invoke<void>("open_workspace_terminal", { path });
 };
 
+export const openExternalUrl = async (url: string) => {
+  const normalized = url.trim();
+  if (!normalized) return;
+  if (isTauriDesktop()) {
+    const invoke = await getInvoke();
+    return invoke<void>("open_external_url", { url: normalized });
+  }
+  window.open(normalized, "_blank", "noopener,noreferrer");
+};
+
 export const getWorkspaceGitChanges = async (path: string) => {
   const invoke = await getInvoke();
   return invoke<WorkspaceGitChange[]>("get_workspace_git_changes", { path });

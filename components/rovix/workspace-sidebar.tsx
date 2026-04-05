@@ -6,15 +6,7 @@ import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { cn } from "@/lib/utils";
 import type { ThreadRecord } from "@/lib/thread-session";
-import {
-  ChevronDownIcon,
-  Code2Icon,
-  FolderIcon,
-  MessageSquareTextIcon,
-  PanelLeftIcon,
-  PlusIcon,
-  ZapIcon,
-} from "lucide-react";
+import { Icon } from "@iconify/react";
 
 type WorkspaceSidebarProps = {
   collapsed: boolean;
@@ -32,8 +24,8 @@ type WorkspaceSidebarProps = {
 };
 
 const navItems = [
-  { key: "chat", label: "Sessions", icon: MessageSquareTextIcon },
-  { key: "editor", label: "Editor", icon: Code2Icon },
+  { key: "chat", label: "Sessions", icon: "solar:chat-round-dots-linear" },
+  { key: "editor", label: "Editor", icon: "solar:code-linear" },
 ] as const;
 
 const summarizeWorkspaceGroup = (value: string | null | undefined) => {
@@ -92,7 +84,7 @@ export function WorkspaceSidebar({
         {!collapsed ? (
           <div className="flex min-w-0 items-center gap-3">
             <div className="flex size-10 shrink-0 items-center justify-center rounded-2xl bg-gradient-to-br from-violet-600 to-indigo-600 shadow-[0_14px_30px_rgba(91,76,255,0.35)]">
-              <ZapIcon className="size-4 text-white" />
+              <Icon icon="solar:bolt-linear" className="size-4 text-white" aria-hidden="true" />
             </div>
             <div className="min-w-0">
               <div className="truncate text-[15px] font-semibold tracking-tight text-white">
@@ -102,7 +94,7 @@ export function WorkspaceSidebar({
           </div>
         ) : (
           <div className="flex size-10 items-center justify-center rounded-2xl bg-gradient-to-br from-violet-600 to-indigo-600 shadow-[0_14px_30px_rgba(91,76,255,0.35)]">
-            <ZapIcon className="size-4 text-white" />
+            <Icon icon="solar:bolt-linear" className="size-4 text-white" aria-hidden="true" />
           </div>
         )}
         <Button
@@ -116,8 +108,10 @@ export function WorkspaceSidebar({
           aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
           title={collapsed ? "Expand sidebar" : "Collapse sidebar"}
         >
-          <PanelLeftIcon
+          <Icon
+            icon="solar:sidebar-minimalistic-linear"
             className={cn("size-4 transition-transform", collapsed && "rotate-180")}
+            aria-hidden="true"
           />
         </Button>
       </div>
@@ -131,14 +125,14 @@ export function WorkspaceSidebar({
             className="h-11 w-full rounded-2xl bg-[#4b5ef3] px-4 text-[14px] font-semibold text-white shadow-[0_12px_30px_rgba(75,94,243,0.26)] transition-colors hover:bg-[#5a6cff]"
             title="New Session"
           >
-            <PlusIcon className="size-4" />
+            <Icon icon="solar:add-circle-linear" className="size-4" aria-hidden="true" />
             <span>New Session</span>
           </Button>
         </div>
       ) : null}
 
       <div className={cn("space-y-1 px-3", collapsed && "px-2")}>
-        {navItems.map(({ key, label, icon: Icon }) => {
+        {navItems.map(({ key, label, icon }) => {
           const selected = activeView === key;
           return (
             <Button
@@ -157,7 +151,7 @@ export function WorkspaceSidebar({
               )}
               title={label}
             >
-              <Icon className="size-[15px] shrink-0" />
+              <Icon icon={icon} className="size-[15px] shrink-0" aria-hidden="true" />
               {!collapsed ? <span className="text-[13px] font-medium">{label}</span> : null}
             </Button>
           );
@@ -171,7 +165,11 @@ export function WorkspaceSidebar({
             className="h-auto w-full justify-start gap-2.5 rounded-xl px-3 py-2.5 text-left text-[#6d7a92] shadow-none transition-colors hover:bg-[#111c2e] hover:text-white"
             title={isDesktopRuntime ? "Pick folder..." : "Set directory"}
           >
-            <FolderIcon className="size-[15px] shrink-0" />
+            <Icon
+              icon="solar:folder-with-files-linear"
+              className="size-[15px] shrink-0"
+              aria-hidden="true"
+            />
             <span className="truncate text-[13px] font-medium">
               {currentWorkspaceName}
             </span>
@@ -190,7 +188,11 @@ export function WorkspaceSidebar({
               <div key={group.workspace} className="space-y-1.5">
                 {!collapsed ? (
                   <div className="flex items-center gap-2 px-1 pb-1 pt-2 text-[#7f8ca3]">
-                    <FolderIcon className="size-[14px]" />
+                    <Icon
+                      icon="solar:folder-with-files-linear"
+                      className="size-[14px]"
+                      aria-hidden="true"
+                    />
                     <span className="truncate text-[12px] font-semibold">
                       {group.workspace}
                     </span>
@@ -254,7 +256,11 @@ export function WorkspaceSidebar({
             </div>
             <div className="text-[11px] text-[#52617b]">Pro Plan</div>
           </div>
-          <ChevronDownIcon className="size-4 shrink-0 text-[#52617b]" />
+          <Icon
+            icon="solar:alt-arrow-down-linear"
+            className="size-4 shrink-0 text-[#52617b]"
+            aria-hidden="true"
+          />
         </Button>
         </div>
       ) : null}

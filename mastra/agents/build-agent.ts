@@ -10,7 +10,6 @@ import {
   execCommandTool,
   editTool,
   imageGenerateTool,
-  listDirTool,
   listTool,
   listLocalProcessesTool,
   readTool,
@@ -104,12 +103,12 @@ const buildInstructions = ({ requestContext }: { requestContext: RequestContext 
   const runtimeDirectives = [
     `Execution contract:
 - For coding work, prefer concrete tool actions before explanatory prose.
-- Start by reading or locating the relevant files with read/list/grep/lsp_inspect when context is incomplete.
-- Use write/edit/ast_edit only after you understand the target files.
+- Start by reading or locating the relevant files with read/list/grep when context is incomplete.
+- Use write/edit only after you understand the target files.
 - Use bash for validation or project commands.
 - Use shell or unified_exec when a Codex-style command execution surface is more appropriate.
 - Prefer exec_command + write_stdin for long-running or interactive background terminal sessions.
-- Use list_dir for Codex-style directory listing and apply_patch for unified diff patch application.
+- Use list for directory listing and apply_patch for unified diff patch application.
 - Use tool_search or tool_suggest when you need to discover the right tool quickly.
 - Use startLocalDevServer for long-running dev servers such as bun dev, npm run dev, pnpm dev, or yarn dev.
 - Use listLocalProcesses, readLocalProcessLogs, and stopLocalProcess to manage long-running services after they start.
@@ -155,7 +154,7 @@ ${guideText ? `- Active guidance: ${guideText}` : ''}`.trim());
 
   runtimeDirectives.push(
     `Current project path: ${workspaceRoot}
-Operate on the local project using the available file, search, edit, and command tools. Stay inside the project by default. If a task appears to require touching unrelated parts of the machine, confirm intent first. Use lsp_inspect for semantic lookup and use the skill tool for on-demand skill loading when helpful.`,
+Operate on the local project using the available file, search, edit, and command tools. Stay inside the project by default. If a task appears to require touching unrelated parts of the machine, confirm intent first. Use the skill tool for on-demand skill loading when helpful.`,
   );
 
   const mentionedSkillsInstructions = getRequestContextString(
@@ -188,7 +187,6 @@ export const buildAgent = new Agent({
   instructions: buildInstructions,
   model: ({ requestContext }) => resolveModel({ requestContext }),
   memory: buildAgentMemory,
-  workspace: ({ requestContext }) => getWorkspaceForRequest(requestContext),
   inputProcessors: ({ requestContext }) => {
     const workspace = getWorkspaceForRequest(requestContext);
     const processors: InputProcessorOrWorkflow[] = [
@@ -205,7 +203,6 @@ export const buildAgent = new Agent({
         ttl: 5 * 60_000,
       }),
     );
-
     return processors;
   },
   tools: staticTools,

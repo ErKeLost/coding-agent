@@ -223,7 +223,7 @@ export const imageGenerateTool = createTool({
     returnType: z.enum(['url', 'base64', 'file']).default('url'),
     maxImages: z.number().int().min(1).max(8).default(1),
     path: z.string().optional(),
-    uploadToSupabase: z.boolean().default(true),
+    uploadToSupabase: z.boolean().default(false),
     supabaseBucket: z.string().optional(),
     supabasePrefix: z.string().optional(),
   }),
@@ -271,21 +271,23 @@ export const imageGenerateTool = createTool({
             return { kind: 'url' as const, url: urlFromSupabase, publicUrl: urlFromSupabase, mimeType: 'unknown', model };
           }
           if (item.startsWith('http://') || item.startsWith('https://') || item.startsWith('data:')) {
-            if (item.startsWith('data:')) {
-              return null;
-            }
             return { kind: 'url' as const, url: item, mimeType: 'unknown', model };
           }
           const parsed = parseDataUrl(item);
           if (parsed) {
-            return null;
+            return {
+              kind: 'url' as const,
+              url: `data:${parsed.mimeType};base64,${parsed.base64}`,
+              mimeType: parsed.mimeType,
+              model,
+            };
           }
           return { kind: 'url' as const, url: item, mimeType: 'unknown', model };
         }).filter((entry): entry is NonNullable<typeof entry> => Boolean(entry));
         if (!items.length) {
           return {
             error:
-              'Unable to produce public URL. Configure SUPABASE_URL/SUPABASE_KEY (and public bucket) to return short image URLs.',
+              'Unable to produce image URL from provider response.',
           };
         }
         const [first, ...rest] = items;

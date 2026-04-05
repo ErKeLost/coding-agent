@@ -1096,6 +1096,48 @@ async fn open_workspace_terminal(path: String) -> Result<(), String> {
 }
 
 #[tauri::command]
+async fn open_external_url(url: String) -> Result<(), String> {
+  tauri::async_runtime::spawn_blocking(move || {
+    let normalized = url.trim().to_string();
+    if !(normalized.starts_with("http://") || normalized.starts_with("https://")) {
+      return Err("only http/https URLs are allowed".to_string());
+    }
+
+    #[cfg(target_os = "macos")]
+    {
+      Command::new("open")
+        .arg(&normalized)
+        .spawn()
+        .map_err(|err| format!("failed to open URL: {err}"))?;
+      return Ok(());
+    }
+
+    #[cfg(target_os = "windows")]
+    {
+      Command::new("cmd")
+        .args(["/C", "start", "", &normalized])
+        .spawn()
+        .map_err(|err| format!("failed to open URL: {err}"))?;
+      return Ok(());
+    }
+
+    #[cfg(all(unix, not(target_os = "macos")))]
+    {
+      Command::new("xdg-open")
+        .arg(&normalized)
+        .spawn()
+        .map_err(|err| format!("failed to open URL: {err}"))?;
+      return Ok(());
+    }
+
+    #[allow(unreachable_code)]
+    Err("unsupported platform for opening URLs".to_string())
+  })
+  .await
+  .map_err(|err| format!("failed to open external URL: {err}"))?
+}
+
+#[tauri::command]
 async fn get_workspace_git_changes(path: String) -> Result<Vec<WorkspaceGitChange>, String> {
   tauri::async_runtime::spawn_blocking(move || {
     let root = canonicalize_workspace_root(&path)?;
@@ -1276,6 +1318,7 @@ pub fn run() {
       push_workspace_branch,
       search_workspace_content,
       open_workspace_terminal,
+      open_external_url,
       get_workspace_git_changes,
       get_workspace_git_diff,
       stage_workspace_file,
@@ -1315,8 +1358,14 @@ pub fn run() {
         .title("Rovix")
         .inner_size(1440.0, 960.0)
         .min_inner_size(1080.0, 720.0)
-        .resizable(true)
-        .build()?;
+        .resizable(true);
+
+        #[cfg(target_os = "macos")]
+        let window = window
+          .title_bar_style(tauri::TitleBarStyle::Overlay)
+          .hidden_title(true);
+
+        let window = window.build()?;
 
         if let Some(sw) = splash_window {
           let _ = sw.close();
@@ -1445,7 +1494,7 @@ pub fn run() {
           return Err("Next.js server did not become ready within 30 seconds.".into());
         }
 
-        WebviewWindowBuilder::new(
+        let window = WebviewWindowBuilder::new(
           app,
           "main",
           WebviewUrl::External(server_url.parse().unwrap()),
@@ -1453,8 +1502,14 @@ pub fn run() {
         .title("Rovix")
         .inner_size(1440.0, 960.0)
         .min_inner_size(1080.0, 720.0)
-        .resizable(true)
-        .build()?;
+        .resizable(true);
+
+        #[cfg(target_os = "macos")]
+        let window = window
+          .title_bar_style(tauri::TitleBarStyle::Overlay)
+          .hidden_title(true);
+
+        let _window = window.build()?;
 
         // Dismiss the splash screen now that the main window is visible.
         if let Some(sw) = splash_window {

@@ -33,17 +33,7 @@ import {
   SidebarTrigger,
 } from "@/components/ui/sidebar";
 import { cn } from "@/lib/utils";
-import {
-  CheckIcon,
-  FolderIcon,
-  FolderOpenIcon,
-  PaletteIcon,
-  MessageSquareIcon,
-  MoonIcon,
-  PlusIcon,
-  Settings2Icon,
-  Trash2Icon,
-} from "lucide-react";
+import { Icon } from "@iconify/react";
 
 type ThreadEntry = {
   id: string;
@@ -144,7 +134,7 @@ export function AppSidebar({
       <DropdownMenuSub>
         <DropdownMenuSubTrigger className="rounded-[8px] px-2 py-1.5 text-[12px] font-medium text-foreground [&_svg]:text-muted-foreground">
           <div className="flex min-w-0 flex-1 items-center gap-2">
-            <PaletteIcon className="size-3.5" />
+            <Icon icon="solar:palette-round-linear" className="size-3.5" aria-hidden="true" />
             <span>主题</span>
           </div>
           <span className="ml-auto text-[10px] text-muted-foreground">
@@ -168,14 +158,20 @@ export function AppSidebar({
                 ))}
               </div>
               <span>{colorThemeLabels[value]}</span>
-              {colorTheme === value ? <CheckIcon className="ml-auto size-4 text-foreground" /> : null}
+              {colorTheme === value ? (
+                <Icon
+                  icon="solar:check-circle-linear"
+                  className="ml-auto size-4 text-foreground"
+                  aria-hidden="true"
+                />
+              ) : null}
             </DropdownMenuItem>
           ))}
         </DropdownMenuSubContent>
       </DropdownMenuSub>
       <div className="mt-0.5 flex items-center gap-2 rounded-[8px] px-2 py-1.5 text-foreground">
         <span className="flex size-6 items-center justify-center rounded-full bg-accent/70 text-muted-foreground">
-          <MoonIcon className="size-3.5" />
+          <Icon icon="solar:moon-linear" className="size-3.5" aria-hidden="true" />
         </span>
         <div className="min-w-0 flex-1">
           <div className="text-[12px] font-medium">暗黑模式</div>
@@ -221,7 +217,11 @@ export function AppSidebar({
               className="app-control rounded-lg border-0 text-sidebar-foreground/72 shadow-none transition-colors hover:text-sidebar-foreground group-data-[collapsible=icon]:hidden"
               aria-label="新开文件夹"
             >
-              <FolderOpenIcon className="size-4" />
+              <Icon
+                icon="solar:folder-open-linear"
+                className="size-4"
+                aria-hidden="true"
+              />
             </Button>
             <Button
               type="button"
@@ -231,7 +231,7 @@ export function AppSidebar({
               className="app-control rounded-lg border-0 text-sidebar-foreground/72 shadow-none transition-colors hover:text-sidebar-foreground group-data-[collapsible=icon]:hidden"
               aria-label="新建对话"
             >
-              <PlusIcon className="size-4" />
+              <Icon icon="solar:add-circle-linear" className="size-4" aria-hidden="true" />
             </Button>
             <SidebarTrigger className="app-control size-8 rounded-lg border-0 text-sidebar-foreground/72 shadow-none hover:text-sidebar-foreground" />
           </div>
@@ -243,7 +243,11 @@ export function AppSidebar({
           {groupedThreads.map((group) => (
             <section key={group.name} className="space-y-2.5">
               <div className="flex items-center gap-2 px-1 text-sidebar-foreground/70">
-                <FolderIcon className="size-4 shrink-0 text-sidebar-foreground/50" />
+                <Icon
+                  icon="solar:folder-with-files-linear"
+                  className="size-4 shrink-0 text-sidebar-foreground/50"
+                  aria-hidden="true"
+                />
                 <span className="min-w-0 flex-1 truncate text-[13px] font-semibold">
                   {group.name}
                 </span>
@@ -287,7 +291,7 @@ export function AppSidebar({
                             onClick={() => onDeleteThread?.(thread.id)}
                             className="rounded-lg"
                           >
-                            <Trash2Icon className="size-4" />
+                            <Icon icon="solar:trash-bin-trash-linear" className="size-4" aria-hidden="true" />
                             删除线程
                           </ContextMenuItem>
                         </ContextMenuContent>
@@ -302,7 +306,11 @@ export function AppSidebar({
           {hasUngroupedThreads ? (
             <section className="space-y-2.5">
               <div className="flex items-center gap-2 px-1 text-sidebar-foreground/70">
-                <MessageSquareIcon className="size-4 shrink-0 text-sidebar-foreground/50" />
+                <Icon
+                  icon="solar:chat-round-dots-linear"
+                  className="size-4 shrink-0 text-sidebar-foreground/50"
+                  aria-hidden="true"
+                />
                 <span className="min-w-0 flex-1 truncate text-[13px] font-semibold">
                   未分组
                 </span>
@@ -346,7 +354,7 @@ export function AppSidebar({
                             onClick={() => onDeleteThread?.(thread.id)}
                             className="rounded-lg"
                           >
-                            <Trash2Icon className="size-4" />
+                            <Icon icon="solar:trash-bin-trash-linear" className="size-4" aria-hidden="true" />
                             删除线程
                           </ContextMenuItem>
                         </ContextMenuContent>
@@ -372,7 +380,11 @@ export function AppSidebar({
                 className="app-sidebar-item h-auto w-full flex-col items-center justify-center gap-3 rounded-xl border-dashed px-4 py-8 text-center shadow-none transition-colors"
               >
                 <span className="app-control flex size-11 items-center justify-center rounded-xl border-0 text-sidebar-foreground/50">
-                  <MessageSquareIcon className="size-5" />
+                  <Icon
+                    icon="solar:chat-round-dots-linear"
+                    className="size-5"
+                    aria-hidden="true"
+                  />
                 </span>
                 <div className="space-y-1">
                   <div className="text-[13px] font-medium text-sidebar-foreground/70">
@@ -395,7 +407,11 @@ export function AppSidebar({
             className="app-control size-10 rounded-lg border-0 text-sidebar-foreground shadow-none transition-colors"
             aria-label="新开文件夹"
           >
-            <FolderOpenIcon className="size-4" />
+            <Icon
+              icon="solar:folder-open-linear"
+              className="size-4"
+              aria-hidden="true"
+            />
           </Button>
           <Button
             type="button"
@@ -404,7 +420,7 @@ export function AppSidebar({
             className="app-control size-10 rounded-lg border-0 text-sidebar-foreground shadow-none transition-colors"
             aria-label="新建对话"
           >
-            <PlusIcon className="size-4" />
+            <Icon icon="solar:add-circle-linear" className="size-4" aria-hidden="true" />
           </Button>
         </div>
       </SidebarContent>
@@ -421,7 +437,7 @@ export function AppSidebar({
                 className="app-sidebar-item h-10 w-full justify-start gap-3 rounded-[16px] px-3 text-sidebar-foreground/78 shadow-none transition-colors hover:text-sidebar-foreground"
               >
                 <span className="flex size-8 items-center justify-center rounded-[12px] bg-sidebar-foreground/[0.06] text-sidebar-foreground/72">
-                  <Settings2Icon className="size-4" />
+                  <Icon icon="solar:settings-linear" className="size-4" aria-hidden="true" />
                 </span>
                 <span className="min-w-0 flex-1 text-left text-[12px] font-medium">设置</span>
               </Button>
@@ -438,7 +454,7 @@ export function AppSidebar({
                   tooltip="设置"
                   className="app-control-ghost size-10 justify-center rounded-lg px-0 text-[12px] text-sidebar-foreground/60 hover:text-sidebar-foreground"
                 >
-                  <Settings2Icon className="size-4" />
+                  <Icon icon="solar:settings-linear" className="size-4" aria-hidden="true" />
                 </SidebarMenuButton>
               </DropdownMenuTrigger>
               {renderSettingsMenu()}

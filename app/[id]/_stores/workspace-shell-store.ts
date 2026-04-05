@@ -3,9 +3,10 @@
 import { create } from "zustand";
 import { persist, createJSONStorage } from "zustand/middleware";
 
-export const DEFAULT_MODEL_ID = "openrouter/qwen/qwen3.6-plus:free";
+export const DEFAULT_MODEL_ID = "openrouter/openai/gpt-5.4-nano";
 const MODEL_STORAGE_KEY = "chat-selected-model";
 const LEGACY_DEFAULT_MODEL_IDS = new Set([
+  "openrouter/qwen/qwen3.6-plus:free",
   "openrouter/z-ai/glm-5v-turbo",
   "openrouter/openai/gpt-5.4-mini",
 ]);

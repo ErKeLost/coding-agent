@@ -11,7 +11,7 @@ import {
   ModelSelectorLogo,
   ModelSelectorTrigger,
 } from "@/components/ai-elements/model-selector";
-import { ChevronDownIcon, SquareTerminalIcon } from "lucide-react";
+import { Icon } from "@iconify/react";
 
 type SelectedModel = {
   name: string;
@@ -55,7 +55,11 @@ export function WorkspaceModelTerminalControls({
                 {selectedModelData?.name ?? "选择模型"}
               </span>
             </div>
-            <ChevronDownIcon className="size-3.5 shrink-0 text-muted-foreground" />
+            <Icon
+              icon="lucide:chevron-down"
+              className="size-3.5 shrink-0 text-muted-foreground"
+              aria-hidden="true"
+            />
           </Button>
         </ModelSelectorTrigger>
       </ModelSelector>
@@ -69,7 +73,11 @@ export function WorkspaceModelTerminalControls({
             className="app-control h-8 w-8 shrink-0 rounded-[10px] border-0 px-0 shadow-none"
             aria-label={terminalExpanded ? "隐藏终端" : "显示终端"}
           >
-            <SquareTerminalIcon className="size-3.5" />
+            <Icon
+              icon="lucide:square-terminal"
+              className="size-3.5"
+              aria-hidden="true"
+            />
           </Button>
         </TooltipTrigger>
         <TooltipContent side="top" sideOffset={8}>

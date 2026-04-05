@@ -1,4 +1,4 @@
-import { LoaderCircleIcon, SquareTerminalIcon } from "lucide-react";
+import { Icon } from "@iconify/react";
 
 type StartupScreenProps = {
   label?: string;
@@ -19,7 +19,11 @@ export function StartupScreen({
       <div className="app-panel relative w-[min(560px,calc(100vw-32px))] rounded-[30px] px-8 py-10">
         <div className="flex items-start gap-4">
           <div className="app-soft-card flex size-14 items-center justify-center rounded-2xl border border-white/8">
-            <SquareTerminalIcon className="size-6 text-cyan-400" />
+            <Icon
+              icon="solar:terminal-2-linear"
+              className="size-6 text-cyan-400"
+              aria-hidden="true"
+            />
           </div>
           <div className="min-w-0 flex-1">
             <div className="text-[11px] font-medium tracking-[0.24em] text-muted-foreground/70 uppercase">
@@ -32,7 +36,11 @@ export function StartupScreen({
               {detail}
             </p>
           </div>
-          <LoaderCircleIcon className="mt-1 size-5 animate-spin text-muted-foreground/75" />
+          <Icon
+            icon="solar:refresh-linear"
+            className="mt-1 size-5 animate-spin text-muted-foreground/75"
+            aria-hidden="true"
+          />
         </div>
 
         <div className="mt-8 space-y-3">

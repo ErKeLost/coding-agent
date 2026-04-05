@@ -24,6 +24,8 @@ const normalizeLanguage = (language: string) => {
     case "markdown":
     case "css":
     case "html":
+    case "vue":
+    case "svelte":
     case "yaml":
     case "bash":
     case "sql":
@@ -137,30 +139,16 @@ export function ShikiFilePreview({
 
   return (
     <div
-      className="flex h-full min-h-0 flex-col overflow-hidden rounded-[20px] border"
+      className="flex h-full min-h-0 flex-col overflow-hidden rounded-[12px] border"
       style={previewStyle}
     >
       <div
-        className="flex items-center justify-between gap-3 border-b px-4 py-3"
+        className="scrollbar-frost min-h-0 flex-1 overflow-auto p-1.5"
         style={{
-          borderColor: "var(--app-hairline)",
-          background: "var(--app-soft-fill-strong)",
+          background: "color-mix(in srgb, var(--background) 78%, transparent)",
         }}
       >
-        <div className="min-w-0">
-          <div className="truncate font-mono text-[12px] text-foreground/88">
-            {filename}
-          </div>
-          <div className="mt-0.5 text-[10px] text-muted-foreground/72">
-            Syntax-highlighted snapshot
-          </div>
-        </div>
-      </div>
-      <div
-        className="scrollbar-frost min-h-0 flex-1 overflow-auto p-3"
-        style={{ background: "color-mix(in srgb, var(--background) 78%, transparent)" }}
-      >
-        <div ref={containerRef} className="min-h-[180px]" />
+        <div ref={containerRef} className="min-h-[120px]" />
       </div>
     </div>
   );

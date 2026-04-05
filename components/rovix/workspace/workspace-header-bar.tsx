@@ -12,13 +12,7 @@ import {
 import { SidebarTrigger } from "@/components/ui/sidebar";
 import { BranchPicker } from "@/components/rovix/branch-picker";
 import type { WorkspaceBranchPayload } from "@/lib/desktop-workspace";
-import {
-  ChevronDownIcon,
-  GitBranchIcon,
-  SearchIcon,
-  Settings2Icon,
-  UploadIcon,
-} from "lucide-react";
+import { Icon } from "@iconify/react";
 import { cn } from "@/lib/utils";
 
 type WorkspaceHeaderBarProps = {
@@ -78,7 +72,7 @@ export function WorkspaceHeaderBar({
           onClick={onOpenSearch}
           className="app-control h-9 rounded-lg border-0 px-3 text-[12px] font-normal text-foreground/78 shadow-none transition-colors hover:text-foreground"
         >
-          <SearchIcon className="size-4" />
+          <Icon icon="solar:magnifer-linear" className="size-4" aria-hidden="true" />
           搜索
         </Button>
 
@@ -99,9 +93,17 @@ export function WorkspaceHeaderBar({
                   variant="ghost"
                   className="h-7 rounded-[10px] bg-[color:var(--app-soft-fill)] px-3 text-[11px] font-medium text-foreground/92 shadow-none transition-colors hover:bg-[color:var(--app-control-hover)]"
                 >
-                  <Settings2Icon className="size-3 text-foreground/72" />
+                  <Icon
+                    icon="solar:settings-linear"
+                    className="size-3 text-foreground/72"
+                    aria-hidden="true"
+                  />
                   提交
-                  <ChevronDownIcon className="size-3 text-muted-foreground/75" />
+                  <Icon
+                    icon="solar:alt-arrow-down-linear"
+                    className="size-3 text-muted-foreground/75"
+                    aria-hidden="true"
+                  />
                 </Button>
               </DropdownMenuTrigger>
               <DropdownMenuContent
@@ -119,7 +121,11 @@ export function WorkspaceHeaderBar({
                   }
                   className="rounded-[8px] px-2 py-1.5 text-[11px] font-medium"
                 >
-                  <Settings2Icon className="size-3.5 text-foreground/72" />
+                  <Icon
+                    icon="solar:settings-linear"
+                    className="size-3.5 text-foreground/72"
+                    aria-hidden="true"
+                  />
                   提交
                 </DropdownMenuItem>
                 <DropdownMenuItem
@@ -129,7 +135,7 @@ export function WorkspaceHeaderBar({
                   }
                   className="rounded-[8px] px-2 py-1.5 text-[11px] font-medium"
                 >
-                  <UploadIcon className="size-3.5" />
+                  <Icon icon="solar:upload-linear" className="size-3.5" aria-hidden="true" />
                   推送
                 </DropdownMenuItem>
                 <DropdownMenuSeparator className="my-0.75" />
@@ -137,7 +143,11 @@ export function WorkspaceHeaderBar({
                   onClick={() => void onCreateBranch()}
                   className="rounded-[8px] px-2 py-1.5 text-[11px] font-medium"
                 >
-                  <GitBranchIcon className="size-3.5" />
+                  <Icon
+                    icon="solar:git-branch-linear"
+                    className="size-3.5"
+                    aria-hidden="true"
+                  />
                   Create branch
                 </DropdownMenuItem>
               </DropdownMenuContent>
@@ -150,7 +160,11 @@ export function WorkspaceHeaderBar({
             onClick={() => void onSelectBranch("main")}
             className="app-control h-9 rounded-lg border-0 px-3 text-[12px] font-normal text-foreground/78 shadow-none transition-colors hover:text-foreground"
           >
-            <GitBranchIcon className="size-4" />
+            <Icon
+              icon="solar:git-branch-linear"
+              className="size-4"
+              aria-hidden="true"
+            />
             初始化 main
           </Button>
         )}

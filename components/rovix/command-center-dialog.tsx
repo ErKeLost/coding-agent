@@ -9,11 +9,7 @@ import {
   CommandList,
   CommandShortcut,
 } from "@/components/ui/command";
-import {
-  FileSearchIcon,
-  FlaskConicalIcon,
-  WandSparklesIcon,
-} from "lucide-react";
+import { Icon } from "@iconify/react";
 
 type CommandAction = {
   title: string;
@@ -30,9 +26,9 @@ type CommandCenterDialogProps = {
 };
 
 const iconMap = {
-  test: FlaskConicalIcon,
-  refactor: WandSparklesIcon,
-  explain: FileSearchIcon,
+  test: "solar:test-tube-linear",
+  refactor: "solar:magic-stick-3-linear",
+  explain: "solar:document-text-linear",
 } as const;
 
 export function CommandCenterDialog({
@@ -64,7 +60,7 @@ export function CommandCenterDialog({
             className="[&_[cmdk-group-heading]]:px-2 [&_[cmdk-group-heading]]:py-2 [&_[cmdk-group-heading]]:text-[10px] [&_[cmdk-group-heading]]:font-bold [&_[cmdk-group-heading]]:uppercase [&_[cmdk-group-heading]]:tracking-[1px] [&_[cmdk-group-heading]]:text-[#64748b]"
           >
             {actions.map((action) => {
-              const Icon =
+              const icon =
                 action.value === "test"
                   ? iconMap.test
                   : action.value === "refactor"
@@ -79,7 +75,7 @@ export function CommandCenterDialog({
                   className="group rounded-[14px] px-3 py-3 data-[selected=true]:bg-[#111a2d] data-[selected=true]:text-[#dbeafe]"
                 >
                   <div className="flex size-8 items-center justify-center rounded-[8px] bg-[#2d3449] text-[#7fb0ff]">
-                    <Icon className="size-[17px]" />
+                    <Icon icon={icon} className="size-[17px]" aria-hidden="true" />
                   </div>
                   <div className="flex min-w-0 flex-1 flex-col">
                     <span className="truncate text-sm text-[#dae2fd]">

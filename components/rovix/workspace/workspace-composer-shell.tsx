@@ -4,7 +4,7 @@ import type { ReactNode } from "react";
 import { PromptInputProvider } from "@/components/ai-elements/prompt-input";
 import { Plan } from "@/components/tool-ui/plan";
 import { Button } from "@/components/ui/button";
-import { SparklesIcon, LoaderCircleIcon } from "lucide-react";
+import { Icon } from "@iconify/react";
 import { cn } from "@/lib/utils";
 
 type WorkspaceComposerShellProps = {
@@ -54,7 +54,11 @@ export function WorkspaceComposerShell({
               {queuedSubmissionPreview ? (
                 <div className="flex w-full flex-wrap items-center justify-between gap-2 px-5 py-3 text-[12px] text-muted-foreground">
                   <div className="flex min-w-0 flex-1 items-center gap-2">
-                    <LoaderCircleIcon className="size-3.5 animate-spin" />
+                    <Icon
+                      icon="solar:refresh-linear"
+                      className="size-3.5 animate-spin"
+                      aria-hidden="true"
+                    />
                     <span className="truncate">{queuedSubmissionSummary}</span>
                   </div>
                   <WorkspacePromptGuideButton
@@ -72,7 +76,11 @@ export function WorkspaceComposerShell({
                   )}
                 >
                   <div className="flex min-w-0 flex-1 items-center gap-2">
-                    <SparklesIcon className="size-3.5 shrink-0 text-primary/80" />
+                    <Icon
+                      icon="solar:magic-stick-3-linear"
+                      className="size-3.5 shrink-0 text-primary/80"
+                      aria-hidden="true"
+                    />
                     <span className="truncate">{guideBanner.text}</span>
                   </div>
                   {queuedSubmissionPreview ? (
@@ -113,7 +121,11 @@ export const WorkspacePromptGuideButton = ({
       onClick={onClick}
       className="app-control h-9 rounded-full border-0 px-3 text-[12px] font-medium text-foreground/88 shadow-none disabled:cursor-not-allowed"
     >
-      <SparklesIcon className="size-3.5 text-primary/80" />
+      <Icon
+        icon="solar:magic-stick-3-linear"
+        className="size-3.5 text-primary/80"
+        aria-hidden="true"
+      />
       引导
     </Button>
   );

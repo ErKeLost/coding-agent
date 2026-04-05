@@ -4,10 +4,11 @@ import "xterm/css/xterm.css";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { FitAddon } from "@xterm/addon-fit";
-import { FileTerminalIcon, PlusIcon, XIcon } from "lucide-react";
+import { Icon } from "@iconify/react";
 import { Button } from "@/components/ui/button";
 import {
   listenDesktopTerminalOutput,
+  openExternalUrl,
   readDesktopTerminalSession,
   resizeDesktopTerminalSession,
   startDesktopTerminalSession,
@@ -40,6 +41,7 @@ type WorkspaceTerminalState = {
 };
 
 type XTermTerminal = import("xterm").Terminal;
+type XTermDisposable = { dispose: () => void };
 
 const FALLBACK_SURFACE_LIGHT = "#f3eee6";
 const FALLBACK_SURFACE_DARK = "#171f26";
@@ -87,6 +89,24 @@ function createWorkspaceState(): WorkspaceTerminalState {
   };
 }
 
+function getErrorMessage(error: unknown) {
+  if (typeof error === "string") return error;
+  if (error instanceof Error) return error.message;
+  if (
+    typeof error === "object" &&
+    error !== null &&
+    "message" in error &&
+    typeof (error as { message?: unknown }).message === "string"
+  ) {
+    return (error as { message: string }).message;
+  }
+  return "";
+}
+
+function isSessionMissingError(error: unknown) {
+  return /terminal session not found/i.test(getErrorMessage(error));
+}
+
 export function BottomTerminalPanel({
   workspaceRoot,
   isDesktopRuntime,
@@ -99,7 +119,9 @@ export function BottomTerminalPanel({
   const mountMapRef = useRef<Map<string, HTMLDivElement>>(new Map());
   const unlistenMapRef = useRef<Map<string, () => void>>(new Map());
   const resizeObserverMapRef = useRef<Map<string, ResizeObserver>>(new Map());
+  const linkProviderMapRef = useRef<Map<string, XTermDisposable>>(new Map());
   const queueMapRef = useRef<Map<string, Promise<void>>>(new Map());
+  const disposedSessionIdsRef = useRef<Set<string>>(new Set());
   const workspaceRootRef = useRef<string | null>(workspaceRoot);
 
   const [internalExpanded] = useState(true);
@@ -179,7 +201,15 @@ export function BottomTerminalPanel({
     return workspaceStatesRef.current[workspaceRoot] ?? createWorkspaceState();
   }, [workspaceRoot, tick]);
 
-  const activeSessionId = workspaceState?.activeSessionId ?? null;
+  const activeSessionId = useMemo(() => {
+    const sessions = workspaceState?.sessions ?? [];
+    if (!sessions.length) return null;
+    const current = workspaceState?.activeSessionId ?? null;
+    if (current && sessions.some((session) => session.sessionId === current)) {
+      return current;
+    }
+    return sessions[0]?.sessionId ?? null;
+  }, [workspaceState?.activeSessionId, workspaceState?.sessions]);
 
   const syncWorkspaceState = useCallback(
     (
@@ -207,7 +237,6 @@ export function BottomTerminalPanel({
       const mount = mountMapRef.current.get(sessionId);
       if (!terminal || !mount) return;
       terminal.options.theme = { ...terminalPalette };
-      terminal.clearTextureAtlas();
       mount.style.backgroundColor = terminalSurface;
       mount
         .querySelectorAll<HTMLElement>(
@@ -216,7 +245,6 @@ export function BottomTerminalPanel({
         .forEach((node) => {
           node.style.backgroundColor = "transparent";
         });
-      terminal.refresh(0, terminal.rows - 1);
     },
     [terminalPalette, terminalSurface],
   );
@@ -225,14 +253,60 @@ export function BottomTerminalPanel({
     const terminal = terminalMapRef.current.get(sessionId);
     const fitAddon = fitMapRef.current.get(sessionId);
     if (!terminal || !fitAddon) return;
-    fitAddon.fit();
-    void resizeDesktopTerminalSession(sessionId, terminal.cols, terminal.rows);
+    if (!terminal.element || !terminal.element.isConnected) return;
+    try {
+      fitAddon.fit();
+    } catch {
+      return;
+    }
+    void resizeDesktopTerminalSession(sessionId, terminal.cols, terminal.rows).catch(
+      (err) => {
+        if (isSessionMissingError(err)) return;
+        setError(getErrorMessage(err) || "Failed to resize terminal");
+      },
+    );
   }, []);
+
+  const writeOutputToTerminal = useCallback(
+    (sessionId: string, output: string) => {
+      if (!output) return true;
+      const terminal = terminalMapRef.current.get(sessionId);
+      if (!terminal) return false;
+      try {
+        terminal.write(output);
+        return true;
+      } catch {
+        // Renderer can be temporarily unavailable during mount/switch.
+        return false;
+      }
+    },
+    [],
+  );
+
+  const openTerminalLink = useCallback(
+    (rawUrl: string) => {
+      const trimmed = rawUrl.trim();
+      if (!trimmed) return;
+      try {
+        const parsed = new URL(trimmed);
+        if (parsed.protocol !== "http:" && parsed.protocol !== "https:") return;
+        void openExternalUrl(parsed.toString());
+      } catch {
+        // Ignore malformed URLs from terminal output.
+      }
+    },
+    [],
+  );
 
   const ensureTerminalInstance = useCallback(
     async (sessionId: string) => {
       const mount = mountMapRef.current.get(sessionId);
       if (!mount || terminalMapRef.current.has(sessionId)) return;
+      // Do not initialize xterm while panel is hidden or container has no size.
+      // Creating the renderer at 0x0 can leave the first terminal blank/unusable.
+      if (!isExpanded || mount.offsetParent === null) {
+        return;
+      }
       const [{ Terminal }, { FitAddon }] = await Promise.all([
         import("xterm"),
         import("@xterm/addon-fit"),
@@ -245,7 +319,7 @@ export function BottomTerminalPanel({
         cursorBlink: true,
         cursorStyle: "block",
         fontFamily:
-          'var(--font-geist-mono), "SFMono-Regular", Menlo, Monaco, Consolas, "Liberation Mono", monospace',
+          '"JetBrainsMono Nerd Font", "MesloLGS NF", var(--font-geist-mono), "SFMono-Regular", Menlo, Monaco, Consolas, "Liberation Mono", monospace',
         fontSize: 11,
         fontWeight: "400",
         lineHeight: 1.28,
@@ -257,13 +331,56 @@ export function BottomTerminalPanel({
       const fitAddon = new FitAddon();
       terminal.loadAddon(fitAddon);
       terminal.open(mount);
+      disposedSessionIdsRef.current.delete(sessionId);
+
+      const linkProviderDisposable = terminal.registerLinkProvider({
+        provideLinks: (y, callback) => {
+          const line = terminal.buffer.active.getLine(y - 1);
+          const text = line?.translateToString(true) ?? "";
+          const links: Array<{
+            text: string;
+            range: {
+              start: { x: number; y: number };
+              end: { x: number; y: number };
+            };
+            activate: () => void;
+          }> = [];
+          const urlPattern = /\bhttps?:\/\/[^\s<>"'`]+/g;
+          let match: RegExpExecArray | null = null;
+
+          while ((match = urlPattern.exec(text))) {
+            const raw = match[0].replace(/[),.;!?]+$/, "");
+            const start = match.index + 1;
+            const end = start + raw.length - 1;
+            if (end < start) continue;
+            links.push({
+              text: raw,
+              range: {
+                start: { x: start, y },
+                end: { x: end, y },
+              },
+              activate: () => openTerminalLink(raw),
+            });
+          }
+
+          callback(links);
+        },
+      });
+      linkProviderMapRef.current.set(sessionId, linkProviderDisposable);
 
       terminal.onData((data) => {
+        if (disposedSessionIdsRef.current.has(sessionId)) return;
         const currentQueue =
           queueMapRef.current.get(sessionId) ?? Promise.resolve();
-        const nextQueue = currentQueue.then(async () => {
-          await writeDesktopTerminalSession(sessionId, data);
-        });
+        const nextQueue = currentQueue
+          .then(async () => {
+            if (disposedSessionIdsRef.current.has(sessionId)) return;
+            await writeDesktopTerminalSession(sessionId, data);
+          })
+          .catch((err) => {
+            if (isSessionMissingError(err)) return;
+            setError(getErrorMessage(err) || "Failed to write terminal input");
+          });
         queueMapRef.current.set(sessionId, nextQueue);
       });
 
@@ -286,6 +403,7 @@ export function BottomTerminalPanel({
       activeSessionId,
       applyThemeToTerminal,
       isExpanded,
+      openTerminalLink,
       syncTerminalSize,
       terminalPalette,
     ],
@@ -298,14 +416,27 @@ export function BottomTerminalPanel({
       const unlisten = await listenDesktopTerminalOutput(
         session.sessionId,
         (payload) => {
+          if (disposedSessionIdsRef.current.has(session.sessionId)) return;
           const currentWorkspace = workspaceStatesRef.current[path];
           const currentSession = currentWorkspace?.sessions.find(
             (item) => item.sessionId === session.sessionId,
           );
+          // Ignore stale/duplicate chunks that we've already applied.
+          if (
+            currentSession &&
+            payload.nextOffset <= (currentSession.offset ?? 0)
+          ) {
+            return;
+          }
           if (payload.output) {
-            terminalMapRef.current
-              .get(session.sessionId)
-              ?.write(payload.output);
+            const applied = writeOutputToTerminal(
+              session.sessionId,
+              payload.output,
+            );
+            if (!applied) {
+              // Keep offset unchanged so content can be replayed on next hydrate.
+              return;
+            }
           }
           if (currentSession) {
             currentSession.offset = payload.nextOffset ?? currentSession.offset;
@@ -314,32 +445,44 @@ export function BottomTerminalPanel({
       );
       unlistenMapRef.current.set(session.sessionId, unlisten);
     },
-    [],
+    [writeOutputToTerminal],
   );
 
   const hydrateSession = useCallback(
     async (path: string, session: TerminalSessionRecord) => {
-      await ensureTerminalInstance(session.sessionId);
-      if (!terminalMapRef.current.has(session.sessionId)) return;
-      await ensureSessionListener(path, session);
-      const currentWorkspace = workspaceStatesRef.current[path];
-      const currentSession =
-        currentWorkspace?.sessions.find(
-          (item) => item.sessionId === session.sessionId,
-        ) ?? session;
-      const payload = await readDesktopTerminalSession(
-        session.sessionId,
-        currentSession.offset,
-      );
-      if (payload.output) {
-        terminalMapRef.current.get(session.sessionId)?.write(payload.output);
-      }
-      currentSession.offset = payload.nextOffset ?? currentSession.offset;
-      if (activeSessionId === session.sessionId && isExpanded) {
-        window.requestAnimationFrame(() => {
-          syncTerminalSize(session.sessionId);
-          terminalMapRef.current.get(session.sessionId)?.focus();
-        });
+      try {
+        await ensureTerminalInstance(session.sessionId);
+        if (!terminalMapRef.current.has(session.sessionId)) return;
+        await ensureSessionListener(path, session);
+        const currentWorkspace = workspaceStatesRef.current[path];
+        const currentSession =
+          currentWorkspace?.sessions.find(
+            (item) => item.sessionId === session.sessionId,
+          ) ?? session;
+        const payload = await readDesktopTerminalSession(
+          session.sessionId,
+          currentSession.offset,
+        );
+        if (payload.output) {
+          const applied = writeOutputToTerminal(
+            session.sessionId,
+            payload.output,
+          );
+          if (!applied) {
+            // Do not advance offset; retry on next hydrate/select.
+            return;
+          }
+        }
+        currentSession.offset = payload.nextOffset ?? currentSession.offset;
+        if (activeSessionId === session.sessionId && isExpanded) {
+          window.requestAnimationFrame(() => {
+            syncTerminalSize(session.sessionId);
+            terminalMapRef.current.get(session.sessionId)?.focus();
+          });
+        }
+      } catch (err) {
+        if (isSessionMissingError(err)) return;
+        setError(getErrorMessage(err) || "Failed to hydrate terminal");
       }
     },
     [
@@ -348,6 +491,7 @@ export function BottomTerminalPanel({
       ensureTerminalInstance,
       isExpanded,
       syncTerminalSize,
+      writeOutputToTerminal,
     ],
   );
 
@@ -357,18 +501,31 @@ export function BottomTerminalPanel({
         mountMapRef.current.delete(sessionId);
         return;
       }
+      // Re-attaching viewport for an existing session should reactivate it.
+      disposedSessionIdsRef.current.delete(sessionId);
       const previousNode = mountMapRef.current.get(sessionId);
       if (previousNode === node) {
+        if (isExpanded && !terminalMapRef.current.has(sessionId)) {
+          const currentPath = workspaceRootRef.current;
+          const currentSession = currentPath
+            ? getSessionRecord(currentPath, sessionId)
+            : null;
+          if (currentPath && currentSession) {
+            void hydrateSession(currentPath, currentSession);
+          } else {
+            void ensureTerminalInstance(sessionId);
+          }
+        }
         return;
       }
       mountMapRef.current.set(sessionId, node);
-      if (!isExpanded) {
-        return;
-      }
       const currentPath = workspaceRootRef.current;
       const currentSession = currentPath
         ? getSessionRecord(currentPath, sessionId)
         : null;
+      if (!isExpanded) {
+        return;
+      }
       if (currentPath && currentSession) {
         void hydrateSession(currentPath, currentSession);
         return;
@@ -395,6 +552,8 @@ export function BottomTerminalPanel({
         sessions: [...state.sessions, session],
         nextLabelIndex: state.nextLabelIndex + 1,
       }));
+      // Wake up prompt output for shells that don't print until first input.
+      void writeDesktopTerminalSession(session.sessionId, "\n").catch(() => {});
       return session;
     },
     [syncWorkspaceState],
@@ -423,12 +582,22 @@ export function BottomTerminalPanel({
         ...state,
         activeSessionId: sessionId,
       }));
+      const currentSession = getSessionRecord(workspaceRoot, sessionId);
+      if (currentSession) {
+        void hydrateSession(workspaceRoot, currentSession);
+      }
       window.requestAnimationFrame(() => {
         syncTerminalSize(sessionId);
         terminalMapRef.current.get(sessionId)?.focus();
       });
     },
-    [syncTerminalSize, syncWorkspaceState, workspaceRoot],
+    [
+      getSessionRecord,
+      hydrateSession,
+      syncTerminalSize,
+      syncWorkspaceState,
+      workspaceRoot,
+    ],
   );
 
   const handleCloseSession = useCallback(
@@ -444,14 +613,26 @@ export function BottomTerminalPanel({
       try {
         setPendingAction("closing");
         setError(null);
-        await stopDesktopTerminalSession(sessionId);
+        try {
+          await stopDesktopTerminalSession(sessionId);
+        } catch (err) {
+          if (!isSessionMissingError(err)) throw err;
+        }
 
         unlistenMapRef.current.get(sessionId)?.();
         unlistenMapRef.current.delete(sessionId);
         resizeObserverMapRef.current.get(sessionId)?.disconnect();
         resizeObserverMapRef.current.delete(sessionId);
-        terminalMapRef.current.get(sessionId)?.dispose();
+        disposedSessionIdsRef.current.add(sessionId);
+        const terminal = terminalMapRef.current.get(sessionId);
         terminalMapRef.current.delete(sessionId);
+        try {
+          terminal?.dispose();
+        } catch {
+          // Ignore dispose races.
+        }
+        linkProviderMapRef.current.get(sessionId)?.dispose();
+        linkProviderMapRef.current.delete(sessionId);
         fitMapRef.current.delete(sessionId);
         mountMapRef.current.delete(sessionId);
         queueMapRef.current.delete(sessionId);
@@ -482,9 +663,7 @@ export function BottomTerminalPanel({
           });
         }
       } catch (err) {
-        setError(
-          err instanceof Error ? err.message : "Failed to close terminal",
-        );
+        setError(getErrorMessage(err) || "Failed to close terminal");
       } finally {
         setPendingAction(null);
       }
@@ -497,13 +676,22 @@ export function BottomTerminalPanel({
   }, [workspaceRoot]);
 
   useEffect(() => {
-    if (!workspaceRoot || !isDesktopRuntime) return;
+    if (!workspaceRoot || !isDesktopRuntime || !isExpanded) return;
     const state = workspaceStatesRef.current[workspaceRoot];
     if (state?.sessions.length) return;
-    void createSession(workspaceRoot).then((session) =>
-      hydrateSession(workspaceRoot, session),
-    );
-  }, [createSession, hydrateSession, isDesktopRuntime, workspaceRoot]);
+    void createSession(workspaceRoot)
+      .then((session) => hydrateSession(workspaceRoot, session))
+      .catch((err) => {
+        if (isSessionMissingError(err)) return;
+        setError(getErrorMessage(err) || "Failed to initialize terminal");
+      });
+  }, [
+    createSession,
+    hydrateSession,
+    isDesktopRuntime,
+    isExpanded,
+    workspaceRoot,
+  ]);
 
   useEffect(() => {
     if (!isExpanded) return;
@@ -537,12 +725,16 @@ export function BottomTerminalPanel({
         observer.disconnect();
       for (const terminal of terminalMapRef.current.values())
         terminal.dispose();
+      for (const linkProvider of linkProviderMapRef.current.values())
+        linkProvider.dispose();
       unlistenMapRef.current.clear();
       resizeObserverMapRef.current.clear();
       terminalMapRef.current.clear();
+      linkProviderMapRef.current.clear();
       fitMapRef.current.clear();
       mountMapRef.current.clear();
       queueMapRef.current.clear();
+      disposedSessionIdsRef.current.clear();
     };
   }, []);
 
@@ -565,9 +757,11 @@ export function BottomTerminalPanel({
       >
         <div className="flex min-w-0 items-center gap-2">
           <div className="flex items-center gap-2 pr-1 text-[12px] font-medium">
-            <FileTerminalIcon
+            <Icon
+              icon="lucide:terminal"
               className="size-3.5"
               style={{ color: "var(--terminal-muted)" }}
+              aria-hidden="true"
             />
             <span>终端</span>
             <span
@@ -611,7 +805,11 @@ export function BottomTerminalPanel({
                       onClick={() => void handleCloseSession(session.sessionId)}
                       className="rounded-sm p-0.5 opacity-60 transition-opacity group-hover:opacity-100"
                     >
-                      <XIcon className="size-3" />
+                      <Icon
+                        icon="lucide:x"
+                        className="size-3"
+                        aria-hidden="true"
+                      />
                     </button>
                   ) : null}
                 </div>
@@ -631,7 +829,11 @@ export function BottomTerminalPanel({
           onClick={() => void handleCreateSession()}
           title="新建终端"
         >
-          <PlusIcon className="size-3.5" />
+          <Icon
+            icon="lucide:plus"
+            className="size-3.5"
+            aria-hidden="true"
+          />
         </Button>
       </div>
 
@@ -654,6 +856,22 @@ export function BottomTerminalPanel({
           >
             <div
               ref={(node) => setMountNode(session.sessionId, node)}
+              onMouseDown={() => {
+                const terminal = terminalMapRef.current.get(session.sessionId);
+                if (terminal) {
+                  terminal.focus();
+                  return;
+                }
+                if (workspaceRoot) {
+                  const currentSession = getSessionRecord(
+                    workspaceRoot,
+                    session.sessionId,
+                  );
+                  if (currentSession) {
+                    void hydrateSession(workspaceRoot, currentSession);
+                  }
+                }
+              }}
               className="h-full w-full min-w-0"
               style={{ backgroundColor: terminalSurface }}
             />

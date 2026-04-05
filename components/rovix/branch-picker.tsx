@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { CheckIcon, ChevronDownIcon, GitBranchIcon, PlusIcon } from "lucide-react";
+import { Icon } from "@iconify/react";
 import { Button } from "@/components/ui/button";
 import {
   Command,
@@ -68,10 +68,18 @@ export function BranchPicker({
           className="h-7 min-w-[132px] max-w-[220px] justify-between rounded-[10px] border-0 bg-transparent px-2 text-[11px] font-medium text-foreground/86 shadow-none"
         >
           <span className="flex min-w-0 items-center gap-2">
-            <GitBranchIcon className="size-3.5 shrink-0 text-muted-foreground/80" />
+            <Icon
+              icon="solar:git-branch-linear"
+              className="size-3.5 shrink-0 text-muted-foreground/80"
+              aria-hidden="true"
+            />
             <span className="truncate">{currentBranch ?? "选择分支"}</span>
           </span>
-          <ChevronDownIcon className="size-3.5 shrink-0 text-muted-foreground/75" />
+          <Icon
+            icon="solar:alt-arrow-down-linear"
+            className="size-3.5 shrink-0 text-muted-foreground/75"
+            aria-hidden="true"
+          />
         </Button>
       </PopoverTrigger>
       <PopoverContent
@@ -96,11 +104,13 @@ export function BranchPicker({
                 onSelect={() => void handleSelect(branch)}
                 className="rounded-none px-3 py-2 text-[12px]"
               >
-                <CheckIcon
+                <Icon
+                  icon="solar:check-circle-linear"
                   className={cn(
                     "size-3.5",
                     branch === currentBranch ? "opacity-100" : "opacity-0",
                   )}
+                  aria-hidden="true"
                 />
                 <span className="truncate">{branch}</span>
               </CommandItem>
@@ -111,7 +121,7 @@ export function BranchPicker({
                 onSelect={() => void handleCreate()}
                 className="border-t px-3 py-2 text-[12px]"
               >
-                <PlusIcon className="size-3.5" />
+                <Icon icon="solar:add-circle-linear" className="size-3.5" aria-hidden="true" />
                 <span className="truncate">创建分支 “{query.trim()}”</span>
               </CommandItem>
             ) : null}
