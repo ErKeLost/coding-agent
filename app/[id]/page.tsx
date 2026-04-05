@@ -764,9 +764,22 @@ const ToolResultPreview = ({ preview }: { preview: ToolStandalonePreview }) => {
   return null;
 };
 
+const isNoiseToolText = (value: string | null | undefined) => {
+  if (!value) return true;
+  const normalized = value.trim().toLowerCase();
+  return (
+    normalized === "[]" ||
+    normalized === "{}" ||
+    normalized === "null" ||
+    normalized === "0 todos" ||
+    normalized === "0 todo"
+  );
+};
+
 const getToolResultText = (item: Extract<ChatItem, { type: "tool" }>) => {
   const result = getToolResultRecord(item);
-  return getString(result?.output) ?? getString(result?.message) ?? null;
+  const text = getString(result?.output) ?? getString(result?.message) ?? null;
+  return isNoiseToolText(text) ? null : text;
 };
 
 const renderToolDetail = (detail: string): ReactNode => {
@@ -1528,10 +1541,11 @@ const getToolPathTail = (item: Extract<ChatItem, { type: "tool" }>) => {
   const result = isRecord(item.result) ? item.result : null;
   const resultMeta =
     result && isRecord(result.metadata) ? result.metadata : null;
-  const resultTitle =
+  const rawResultTitle =
     getString(result?.title) ??
     getString(resultMeta?.title) ??
     getString(resultMeta?.name);
+  const resultTitle = isNoiseToolText(rawResultTitle) ? undefined : rawResultTitle;
   const command = getString(args?.command);
   const query = getString(args?.query);
   const pattern = getString(args?.pattern);
@@ -2057,7 +2071,7 @@ export default function Home() {
   }, [items]);
 
   const activeError = error ?? threadSessionError;
-  const { directive: avatarDirective, thinking: avatarThinking } =
+  const { directive: avatarDirective } =
     useAvatarDirector({
       threadId,
       threadTitle: activeThreadRecord?.title ?? null,
@@ -2711,8 +2725,8 @@ export default function Home() {
             void handleSelectEditorFile(path);
           }}
         />
-        <AvatarCornerWidget directive={avatarDirective} thinking={avatarThinking} />
       </SidebarInset>
+      <AvatarCornerWidget directive={avatarDirective} />
     </SidebarProvider>
   );
 }

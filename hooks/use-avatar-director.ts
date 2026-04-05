@@ -23,6 +23,8 @@ const EMPTY_DIRECTIVE: AvatarDirective = {
   action: "idle",
   emotion: "neutral",
   lookAt: "thread_center",
+  moveTo: "right",
+  locomotion: "idle",
   priority: "low",
   source: "heuristic",
 };
@@ -120,6 +122,8 @@ export function useAvatarDirector({
               action: nextDirective.action,
               emotion: nextDirective.emotion,
               lookAt: nextDirective.lookAt,
+              moveTo: nextDirective.moveTo,
+              locomotion: nextDirective.locomotion,
               priority: nextDirective.priority,
             });
             if (directiveSignature === lastDirectiveSignatureRef.current) {
