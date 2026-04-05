@@ -1,6 +1,6 @@
 {
   "name": "my-app",
-  "version": "0.2.24",
+  "version": "0.2.28",
   "private": true,
   "workspaces": [
     "apps/*"
@@ -16,7 +16,8 @@
     "site:preview": "bun run --filter @rovix/site preview",
     "desktop:dev": "tauri dev",
     "desktop:build": "tauri build",
-    "prepare:sidecar": "node scripts/prepare-sidecar.mjs"
+    "prepare:sidecar": "node scripts/prepare-sidecar.mjs",
+    "version:sync": "node scripts/sync-version.mjs"
   },
   "dependencies": {
     "@hookform/resolvers": "^5.2.2",
