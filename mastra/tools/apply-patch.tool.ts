@@ -25,6 +25,13 @@ export const applyPatchTool = createTool({
       throw new Error('No patch hunks were found.');
     }
 
+    const intendedFiles = Array.from(
+      new Set(
+        patches
+          .map((patch) => cleanPatchPath(patch.newFileName) ?? cleanPatchPath(patch.oldFileName))
+          .filter((value): value is string => Boolean(value)),
+      ),
+    );
     const changedFiles: string[] = [];
 
     for (const patch of patches) {
@@ -56,11 +63,15 @@ export const applyPatchTool = createTool({
       changedFiles.push(targetFile);
     }
 
+    if (changedFiles.length === 0) {
+      const intendedSummary =
+        intendedFiles.length > 0 ? ` Intended files: ${intendedFiles.join(', ')}` : '';
+      throw new Error(`Patch parsed but no file changes were applied.${intendedSummary}`);
+    }
+
     return {
       title: 'apply_patch',
-      output: changedFiles.length
-        ? changedFiles.map(file => `Patched ${file}`).join('\n')
-        : 'Patch applied with no file changes.',
+      output: changedFiles.map(file => `Patched ${file}`).join('\n'),
       metadata: {
         files: changedFiles,
         count: changedFiles.length,

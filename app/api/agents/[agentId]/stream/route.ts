@@ -78,6 +78,7 @@ type StreamEvent =
       eventName: "tool.call.completed";
       toolCallId: string;
       toolName: string;
+      args?: unknown;
       result?: unknown;
       agentId?: string;
       parentToolCallId?: string;
@@ -534,6 +535,7 @@ export async function POST(
           eventName: "tool.call.completed",
           toolCallId,
           toolName,
+          args,
           result,
           agentId: activeAgent?.agentId,
           parentToolCallId: activeAgent?.parentToolCallId,
@@ -562,6 +564,15 @@ export async function POST(
       chunkType?.startsWith("workflow-execution-event-")
     ) {
       return mapChunkToStreamEvents(record.payload);
+    }
+
+    const nestedSteps = Array.isArray((record as { steps?: unknown }).steps)
+      ? ((record as { steps: unknown[] }).steps ?? [])
+      : [];
+    if (nestedSteps.length > 0) {
+      for (const step of nestedSteps) {
+        events.push(...mapChunkToStreamEvents(step));
+      }
     }
 
     if (chunkType === "routing-agent-text-delta") {
@@ -779,6 +790,10 @@ export async function POST(
           typeof resultPayload.toolCallId === "string" ? resultPayload.toolCallId : undefined,
         toolName:
           typeof resultPayload.toolName === "string" ? resultPayload.toolName : undefined,
+        args:
+          resultPayload && typeof resultPayload === "object" && "args" in resultPayload
+            ? (resultPayload as { args?: unknown }).args
+            : undefined,
         result: resultValue,
         error:
           isFailedResult && typeof resultValue === "object" && resultValue !== null
@@ -850,6 +865,7 @@ export async function POST(
         phase: isFailedResult ? "failed" : "completed",
         toolCallId,
         toolName,
+        args: record.toolCall?.args ?? record.args,
         result: resultValue,
         error:
           isFailedResult &&
@@ -872,10 +888,12 @@ export async function POST(
   const encoder = new TextEncoder();
   const emittedToolStarts = new Set<string>();
   const emittedToolCompletions = new Set<string>();
+  const startedToolMeta = new Map<string, { toolName?: string; args?: unknown }>();
   let lastSessionStateKey: string | undefined;
   let lastUsageKey: string | undefined;
   let latestPreviewUrl: string | undefined;
   let streamOutcome: "idle" | "streaming" | "done" | "error" = "idle";
+  let streamTerminalErrorText: string | undefined;
   let activeAgentLabel: string | undefined = agent.name;
   const pendingAppliedSteers: string[] = [];
   const memory =
@@ -1021,16 +1039,23 @@ export async function POST(
     event: StreamEvent
   ) => {
     if (event.eventName === "tool.call.started") {
-      if (emittedToolStarts.has(event.toolCallId)) return;
+      if (emittedToolStarts.has(event.toolCallId)) return false;
       emittedToolStarts.add(event.toolCallId);
+      startedToolMeta.set(event.toolCallId, {
+        toolName: event.toolName,
+        args: event.args,
+      });
     }
     if (event.eventName === "tool.call.completed") {
-      if (emittedToolCompletions.has(event.toolCallId)) return;
+      if (emittedToolCompletions.has(event.toolCallId)) return false;
+      emittedToolCompletions.add(event.toolCallId);
+    }
+    if (event.eventName === "tool.call.failed" && event.toolCallId) {
       emittedToolCompletions.add(event.toolCallId);
     }
     if (event.eventName === "session.updated") {
       const sessionStateKey = `${event.previewUrl ?? ""}`;
-      if (sessionStateKey === lastSessionStateKey) return;
+      if (sessionStateKey === lastSessionStateKey) return false;
       lastSessionStateKey = sessionStateKey;
       latestPreviewUrl = event.previewUrl ?? latestPreviewUrl;
     }
@@ -1042,6 +1067,7 @@ export async function POST(
     }
 
     enqueueJson(controller, event);
+    return true;
   };
 
   const emitUsageIfNeeded = (
@@ -1206,8 +1232,10 @@ export async function POST(
           const chunk = redactStreamChunk(value);
           const streamEvents = mapChunkToStreamEvents(chunk);
           for (const event of streamEvents) {
-            logStreamEvent(event);
-            applyStreamEvent(controller, event);
+            const emitted = applyStreamEvent(controller, event);
+            if (emitted) {
+              logStreamEvent(event);
+            }
           }
           while (pendingAppliedSteers.length > 0) {
             const steerText = pendingAppliedSteers.shift();
@@ -1222,20 +1250,43 @@ export async function POST(
         }
       } catch (error) {
         streamOutcome = "error";
+        const errorName =
+          error instanceof Error && error.name ? error.name : undefined;
+        const errorMessage =
+          error instanceof Error && error.message ? error.message : undefined;
+        streamTerminalErrorText =
+          errorName === "ResponseAborted"
+            ? "Tool execution was interrupted because the model response was aborted (tripwire)."
+            : errorMessage || errorName || "Stream error";
         logger?.error("Mastra stream failed", {
           routeAgentId: agentId,
           threadId: payload.threadId ?? null,
           model: payload.model ?? null,
           workspaceRoot: effectiveWorkspaceRoot ?? null,
-          error: error instanceof Error ? error.message : "Stream error",
+          error: errorMessage ?? "Stream error",
+          errorName: errorName ?? null,
         });
         const errorPayload = {
           type: "stream.event",
           eventName: "tool.call.failed",
-          error: error instanceof Error ? error.message : "Stream error",
+          error: streamTerminalErrorText,
         };
         enqueueJson(controller, errorPayload);
       } finally {
+        for (const toolCallId of emittedToolStarts) {
+          if (emittedToolCompletions.has(toolCallId)) continue;
+          const meta = startedToolMeta.get(toolCallId);
+          const orphanedToolEvent: StreamEvent = {
+            type: "stream.event",
+            eventName: "tool.call.failed",
+            toolCallId,
+            toolName: meta?.toolName,
+            error:
+              streamTerminalErrorText ??
+              "Tool started but the stream ended before a result was received.",
+          };
+          enqueueJson(controller, orphanedToolEvent);
+        }
         const finalStatus =
           streamOutcome === "error"
             ? "error"

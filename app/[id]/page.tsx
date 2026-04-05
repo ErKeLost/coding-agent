@@ -7,6 +7,7 @@ import {
   useRef,
   useState,
   useSyncExternalStore,
+  type ReactNode,
 } from "react";
 import { getUsage } from "tokenlens";
 import type { LanguageModelUsage } from "ai";
@@ -269,8 +270,21 @@ const extractPatchFiles = (patchText: string) => {
   const files = new Set<string>();
   const lines = patchText.split("\n");
   for (const line of lines) {
-    if (!line.startsWith("+++ ") && !line.startsWith("--- ")) continue;
-    const raw = line.slice(4).trim();
+    const trimmed = line.trim();
+    if (
+      trimmed.startsWith("*** Update File: ") ||
+      trimmed.startsWith("*** Add File: ") ||
+      trimmed.startsWith("*** Delete File: ") ||
+      trimmed.startsWith("*** Move to: ")
+    ) {
+      const raw = trimmed.replace(/^\*\*\* (Update File|Add File|Delete File|Move to):\s*/, "").trim();
+      if (raw && raw !== "/dev/null") {
+        files.add(raw.replace(/^[ab]\//, ""));
+      }
+      continue;
+    }
+    if (!trimmed.startsWith("+++ ") && !trimmed.startsWith("--- ")) continue;
+    const raw = trimmed.slice(4).trim();
     if (!raw || raw === "/dev/null") continue;
     const cleaned = raw.replace(/^[ab]\//, "");
     files.add(cleaned);
@@ -477,7 +491,8 @@ const TOOL_LABELS: Record<string, string> = {
   edit: "edit",
   write: "write",
   writefiles: "writeFiles",
-  patch: "patch",
+  patch: "apply_patch",
+  apply_patch: "apply_patch",
   replace: "replace",
   grep: "grep",
   glob: "glob",
@@ -538,7 +553,7 @@ const inferGenericToolName = (
     "relative_path",
   ]);
 
-  if (getString(args?.patchText)) return "patch";
+  if (getPatchTextFromArgs(args)) return "apply_patch";
   if (filePath && typeof args?.oldString === "string") return "edit";
   if (filePath && typeof args?.content === "string") return "write";
   if (filePath) return "read";
@@ -554,9 +569,68 @@ const getToolResultMetadata = (item: Extract<ChatItem, { type: "tool" }>) => {
   return result && isRecord(result.metadata) ? result.metadata : null;
 };
 
+const parsePatchedFilesFromOutput = (value?: string) => {
+  if (!value) return [];
+  const files = value
+    .split("\n")
+    .map((line) => line.trim())
+    .flatMap((line) => {
+      const prefixedMatch = line.match(/^[AMD]\s+(.+)$/);
+      if (prefixedMatch) return [prefixedMatch[1]];
+      const patchedMatch = line.match(/^Patched\s+(.+)$/i);
+      if (patchedMatch) return [patchedMatch[1]];
+      return [];
+    })
+    .map(toDisplayPath);
+  return Array.from(new Set(files));
+};
+
+const isPatchToolItem = (item: Extract<ChatItem, { type: "tool" }>) => {
+  const normalizedName = item.name.trim().toLowerCase();
+  if (normalizedName === "apply_patch" || normalizedName === "patch") {
+    return true;
+  }
+
+  if (getPatchTextFromArgs(item.args)) {
+    return true;
+  }
+
+  const result = getToolResultRecord(item);
+  const metadata = getToolResultMetadata(item);
+  const metadataName =
+    getString(metadata?.toolName) ??
+    getString(metadata?.name) ??
+    getString(result?.title);
+  return metadataName?.trim().toLowerCase() === "apply_patch";
+};
+
+const getPatchFilesFromItem = (item: Extract<ChatItem, { type: "tool" }>) => {
+  const patchText = getPatchTextFromArgs(item.args);
+  const patchFiles = patchText
+    ? extractPatchFiles(patchText).map(toDisplayPath)
+    : [];
+  const result = getToolResultRecord(item);
+  const metadata = getToolResultMetadata(item);
+  const resultFiles = getResultFileList(result?.files);
+  const metadataFiles = getResultFileList(metadata?.files);
+  const changedFiles = getResultFileList(metadata?.changedFiles);
+  const outputFiles = parsePatchedFilesFromOutput(getString(result?.output));
+  return patchFiles.length > 0
+    ? patchFiles
+    : resultFiles.length > 0
+      ? resultFiles
+      : metadataFiles.length > 0
+        ? metadataFiles
+        : changedFiles.length > 0
+          ? changedFiles
+          : outputFiles;
+};
+
 const getLanguageFromPath = (filePath?: string | null) => {
   if (!filePath) return "text";
   const normalized = filePath.toLowerCase();
+  if (normalized.endsWith(".diff") || normalized.endsWith(".patch"))
+    return "diff";
   if (normalized.endsWith(".tsx")) return "tsx";
   if (normalized.endsWith(".ts")) return "typescript";
   if (normalized.endsWith(".jsx")) return "jsx";
@@ -597,6 +671,22 @@ const getToolStandalonePreview = (
 ): ToolStandalonePreview | null => {
   const result = getToolResultRecord(item);
   const metadata = getToolResultMetadata(item);
+  const patchText = getPatchTextFromArgs(item.args);
+
+  if (isPatchToolItem(item)) {
+    const files = getPatchFilesFromItem(item);
+    const metadataDiff = getString(metadata?.diff);
+    const outputText = getString(result?.output);
+    const diffText = patchText ?? metadataDiff ?? outputText;
+    if (!diffText) return null;
+    return {
+      kind: "code",
+      filename: files[0] ?? "apply_patch.diff",
+      language: "diff",
+      code: diffText,
+    };
+  }
+
   if (!result) return null;
 
   const filePath =
@@ -663,6 +753,41 @@ const ToolResultPreview = ({ preview }: { preview: ToolStandalonePreview }) => {
   }
 
   return null;
+};
+
+const getToolResultText = (item: Extract<ChatItem, { type: "tool" }>) => {
+  const result = getToolResultRecord(item);
+  return getString(result?.output) ?? getString(result?.message) ?? null;
+};
+
+const renderToolDetail = (detail: string): ReactNode => {
+  const patchMatch = /^改动:\s(.+?)(?:\s\|\s([+-]\d+)\s([+-]\d+))?$/.exec(detail);
+  if (!patchMatch) {
+    return detail;
+  }
+
+  const [, fileSummary, additions, deletions] = patchMatch;
+
+  return (
+    <span className="inline-flex flex-wrap items-center gap-1.5">
+      <span className="text-[10px] font-semibold tracking-[0.08em] text-accent-foreground/80 uppercase">
+        改动
+      </span>
+      <span className="rounded-full bg-accent/55 px-2 py-0.5 text-accent-foreground shadow-[inset_0_0_0_1px_color-mix(in_srgb,var(--accent-foreground)_10%,transparent)]">
+        {fileSummary}
+      </span>
+      {additions ? (
+        <span className="rounded-full bg-emerald-500/12 px-1.5 py-0.5 text-emerald-700 dark:text-emerald-300">
+          {additions}
+        </span>
+      ) : null}
+      {deletions ? (
+        <span className="rounded-full bg-rose-500/12 px-1.5 py-0.5 text-rose-700 dark:text-rose-300">
+          {deletions}
+        </span>
+      ) : null}
+    </span>
+  );
 };
 
 const getVisibleToolName = (item: Extract<ChatItem, { type: "tool" }>) => {
@@ -1018,11 +1143,16 @@ const ComputerUseToolPreview = ({
 
 const formatToolMeta = (item: Extract<ChatItem, { type: "tool" }>) => {
   const name = item.name;
-  if (name === "apply_patch") {
-    const patchText = getPatchTextFromArgs(item.args);
-    if (!patchText) return "patch";
-    const files = extractPatchFiles(patchText).map(toDisplayPath);
-    return files.length ? `patch: ${formatList(files)}` : "patch";
+  if (isPatchToolItem(item)) {
+    const files = getPatchFilesFromItem(item);
+    if (files.length > 0) {
+      return formatList(files, 4);
+    }
+    const output = getString(getToolResultRecord(item)?.output);
+    if (output?.trim() === "Patch applied with no file changes.") {
+      return "未产生文件变更";
+    }
+    return "apply_patch";
   }
 
   const args = getToolArgsRecord(item.args);
@@ -1067,11 +1197,7 @@ const formatToolMeta = (item: Extract<ChatItem, { type: "tool" }>) => {
     return files.length ? `files: ${formatList(files)}` : null;
   }
   if (name === "read" && filePath) {
-    const offset =
-      typeof args.offset === "number" ? ` | offset ${args.offset}` : "";
-    const limit =
-      typeof args.limit === "number" ? ` | limit ${args.limit}` : "";
-    return `file: ${toDisplayPath(filePath)}${offset}${limit}`;
+    return `file: ${toDisplayPath(filePath)}`;
   }
   if (name === "list") {
     return `path: ${toDisplayPath(path ?? ".")}`;
@@ -1102,10 +1228,8 @@ const formatToolMeta = (item: Extract<ChatItem, { type: "tool" }>) => {
     return `file: ${toDisplayPath(filePath)}${replaceAll}`;
   }
   if (name === "patch") {
-    const patchText = getString(args.patchText);
-    if (!patchText) return "patch";
-    const files = extractPatchFiles(patchText).map(toDisplayPath);
-    return files.length ? `patch: ${formatList(files)}` : "patch";
+    const files = getPatchFilesFromItem(item);
+    return files.length ? `files: ${formatList(files)}` : "apply_patch";
   }
   if (name === "runCommand" || name === "bash" || name === "shell_command") {
     return command ? `command: ${command}` : null;
@@ -1204,6 +1328,14 @@ const getToolDisplayTitle = (
   item: Extract<ChatItem, { type: "tool" }>,
   visibleToolName: string,
 ) => {
+  if (isPatchToolItem(item)) {
+    const files = getPatchFilesFromItem(item);
+    return {
+      primary: visibleToolName,
+      secondary: files.length > 0 ? formatList(files, 4) : "补丁内容",
+    };
+  }
+
   const toolMeta = formatToolMeta(item);
   const pathTail = getToolPathTail(item);
   const detail = toolMeta ?? pathTail ?? null;
@@ -1279,6 +1411,12 @@ const getActivityVerb = (
 ) => {
   const normalizedToolName = toolName?.trim().toLowerCase() ?? "";
 
+  if (normalizedToolName === "apply_patch" || normalizedToolName === "patch") {
+    if (status === "error") return "应用补丁失败";
+    if (status === "done") return "已应用补丁";
+    return "正在应用补丁";
+  }
+
   const pendingVerb =
     normalizedToolName === "read" || normalizedToolName === "cat"
       ? "正在阅读"
@@ -1334,6 +1472,17 @@ const getToolDisplayText = (
   visibleToolName: string,
 ) => {
   const normalizedToolName = visibleToolName.trim().toLowerCase();
+  const isRunCommandTool =
+    normalizedToolName === "runcommand" ||
+    normalizedToolName === "bash" ||
+    normalizedToolName === "shell_command" ||
+    normalizedToolName === "exec_command" ||
+    normalizedToolName === "unified_exec";
+
+  if (isRunCommandTool && displayTitle.secondary) {
+    const commandText = displayTitle.secondary.replace(/^command:\s*/i, "");
+    return `${displayTitle.primary} ${commandText}`;
+  }
 
   if (
     (normalizedToolName === "read" ||
@@ -1350,11 +1499,6 @@ const getToolDisplayText = (
       normalizedToolName === "mv" ||
       normalizedToolName === "mkdir" ||
       normalizedToolName === "chmod" ||
-      normalizedToolName === "runcommand" ||
-      normalizedToolName === "bash" ||
-      normalizedToolName === "shell_command" ||
-      normalizedToolName === "exec_command" ||
-      normalizedToolName === "unified_exec" ||
       normalizedToolName === "write_stdin" ||
       normalizedToolName === "writestdin") &&
     displayTitle.secondary
@@ -2140,7 +2284,7 @@ export default function Home() {
                   ) : items.length === 0 ? (
                     <></>
                   ) : (
-                    items.map((item) => {
+                    items.map((item, itemIndex) => {
                       if (item.type === "thinking") {
                         if (item.status === "done" && !item.content.trim()) {
                           return null;
@@ -2232,24 +2376,58 @@ export default function Home() {
                           visibleToolName,
                         );
                         const extraDetails = getToolExtraDetails(item);
+                        const resultText = getToolResultText(item);
+                        const patchTool = isPatchToolItem(item);
+                        const hasLaterActivity = items
+                          .slice(itemIndex + 1)
+                          .some(
+                            (entry) =>
+                              entry.type === "tool" ||
+                              entry.type === "agent" ||
+                              entry.type === "message",
+                          );
+                        const streamSettled =
+                          status !== "submitted" && status !== "streaming";
+                        const missingToolResult =
+                          item.status === "pending" &&
+                          (streamSettled || hasLaterActivity);
+                        const displayVerb = missingToolResult
+                          ? patchTool
+                            ? "未收到补丁结果"
+                            : "未收到工具结果"
+                          : verb;
                         const preview =
-                          item.status === "done"
+                          item.status === "done" || patchTool
                             ? getToolStandalonePreview(item)
                             : null;
                         const normalizedToolName = visibleToolName
                           .trim()
                           .toLowerCase();
                         const previewEnabled =
-                          item.status === "done" &&
-                          (normalizedToolName === "read" ||
-                            normalizedToolName === "cat" ||
-                            normalizedToolName === "edit" ||
-                            normalizedToolName === "write") &&
+                          ((item.status === "done" &&
+                            (normalizedToolName === "read" ||
+                              normalizedToolName === "cat" ||
+                              normalizedToolName === "edit" ||
+                              normalizedToolName === "write")) ||
+                            patchTool) &&
                           Boolean(preview);
+                        const showInlineResult =
+                          item.status === "done" &&
+                          Boolean(resultText) &&
+                          normalizedToolName !== "read" &&
+                          normalizedToolName !== "cat" &&
+                          normalizedToolName !== "list" &&
+                          normalizedToolName !== "glob" &&
+                          normalizedToolName !== "grep" &&
+                          !patchTool &&
+                          !previewEnabled;
                         return (
                           <div key={item.id}>
                             {previewEnabled && preview ? (
-                              <details className="group">
+                              <details
+                                className="group"
+                                open={patchTool && missingToolResult}
+                              >
                                 <summary
                                   className={cn(
                                     "app-tool-row list-none rounded-[11px] px-3 py-0.5 text-[12px] leading-5 text-foreground/82 hover:bg-transparent hover:border-transparent hover:shadow-none [&::-webkit-details-marker]:hidden",
@@ -2260,7 +2438,7 @@ export default function Home() {
                                 >
                                   <div className="flex min-w-0 items-center gap-1.5">
                                     <span className="text-muted-foreground/82">
-                                      {verb}
+                                      {displayVerb}
                                     </span>
                                     <span className="font-mono text-foreground/88 truncate">
                                       {displayText}
@@ -2288,9 +2466,14 @@ export default function Home() {
                                           key={`${item.id}-detail-${index}`}
                                           className="font-mono"
                                         >
-                                          {detail}
+                                          {renderToolDetail(detail)}
                                         </div>
                                       ))}
+                                    </div>
+                                  ) : null}
+                                  {missingToolResult ? (
+                                    <div className="pt-1 text-[11px] leading-4 text-amber-700/80 dark:text-amber-300/80">
+                                      流已结束，但没有收到这次工具调用的结构化结果事件。
                                     </div>
                                   ) : null}
                                 </summary>
@@ -2308,7 +2491,7 @@ export default function Home() {
                               >
                                 <div className="min-w-0 truncate">
                                   <span className="text-muted-foreground/82">
-                                    {verb}
+                                    {displayVerb}
                                   </span>{" "}
                                   <span className="font-mono text-foreground/88">
                                     {displayText}
@@ -2327,9 +2510,14 @@ export default function Home() {
                                         key={`${item.id}-detail-${index}`}
                                         className="font-mono"
                                       >
-                                        {detail}
+                                        {renderToolDetail(detail)}
                                       </div>
                                     ))}
+                                  </div>
+                                ) : null}
+                                {showInlineResult ? (
+                                  <div className="mt-1 text-[11px] leading-4 text-muted-foreground/74">
+                                    {resultText}
                                   </div>
                                 ) : null}
                               </div>

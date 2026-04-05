@@ -678,6 +678,10 @@ export const createStreamEventBus = ({
       updated[index] = {
         ...existing,
         ...tool,
+        args: tool.args ?? existing.args,
+        result: tool.result ?? existing.result,
+        errorText: tool.errorText ?? existing.errorText,
+        costUSD: tool.costUSD ?? existing.costUSD,
         name: pickPreferredToolName(tool.name, existing.name) ?? existing.name,
       };
       updated[index].status = nextStatus;
@@ -961,6 +965,7 @@ export const createStreamEventBus = ({
           id: codexEvent.toolCallId,
           name: codexEvent.toolName,
           status: failureMessage ? "error" : "done",
+          args: codexEvent.args,
           result: codexEvent.result,
           errorText: failureMessage,
           costUSD: extractCostUSD(codexEvent),
