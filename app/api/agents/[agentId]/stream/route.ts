@@ -827,6 +827,19 @@ export async function POST(
             ? extractStructuredToolError(resultValue) ?? "Tool failed"
             : undefined,
       });
+      if (typeof resultPayload.toolName === "string" && resultPayload.toolName === "apply_patch") {
+        console.info("[apply-patch-debug] stream:toolResultsArray", {
+          toolCallId:
+            typeof resultPayload.toolCallId === "string"
+              ? resultPayload.toolCallId
+              : undefined,
+          isFailedResult,
+          hasArgs:
+            resultPayload && typeof resultPayload === "object" && "args" in resultPayload,
+          hasResult:
+            resultPayload && typeof resultPayload === "object" && "result" in resultPayload,
+        });
+      }
       emittedStructuredToolResult = true;
     }
 
@@ -887,6 +900,15 @@ export async function POST(
     if (isToolResult && toolCallId && toolName) {
       const resultValue = record.toolResult?.result ?? record.result;
       const isFailedResult = isStructuredToolFailure(resultValue);
+      if (toolName === "apply_patch") {
+        console.info("[apply-patch-debug] stream:isToolResult", {
+          toolCallId,
+          chunkType,
+          isFailedResult,
+          hasToolResult: Boolean(record.toolResult),
+          hasResult: typeof record.result !== "undefined",
+        });
+      }
       emitStructuredToolEvents({
         phase: isFailedResult ? "failed" : "completed",
         toolCallId,
@@ -1091,6 +1113,28 @@ export async function POST(
         event.targetType === "agent"
           ? event.targetName ?? event.targetId
           : activeAgentLabel;
+    }
+
+    if (
+      (event.eventName === "tool.call.started" ||
+        event.eventName === "tool.call.completed" ||
+        event.eventName === "tool.call.failed") &&
+      event.toolName === "apply_patch"
+    ) {
+      console.info("[apply-patch-debug] stream:event", {
+        eventName: event.eventName,
+        toolCallId: event.toolCallId,
+        hasArgs:
+          "args" in event &&
+          typeof event.args !== "undefined",
+        hasResult:
+          "result" in event &&
+          typeof event.result !== "undefined",
+        error:
+          "error" in event && typeof event.error === "string"
+            ? event.error
+            : undefined,
+      });
     }
 
     enqueueJson(controller, event);
@@ -1303,6 +1347,13 @@ export async function POST(
         for (const toolCallId of emittedToolStarts) {
           if (emittedToolCompletions.has(toolCallId)) continue;
           const meta = startedToolMeta.get(toolCallId);
+          if (meta?.toolName === "apply_patch") {
+            console.error("[apply-patch-debug] stream:orphaned", {
+              toolCallId,
+              toolName: meta.toolName,
+              streamTerminalErrorText,
+            });
+          }
           const orphanedToolEvent: StreamEvent = {
             type: "stream.event",
             eventName: "tool.call.failed",
