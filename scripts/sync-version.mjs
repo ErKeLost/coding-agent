@@ -42,6 +42,15 @@ const targets = [
       return `${JSON.stringify(data, null, 2)}\n`;
     },
   },
+  {
+    file: "src-tauri/Cargo.lock",
+    update(content) {
+      return content.replace(
+        /(\[\[package\]\]\nname = "rovix"\nversion = ")(.*)(")/m,
+        `$1${version}$3`,
+      );
+    },
+  },
 ];
 
 for (const target of targets) {

@@ -6,8 +6,8 @@ import { mastraStore } from './storage';
 export const mastra = new Mastra({
   agents: { buildAgent },
   storage: mastraStore,
-  logger: new PinoLogger({
-    name: 'Mastra',
-    level: process.env.NODE_ENV === 'production' ? 'info' : 'debug',
-  }),
+  // logger: new PinoLogger({
+  //   name: 'Mastra',
+  //   level: process.env.NODE_ENV === 'production' ? 'info' : 'debug',
+  // }),
 });
