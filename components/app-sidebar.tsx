@@ -235,6 +235,8 @@ export function AppSidebar({
     avatarModelAssetOptions.find(
       (entry) => entry.modelPath === avatarDraft.modelPath,
     ) ?? null;
+  const builtinAvatarProfiles = avatarProfiles.filter((entry) => entry.builtin);
+  const customAvatarProfiles = avatarProfiles.filter((entry) => !entry.builtin);
 
   const openNewAvatarDialog = () => {
     setAvatarDraft({
@@ -842,222 +844,434 @@ export function AppSidebar({
         <SidebarRail />
       </Sidebar>
       <Dialog open={avatarDialogOpen} onOpenChange={setAvatarDialogOpen}>
-        <DialogContent className="max-h-[82vh] max-w-[920px] overflow-hidden rounded-[24px] border-border/70 bg-background/98 p-0">
+        <DialogContent className="max-h-[88vh] max-w-[1180px] overflow-hidden rounded-[28px] border-border/70 bg-background/98 p-0">
           <DialogHeader className="border-b border-border/60 px-6 pb-4 pt-6">
             <DialogTitle className="text-[18px]">
               {avatarDraft.id ? "编辑 3D 角色" : "新建 3D 角色"}
             </DialogTitle>
             <DialogDescription>
-              这里可以给角色换模型、起名字、写性格设定和额外 system prompt。
+              默认展示本地角色列表和本地模型列表，也可以直接新建自定义角色。
             </DialogDescription>
           </DialogHeader>
-          <div className="grid max-h-[calc(82vh-148px)] gap-5 overflow-y-auto px-6 py-5 md:grid-cols-[1.15fr_0.95fr]">
-            <div className="grid content-start gap-4">
-              <div className="grid gap-2">
-                <label className="text-[12px] font-medium text-foreground">角色名</label>
-                <Input
-                  value={avatarDraft.name}
-                  onChange={(event) =>
-                    setAvatarDraft((current) => ({
-                      ...current,
-                      name: event.target.value,
-                    }))
-                  }
-                  placeholder="比如：泡泡、柚柚、Rin"
-                />
-              </div>
-              <div className="grid gap-2">
-                <label className="text-[12px] font-medium text-foreground">角色简介</label>
-                <Input
-                  value={avatarDraft.description}
-                  onChange={(event) =>
-                    setAvatarDraft((current) => ({
-                      ...current,
-                      description: event.target.value,
-                    }))
-                  }
-                  placeholder="一句话描述这个角色给人的感觉"
-                />
-              </div>
-              <div className="grid gap-2">
-                <label className="text-[12px] font-medium text-foreground">性格设定</label>
-                <Textarea
-                  value={avatarDraft.personalityPrompt}
-                  onChange={(event) =>
-                    setAvatarDraft((current) => ({
-                      ...current,
-                      personalityPrompt: event.target.value,
-                    }))
-                  }
-                  placeholder="比如：嘴有点坏但不刻薄，遇到报错会先吐槽一句，再给关键判断。"
-                  rows={3}
-                />
-              </div>
-              <div className="grid gap-2">
-                <label className="text-[12px] font-medium text-foreground">额外 System Prompt</label>
-                <Textarea
-                  value={avatarDraft.systemPrompt}
-                  onChange={(event) =>
-                    setAvatarDraft((current) => ({
-                      ...current,
-                      systemPrompt: event.target.value,
-                    }))
-                  }
-                  placeholder="补充这个角色必须遵守的表达方式、禁忌、关注点。"
-                  rows={4}
-                />
-              </div>
-              <div className="grid gap-2">
-                <label className="text-[12px] font-medium text-foreground">3D 模型文件</label>
-                <input
-                  ref={fileInputRef}
-                  type="file"
-                  accept=".glb,.gltf,.vrm,model/gltf-binary,model/gltf+json"
-                  className="hidden"
-                  onChange={handleAvatarFileChange}
-                />
-                <div className="flex items-center gap-2">
+          <div className="grid max-h-[calc(88vh-148px)] gap-0 overflow-hidden lg:grid-cols-[280px_minmax(0,1.1fr)_360px]">
+            <div className="border-b border-border/60 bg-background/72 lg:border-b-0 lg:border-r">
+              <div className="scrollbar-frost-thin flex max-h-[calc(88vh-148px)] flex-col overflow-y-auto px-4 py-5">
+                <div className="mb-4 flex items-center justify-between gap-3">
+                  <div>
+                    <div className="text-[12px] font-semibold tracking-[0.08em] text-muted-foreground">
+                      角色库
+                    </div>
+                    <div className="mt-1 text-[11px] text-muted-foreground">
+                      内置和自定义角色都在这里。
+                    </div>
+                  </div>
                   <Button
                     type="button"
                     variant="outline"
-                    className="h-9 rounded-[10px]"
-                    onClick={() => fileInputRef.current?.click()}
+                    className="h-8 rounded-[10px] px-2.5 text-[11px]"
+                    onClick={openNewAvatarDialog}
                   >
-                    <Icon icon="solar:upload-linear" className="mr-2 size-4" aria-hidden="true" />
-                    上传模型
+                    <Icon icon="solar:add-circle-linear" className="mr-1.5 size-3.5" aria-hidden="true" />
+                    新建
                   </Button>
-                  <div className="min-w-0 text-[12px] text-muted-foreground">
-                    {avatarFileName || avatarDraft.modelPath || "暂未选择文件"}
+                </div>
+
+                <div className="space-y-4">
+                  <div className="space-y-2">
+                    <div className="px-1 text-[11px] font-medium tracking-[0.08em] text-muted-foreground">
+                      内置角色
+                    </div>
+                    <div className="space-y-2">
+                      {builtinAvatarProfiles.map((entry) => {
+                        const selected = entry.id === avatarDraft.id;
+                        return (
+                          <button
+                            key={entry.id}
+                            type="button"
+                            onClick={() => {
+                              setAvatarDraft({
+                                id: entry.id,
+                                name: entry.name,
+                                description: entry.description ?? "",
+                                personalityPrompt: entry.personalityPrompt ?? "",
+                                systemPrompt: entry.systemPrompt ?? "",
+                                modelPath: entry.modelPath ?? "",
+                                capabilities: entry.capabilities,
+                                builtin: entry.builtin ?? false,
+                              });
+                              setAvatarFile(null);
+                              setAvatarFileName("");
+                              setAvatarError("");
+                            }}
+                            className={cn(
+                              "w-full rounded-[18px] border px-3 py-3 text-left transition-colors",
+                              selected
+                                ? "border-foreground/18 bg-foreground/[0.06]"
+                                : "border-border/60 bg-background/82",
+                            )}
+                          >
+                            <div className="flex items-start justify-between gap-3">
+                              <div className="min-w-0">
+                                <div className="truncate text-[13px] font-medium text-foreground">
+                                  {entry.name}
+                                </div>
+                                {entry.description ? (
+                                  <div className="mt-1 line-clamp-3 text-[11px] leading-5 text-muted-foreground">
+                                    {entry.description}
+                                  </div>
+                                ) : null}
+                              </div>
+                              {selected ? (
+                                <Icon
+                                  icon="solar:check-circle-bold"
+                                  className="mt-0.5 size-4 shrink-0 text-foreground/70"
+                                  aria-hidden="true"
+                                />
+                              ) : null}
+                            </div>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+
+                  <div className="space-y-2">
+                    <div className="px-1 text-[11px] font-medium tracking-[0.08em] text-muted-foreground">
+                      自定义角色
+                    </div>
+                    <div className="space-y-2">
+                      <button
+                        type="button"
+                        onClick={openNewAvatarDialog}
+                        className="w-full rounded-[18px] border border-dashed border-border/70 bg-background/70 px-3 py-3 text-left transition-colors"
+                      >
+                        <div className="flex items-start gap-3">
+                          <span className="mt-0.5 flex size-7 items-center justify-center rounded-full bg-foreground/[0.05] text-foreground/68">
+                            <Icon icon="solar:add-circle-linear" className="size-4" aria-hidden="true" />
+                          </span>
+                          <div className="min-w-0">
+                            <div className="text-[13px] font-medium text-foreground">
+                              新建自定义角色
+                            </div>
+                            <div className="mt-1 text-[11px] leading-5 text-muted-foreground">
+                              上传自己的 3D 模型，配置名字、性格和 system prompt。
+                            </div>
+                          </div>
+                        </div>
+                      </button>
+
+                      {customAvatarProfiles.map((entry) => {
+                        const selected = entry.id === avatarDraft.id;
+                        return (
+                          <button
+                            key={entry.id}
+                            type="button"
+                            onClick={() => {
+                              setAvatarDraft({
+                                id: entry.id,
+                                name: entry.name,
+                                description: entry.description ?? "",
+                                personalityPrompt: entry.personalityPrompt ?? "",
+                                systemPrompt: entry.systemPrompt ?? "",
+                                modelPath: entry.modelPath ?? "",
+                                capabilities: entry.capabilities,
+                                builtin: entry.builtin ?? false,
+                              });
+                              setAvatarFile(null);
+                              setAvatarFileName("");
+                              setAvatarError("");
+                            }}
+                            className={cn(
+                              "w-full rounded-[18px] border px-3 py-3 text-left transition-colors",
+                              selected
+                                ? "border-foreground/18 bg-foreground/[0.06]"
+                                : "border-border/60 bg-background/82",
+                            )}
+                          >
+                            <div className="flex items-start justify-between gap-3">
+                              <div className="min-w-0">
+                                <div className="truncate text-[13px] font-medium text-foreground">
+                                  {entry.name}
+                                </div>
+                                {entry.description ? (
+                                  <div className="mt-1 line-clamp-3 text-[11px] leading-5 text-muted-foreground">
+                                    {entry.description}
+                                  </div>
+                                ) : null}
+                              </div>
+                              <div className="mt-0.5 flex shrink-0 items-center gap-1.5">
+                                <button
+                                  type="button"
+                                  onClick={(event) => {
+                                    event.stopPropagation();
+                                    onDeleteAvatarProfile?.(entry.id);
+                                  }}
+                                  className="rounded-full p-1 text-rose-500/78 transition-colors hover:text-rose-500"
+                                  aria-label={`删除 ${entry.name}`}
+                                >
+                                  <Icon icon="solar:trash-bin-trash-linear" className="size-3.5" aria-hidden="true" />
+                                </button>
+                                {selected ? (
+                                  <Icon
+                                    icon="solar:check-circle-bold"
+                                    className="size-4 text-foreground/70"
+                                    aria-hidden="true"
+                                  />
+                                ) : null}
+                              </div>
+                            </div>
+                          </button>
+                        );
+                      })}
+                    </div>
                   </div>
                 </div>
               </div>
-              {avatarError ? (
-                <div className="rounded-[12px] bg-rose-500/[0.06] px-3 py-2 text-[12px] text-rose-700 dark:text-rose-200">
-                  {avatarError}
-                </div>
-              ) : null}
             </div>
 
-            <div className="grid content-start gap-4">
-              <div className="grid gap-2">
-                <div className="flex items-center justify-between gap-3">
-                  <label className="text-[12px] font-medium text-foreground">模型列表</label>
-                  <span className="text-[10px] text-muted-foreground">
-                    {avatarModelAssetOptions.length} 个可用模型
-                  </span>
+            <div className="scrollbar-frost-thin overflow-y-auto px-6 py-5">
+              <div className="grid content-start gap-4">
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <div className="text-[12px] font-semibold tracking-[0.08em] text-muted-foreground">
+                      角色设定
+                    </div>
+                    <div className="mt-1 text-[11px] text-muted-foreground">
+                      这里决定这个角色会怎么陪你说话。
+                    </div>
+                  </div>
+                  <div className="rounded-full bg-foreground/[0.045] px-2.5 py-1 text-[10px] font-medium tracking-[0.04em] text-foreground/68">
+                    {avatarDraft.builtin ? "内置角色" : "自定义角色"}
+                  </div>
                 </div>
-                <div className="grid max-h-[220px] gap-2 overflow-y-auto rounded-[18px] border border-border/60 bg-background/55 p-2">
-                  <button
-                    type="button"
-                    onClick={() =>
+
+                <div className="grid gap-2">
+                  <label className="text-[12px] font-medium text-foreground">角色名</label>
+                  <Input
+                    value={avatarDraft.name}
+                    onChange={(event) =>
                       setAvatarDraft((current) => ({
                         ...current,
-                        modelPath: "",
+                        name: event.target.value,
                       }))
                     }
-                    className={`rounded-[14px] border px-3 py-2 text-left transition-colors ${
-                      !avatarDraft.modelPath
-                        ? "border-foreground/18 bg-foreground/[0.06]"
-                        : "border-border/60 bg-background/82"
-                    }`}
-                  >
-                    <div className="text-[12px] font-medium text-foreground">暂不选择现有模型</div>
-                    <div className="mt-1 text-[11px] leading-5 text-muted-foreground">
-                      只保留角色配置，稍后再上传新的 3D 文件。
-                    </div>
-                  </button>
-                  {avatarModelAssetOptions.map((entry) => {
-                    const selected = entry.modelPath === avatarDraft.modelPath;
-                    return (
-                      <button
-                        key={entry.modelPath}
-                        type="button"
-                        onClick={() => {
-                          setAvatarDraft((current) => ({
-                            ...current,
-                            modelPath: entry.modelPath,
-                            capabilities: entry.capabilities ?? current.capabilities,
-                          }));
-                          setAvatarFile(null);
-                          setAvatarFileName("");
-                        }}
-                        className={`rounded-[14px] border px-3 py-2 text-left transition-colors ${
-                          selected
-                            ? "border-foreground/18 bg-foreground/[0.06]"
-                            : "border-border/60 bg-background/82"
-                        }`}
-                      >
-                        <div className="flex items-start justify-between gap-3">
-                          <div>
-                            <div className="text-[12px] font-medium text-foreground">
-                              {entry.name}
-                            </div>
-                            {entry.description ? (
-                              <div className="mt-1 text-[11px] leading-5 text-muted-foreground">
-                                {entry.description}
-                              </div>
-                            ) : null}
-                          </div>
-                          {selected ? (
-                            <Icon
-                              icon="solar:check-circle-bold"
-                              className="mt-0.5 size-4 shrink-0 text-foreground/70"
-                              aria-hidden="true"
-                            />
-                          ) : null}
-                        </div>
-                      </button>
-                    );
-                  })}
+                    placeholder="比如：泡泡、阿序、Rin"
+                  />
                 </div>
-                {currentAvatarAsset?.description ? (
-                  <div className="text-[11px] leading-5 text-muted-foreground">
-                    当前选中：{currentAvatarAsset.description}
+                <div className="grid gap-2">
+                  <label className="text-[12px] font-medium text-foreground">角色简介</label>
+                  <Input
+                    value={avatarDraft.description}
+                    onChange={(event) =>
+                      setAvatarDraft((current) => ({
+                        ...current,
+                        description: event.target.value,
+                      }))
+                    }
+                    placeholder="一句话描述这个角色给人的感觉"
+                  />
+                </div>
+                <div className="grid gap-2">
+                  <label className="text-[12px] font-medium text-foreground">性格设定</label>
+                  <Textarea
+                    value={avatarDraft.personalityPrompt}
+                    onChange={(event) =>
+                      setAvatarDraft((current) => ({
+                        ...current,
+                        personalityPrompt: event.target.value,
+                      }))
+                    }
+                    placeholder="这里写角色策略、人设和说话方式，不要只写语气词。"
+                    rows={8}
+                  />
+                </div>
+                <div className="grid gap-2">
+                  <label className="text-[12px] font-medium text-foreground">额外 System Prompt</label>
+                  <Textarea
+                    value={avatarDraft.systemPrompt}
+                    onChange={(event) =>
+                      setAvatarDraft((current) => ({
+                        ...current,
+                        systemPrompt: event.target.value,
+                      }))
+                    }
+                    placeholder="补充这个角色必须遵守的阶段判断、陪伴分寸和表达边界。"
+                    rows={8}
+                  />
+                </div>
+                {avatarError ? (
+                  <div className="rounded-[12px] bg-rose-500/[0.06] px-3 py-2 text-[12px] text-rose-700 dark:text-rose-200">
+                    {avatarError}
                   </div>
                 ) : null}
               </div>
+            </div>
 
-              {avatarDraft.capabilities ? (
-                <div className="grid gap-2">
-                  <label className="text-[12px] font-medium text-foreground">
-                    模型能力分析
-                  </label>
-                  <div className="overflow-hidden rounded-[18px] border border-border/60 bg-[linear-gradient(180deg,rgba(255,255,255,0.72),rgba(248,250,252,0.92))] dark:bg-[linear-gradient(180deg,rgba(255,255,255,0.04),rgba(255,255,255,0.02))]">
-                    <div className="grid grid-cols-2 gap-px bg-border/55">
-                      <div className="bg-background/88 px-3 py-3">
-                        <div className="text-[10px] font-medium tracking-[0.14em] text-muted-foreground">
-                          ANIMATIONS
-                        </div>
-                        <div className="mt-1 text-[20px] font-semibold tracking-tight text-foreground">
-                          {avatarDraft.capabilities.animationCount}
-                        </div>
+            <div className="border-t border-border/60 bg-background/58 lg:border-l lg:border-t-0">
+              <div className="scrollbar-frost-thin max-h-[calc(88vh-148px)] overflow-y-auto px-5 py-5">
+                <div className="grid content-start gap-4">
+                  <div className="flex items-start justify-between gap-3">
+                    <div>
+                      <div className="text-[12px] font-semibold tracking-[0.08em] text-muted-foreground">
+                        模型与能力
                       </div>
-                      <div className="bg-background/88 px-3 py-3">
-                        <div className="text-[10px] font-medium tracking-[0.14em] text-muted-foreground">
-                          MORPH TARGETS
-                        </div>
-                        <div className="mt-1 text-[20px] font-semibold tracking-tight text-foreground">
-                          {avatarDraft.capabilities.morphTargetCount}
-                        </div>
+                      <div className="mt-1 text-[11px] text-muted-foreground">
+                        默认展示本地模型列表，也可以直接上传新的模型文件。
                       </div>
                     </div>
-                    <div className="space-y-2 px-3 py-3">
-                      <div className="flex flex-wrap gap-1.5">
-                        {Object.entries(avatarDraft.capabilities.clipGroups)
-                          .filter(([, indexes]) => Array.isArray(indexes) && indexes.length > 0)
-                          .map(([key]) => (
-                            <span
-                              key={key}
-                              className="rounded-full bg-foreground/[0.045] px-2.5 py-1 text-[10px] font-medium tracking-[0.04em] text-foreground/72"
-                            >
-                              {capabilityActionLabels[key] ?? key}
-                            </span>
-                          ))}
+                    <div className="rounded-full bg-foreground/[0.045] px-2.5 py-1 text-[10px] font-medium tracking-[0.04em] text-foreground/68">
+                      本地模型 {avatarModelAssetOptions.length}
+                    </div>
+                  </div>
+
+                  <div className="grid gap-2">
+                    <label className="text-[12px] font-medium text-foreground">3D 模型文件</label>
+                    <input
+                      ref={fileInputRef}
+                      type="file"
+                      accept=".glb,.gltf,.vrm,model/gltf-binary,model/gltf+json"
+                      className="hidden"
+                      onChange={handleAvatarFileChange}
+                    />
+                    <div className="flex items-center gap-2">
+                      <Button
+                        type="button"
+                        variant="outline"
+                        className="h-9 rounded-[10px]"
+                        onClick={() => fileInputRef.current?.click()}
+                      >
+                        <Icon icon="solar:upload-linear" className="mr-2 size-4" aria-hidden="true" />
+                        上传模型
+                      </Button>
+                      <div className="min-w-0 text-[12px] text-muted-foreground">
+                        {avatarFileName || avatarDraft.modelPath || "暂未选择文件"}
                       </div>
                     </div>
                   </div>
+
+                  <div className="grid gap-2">
+                    <div className="flex items-center justify-between gap-3">
+                      <label className="text-[12px] font-medium text-foreground">本地模型列表</label>
+                      <span className="text-[10px] text-muted-foreground">
+                        {avatarModelAssetOptions.length} 个可用模型
+                      </span>
+                    </div>
+                    <div className="grid max-h-[300px] gap-2 overflow-y-auto rounded-[18px] border border-border/60 bg-background/55 p-2">
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setAvatarDraft((current) => ({
+                            ...current,
+                            modelPath: "",
+                          }))
+                        }
+                        className={cn(
+                          "rounded-[14px] border px-3 py-2 text-left transition-colors",
+                          !avatarDraft.modelPath
+                            ? "border-foreground/18 bg-foreground/[0.06]"
+                            : "border-border/60 bg-background/82",
+                        )}
+                      >
+                        <div className="text-[12px] font-medium text-foreground">暂不选择现有模型</div>
+                        <div className="mt-1 text-[11px] leading-5 text-muted-foreground">
+                          只保留角色配置，稍后再上传新的 3D 文件。
+                        </div>
+                      </button>
+                      {avatarModelAssetOptions.map((entry) => {
+                        const selected = entry.modelPath === avatarDraft.modelPath;
+                        return (
+                          <button
+                            key={entry.modelPath}
+                            type="button"
+                            onClick={() => {
+                              setAvatarDraft((current) => ({
+                                ...current,
+                                modelPath: entry.modelPath,
+                                capabilities: entry.capabilities ?? current.capabilities,
+                              }));
+                              setAvatarFile(null);
+                              setAvatarFileName("");
+                            }}
+                            className={cn(
+                              "rounded-[14px] border px-3 py-2 text-left transition-colors",
+                              selected
+                                ? "border-foreground/18 bg-foreground/[0.06]"
+                                : "border-border/60 bg-background/82",
+                            )}
+                          >
+                            <div className="flex items-start justify-between gap-3">
+                              <div>
+                                <div className="text-[12px] font-medium text-foreground">
+                                  {entry.name}
+                                </div>
+                                {entry.description ? (
+                                  <div className="mt-1 text-[11px] leading-5 text-muted-foreground">
+                                    {entry.description}
+                                  </div>
+                                ) : null}
+                              </div>
+                              {selected ? (
+                                <Icon
+                                  icon="solar:check-circle-bold"
+                                  className="mt-0.5 size-4 shrink-0 text-foreground/70"
+                                  aria-hidden="true"
+                                />
+                              ) : null}
+                            </div>
+                          </button>
+                        );
+                      })}
+                    </div>
+                    {currentAvatarAsset?.description ? (
+                      <div className="text-[11px] leading-5 text-muted-foreground">
+                        当前选中：{currentAvatarAsset.description}
+                      </div>
+                    ) : null}
+                  </div>
+
+                  {avatarDraft.capabilities ? (
+                    <div className="grid gap-2">
+                      <label className="text-[12px] font-medium text-foreground">
+                        模型能力分析
+                      </label>
+                      <div className="overflow-hidden rounded-[18px] border border-border/60 bg-[linear-gradient(180deg,rgba(255,255,255,0.72),rgba(248,250,252,0.92))] dark:bg-[linear-gradient(180deg,rgba(255,255,255,0.04),rgba(255,255,255,0.02))]">
+                        <div className="grid grid-cols-2 gap-px bg-border/55">
+                          <div className="bg-background/88 px-3 py-3">
+                            <div className="text-[10px] font-medium tracking-[0.14em] text-muted-foreground">
+                              ANIMATIONS
+                            </div>
+                            <div className="mt-1 text-[20px] font-semibold tracking-tight text-foreground">
+                              {avatarDraft.capabilities.animationCount}
+                            </div>
+                          </div>
+                          <div className="bg-background/88 px-3 py-3">
+                            <div className="text-[10px] font-medium tracking-[0.14em] text-muted-foreground">
+                              MORPH TARGETS
+                            </div>
+                            <div className="mt-1 text-[20px] font-semibold tracking-tight text-foreground">
+                              {avatarDraft.capabilities.morphTargetCount}
+                            </div>
+                          </div>
+                        </div>
+                        <div className="space-y-2 px-3 py-3">
+                          <div className="flex flex-wrap gap-1.5">
+                            {Object.entries(avatarDraft.capabilities.clipGroups)
+                              .filter(([, indexes]) => Array.isArray(indexes) && indexes.length > 0)
+                              .map(([key]) => (
+                                <span
+                                  key={key}
+                                  className="rounded-full bg-foreground/[0.045] px-2.5 py-1 text-[10px] font-medium tracking-[0.04em] text-foreground/72"
+                                >
+                                  {capabilityActionLabels[key] ?? key}
+                                </span>
+                              ))}
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  ) : null}
                 </div>
-              ) : null}
+              </div>
             </div>
           </div>
           <DialogFooter className="border-t border-border/60 px-6 py-4">

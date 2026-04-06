@@ -251,15 +251,21 @@ export default function App() {
             <div className="hero-copy hero-copy-simple">
               <a href={releasePage} target="_blank" rel="noreferrer" className="brand-mark">
                 <span className="brand-halo" aria-hidden="true" />
-                <img className="brand-logo hero-brand-logo" src="/logo.png" alt="Rovix logo" width="120" height="120" />
+                <img className="brand-logo hero-brand-logo" src="/logo.png" alt="Rovix logo" width="72" height="72" />
                 <span className="brand-copy hero-brand-copy">
                   <strong>Rovix</strong>
                   <span>{releaseLabel}</span>
                 </span>
               </a>
 
-              <h1 className="hero-heading hero-heading-simple">Your shortcut to AI coding.</h1>
-              <p className="hero-description hero-description-simple">One workspace. Agent to patch.</p>
+              <h1 className="hero-heading hero-heading-simple">
+                <span className="hero-heading-line hero-heading-line-wide">Your desktop workspace</span>
+                <span className="hero-heading-line">for AI coding.</span>
+              </h1>
+              <p className="hero-description hero-description-simple">
+                Run agents, inspect files, patch code, and stay in flow with companions
+                that know what you&apos;re doing.
+              </p>
 
               <div className="hero-actions hero-actions-simple">
                 <a
@@ -291,6 +297,12 @@ export default function App() {
                   Release metadata is unavailable right now. Downloads fall back to the latest GitHub release page.
                 </p>
               ) : null}
+
+              <div className="hero-notes" aria-hidden="true">
+                <span>Local tools</span>
+                <span>Persistent threads</span>
+                <span>Companion-driven flow</span>
+              </div>
             </div>
           </div>
         </div>

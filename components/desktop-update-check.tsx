@@ -8,6 +8,32 @@ import { isTauriDesktop } from "@/lib/desktop-workspace";
 const UPDATER_ENABLED = process.env.NEXT_PUBLIC_TAURI_UPDATER_ENABLED === "1";
 const CHUNK_RELOAD_GUARD_KEY = "desktop-chunk-reload-at";
 const CHUNK_RELOAD_COOLDOWN_MS = 30_000;
+const UPDATE_PENDING_VERSION_KEY = "desktop-update-pending-version";
+const UPDATE_FAILED_VERSION_KEY = "desktop-update-failed-version";
+
+const getStoredValue = (key: string) => {
+  try {
+    return window.localStorage.getItem(key);
+  } catch {
+    return null;
+  }
+};
+
+const setStoredValue = (key: string, value: string) => {
+  try {
+    window.localStorage.setItem(key, value);
+  } catch {
+    // Ignore storage errors.
+  }
+};
+
+const removeStoredValue = (key: string) => {
+  try {
+    window.localStorage.removeItem(key);
+  } catch {
+    // Ignore storage errors.
+  }
+};
 
 const getErrorMessage = (value: unknown) => {
   if (value instanceof Error) return value.message;
@@ -27,6 +53,45 @@ const isChunkLoadFailure = (message: string) => {
 
 export function DesktopUpdateCheck() {
   const hasCheckedRef = useRef(false);
+
+  useEffect(() => {
+    if (!UPDATER_ENABLED || !isTauriDesktop()) {
+      return;
+    }
+
+    const reconcilePendingUpdate = async () => {
+      const pendingVersion = getStoredValue(UPDATE_PENDING_VERSION_KEY);
+      if (!pendingVersion) return;
+
+      try {
+        const { getVersion } = await import("@tauri-apps/api/app");
+        const currentVersion = await getVersion();
+
+        if (currentVersion === pendingVersion) {
+          removeStoredValue(UPDATE_PENDING_VERSION_KEY);
+          removeStoredValue(UPDATE_FAILED_VERSION_KEY);
+
+          gooeyToast.success(`已更新到 ${currentVersion}`, {
+            description: "应用已经切换到新版本。",
+            duration: 2400,
+          });
+          return;
+        }
+
+        setStoredValue(UPDATE_FAILED_VERSION_KEY, pendingVersion);
+        removeStoredValue(UPDATE_PENDING_VERSION_KEY);
+
+        gooeyToast.error("更新后版本没有切换成功", {
+          description: `目标版本 ${pendingVersion} 没有生效，已暂停自动重试，避免反复下载。请确认你启动的是安装后的正式应用，而不是旧副本或磁盘镜像里的应用。`,
+          duration: 8000,
+        });
+      } catch {
+        // Ignore version probe failures and let the normal updater flow proceed.
+      }
+    };
+
+    void reconcilePendingUpdate();
+  }, []);
 
   useEffect(() => {
     if (!isTauriDesktop()) {
@@ -106,9 +171,21 @@ export function DesktopUpdateCheck() {
 
     const run = async () => {
       try {
+        const failedVersion = getStoredValue(UPDATE_FAILED_VERSION_KEY);
         const { check } = await import("@tauri-apps/plugin-updater");
         const update = await check();
         if (!update) return;
+
+        if (failedVersion === update.version) {
+          if (process.env.NODE_ENV !== "production") {
+            console.warn("[desktop-updater] skipped retry for previously failed version", update.version);
+          }
+          return;
+        }
+
+        if (failedVersion && failedVersion !== update.version) {
+          removeStoredValue(UPDATE_FAILED_VERSION_KEY);
+        }
 
         const toastId = gooeyToast.info(`发现新版本 ${update.version}`, {
           description: update.body ?? "正在后台下载并安装更新。",
@@ -152,6 +229,7 @@ export function DesktopUpdateCheck() {
                   onClick: () => {
                     void (async () => {
                       try {
+                        setStoredValue(UPDATE_PENDING_VERSION_KEY, update.version);
                         gooeyToast.update(toastId, {
                           title: "正在重启应用",
                           description: "如果几秒内没有关闭，请稍后手动重启。",
@@ -174,6 +252,8 @@ export function DesktopUpdateCheck() {
                         if (process.env.NODE_ENV !== "production") {
                           console.warn("[desktop-updater] relaunch failed", error);
                         }
+
+                        removeStoredValue(UPDATE_PENDING_VERSION_KEY);
                       }
                     })();
                   },
