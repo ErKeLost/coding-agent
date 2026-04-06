@@ -1,33 +1,35 @@
 import { createTool } from '@mastra/core/tools';
-import z from 'zod';
+import { z } from 'zod';
 import { listManagedProcesses } from './local-process-manager';
+import { HowOneResultSchema, loadText } from './sandbox-helpers';
+
+const DESCRIPTION = loadText('list-local-processes.txt');
 
 export const listLocalProcessesTool = createTool({
   id: 'listLocalProcesses',
-  description:
-    'List local long-running processes started by the agent, such as dev servers.',
-  inputSchema: z.object({}),
-  outputSchema: z.object({
-    processes: z.array(
-      z.object({
-        id: z.string(),
-        kind: z.enum(['dev-server', 'command', 'shell', 'unified-exec']),
-        command: z.string(),
-        workingDirectory: z.string(),
-        host: z.string().optional(),
-        port: z.number().optional(),
-        url: z.string().optional(),
-        pid: z.number().optional(),
-        exitCode: z.number().optional(),
-        logPath: z.string().optional(),
-        status: z.enum(['running', 'stopped', 'failed']),
-        createdAt: z.string(),
-        updatedAt: z.string(),
-      }),
-    ),
+  description: DESCRIPTION,
+  inputSchema: z.object({
+    status: z.enum(['running', 'stopped', 'failed', 'all']).optional(),
   }),
-  execute: async () => {
+  outputSchema: HowOneResultSchema,
+  execute: async (inputData) => {
     const processes = listManagedProcesses();
-    return { processes };
+    const filtered =
+      !inputData.status || inputData.status === 'all'
+        ? processes
+        : processes.filter((entry) => entry.status === inputData.status);
+
+    return {
+      title: `${filtered.length} local processes`,
+      output:
+        filtered.length > 0
+          ? JSON.stringify(filtered, null, 2)
+          : '[]',
+      metadata: {
+        count: filtered.length,
+        status: inputData.status ?? 'all',
+        processes: filtered,
+      },
+    };
   },
 });

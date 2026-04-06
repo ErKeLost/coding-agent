@@ -4,7 +4,7 @@ Before using this tool:
 
 1. Use the Read tool to understand the file's contents and context
 2. Verify the directory path is correct
-3. The project root is /workspace (Vite starter project)
+3. The project root is the current workspace root
 
 To make multiple file edits, provide the following:
 1. file_path: The absolute path to the file to modify (must be absolute, not relative)

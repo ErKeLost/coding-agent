@@ -1,0 +1,7 @@
+Stop a managed local background process by `processId`.
+
+Use this when a dev server, watcher, or other long-running command should be terminated.
+
+Notes:
+- `processId` is required
+- `force` sends a stronger termination signal when a normal stop is not enough

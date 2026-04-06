@@ -12,30 +12,12 @@ import {
 } from "@/lib/server/agent-request-context";
 import { consumeThreadSteers } from "@/lib/server/steer-queue";
 import {
+  currentTurnIncludesImageInput,
   normalizeAgentMessageInput,
 } from "@/lib/server/agent-input";
 
 export const runtime = "nodejs";
 const BUILD_AGENT_ID = "build-agent";
-
-const GENERIC_TOOL_NAMES = new Set([
-  "tool",
-  "dynamic-tool",
-  "unknown",
-  "unnamed",
-  "unnamed tool",
-]);
-
-const normalizeToolName = (value?: string | null) => {
-  if (typeof value !== "string") return undefined;
-  const trimmed = value.trim();
-  return trimmed ? trimmed : undefined;
-};
-
-const isGenericToolName = (value?: string | null) => {
-  const normalized = normalizeToolName(value)?.toLowerCase();
-  return normalized ? GENERIC_TOOL_NAMES.has(normalized) : false;
-};
 
 type StreamEvent =
   | {
@@ -77,7 +59,7 @@ type StreamEvent =
       type: "stream.event";
       eventName: "tool.call.completed";
       toolCallId: string;
-      toolName: string;
+      toolName?: string;
       args?: unknown;
       result?: unknown;
       agentId?: string;
@@ -107,6 +89,12 @@ type StreamEvent =
       type: "stream.event";
       eventName: "session.updated";
       previewUrl?: string;
+    }
+  | {
+      type: "stream.event";
+      eventName: "session.ended";
+      status: "done" | "idle" | "error";
+      reason?: string;
     }
   | {
       type: "stream.event";
@@ -394,7 +382,50 @@ export async function POST(
       ...(rawRecord.payload && typeof rawRecord.payload === "object" ? rawRecord.payload : {}),
     };
     const events: StreamEvent[] = [];
+    let emittedStructuredToolResult = false;
     const chunkType = record.type?.toLowerCase();
+    const isStructuredToolFailure = (resultValue: unknown) => {
+      if (!resultValue || typeof resultValue !== "object") return false;
+      const typed = resultValue as {
+        success?: unknown;
+        state?: unknown;
+        metadata?: { state?: unknown; timedOut?: unknown };
+      };
+      if (typed.success === false) return true;
+      const state =
+        typeof typed.state === "string"
+          ? typed.state.toLowerCase()
+          : typeof typed.metadata?.state === "string"
+            ? typed.metadata.state.toLowerCase()
+            : "";
+      if (state === "failed" || state === "timed_out") return true;
+      if (typed.metadata?.timedOut === true) return true;
+      return false;
+    };
+    const extractStructuredToolError = (resultValue: unknown) => {
+      if (!resultValue || typeof resultValue !== "object") return undefined;
+      const typed = resultValue as {
+        error?: unknown;
+        message?: unknown;
+        stderr?: unknown;
+        output?: unknown;
+        metadata?: {
+          stderr?: unknown;
+          stdout?: unknown;
+          message?: unknown;
+        };
+      };
+      const direct =
+        (typeof typed.error === "string" && typed.error.trim()) ||
+        (typeof typed.message === "string" && typed.message.trim()) ||
+        (typeof typed.stderr === "string" && typed.stderr.trim()) ||
+        (typeof typed.output === "string" && typed.output.trim()) ||
+        (typeof typed.metadata?.stderr === "string" && typed.metadata.stderr.trim()) ||
+        (typeof typed.metadata?.message === "string" && typed.metadata.message.trim()) ||
+        (typeof typed.metadata?.stdout === "string" && typed.metadata.stdout.trim()) ||
+        undefined;
+      return direct?.trim();
+    };
 
     const emitStructuredToolEvents = ({
       phase,
@@ -429,7 +460,7 @@ export async function POST(
       previewUrl?: string;
       sessionId?: string;
     }) => {
-      if (!toolCallId || !toolName) return;
+      if (!toolCallId) return;
       const isAgentWrapperTool =
         typeof toolName === "string" && toolName.startsWith("agent-");
 
@@ -779,11 +810,7 @@ export async function POST(
         resultPayload && typeof resultPayload === "object" && "result" in resultPayload
           ? (resultPayload as { result?: unknown }).result
           : undefined;
-      const isFailedResult =
-        typeof resultValue === "object" &&
-        resultValue !== null &&
-        "state" in (resultValue as Record<string, unknown>) &&
-        (resultValue as { state?: unknown }).state === "failed";
+      const isFailedResult = isStructuredToolFailure(resultValue);
       emitStructuredToolEvents({
         phase: isFailedResult ? "failed" : "completed",
         toolCallId:
@@ -796,15 +823,18 @@ export async function POST(
             : undefined,
         result: resultValue,
         error:
-          isFailedResult && typeof resultValue === "object" && resultValue !== null
-            ? typeof (resultValue as { error?: unknown }).error === "string"
-              ? (resultValue as { error: string }).error
-              : "Tool failed"
+          isFailedResult
+            ? extractStructuredToolError(resultValue) ?? "Tool failed"
             : undefined,
       });
+      emittedStructuredToolResult = true;
     }
 
-    if (typeof record.error === "string" && record.error.trim()) {
+    if (
+      !emittedStructuredToolResult &&
+      typeof record.error === "string" &&
+      record.error.trim()
+    ) {
       const activeAgent = getActiveAgentContext();
       events.push({
         type: "stream.event",
@@ -856,11 +886,7 @@ export async function POST(
     const isToolResult = chunkType?.includes("tool-result") || Boolean(record.toolResult);
     if (isToolResult && toolCallId && toolName) {
       const resultValue = record.toolResult?.result ?? record.result;
-      const isFailedResult =
-        typeof resultValue === "object" &&
-        resultValue !== null &&
-        "state" in (resultValue as Record<string, unknown>) &&
-        (resultValue as { state?: unknown }).state === "failed";
+      const isFailedResult = isStructuredToolFailure(resultValue);
       emitStructuredToolEvents({
         phase: isFailedResult ? "failed" : "completed",
         toolCallId,
@@ -868,13 +894,11 @@ export async function POST(
         args: record.toolCall?.args ?? record.args,
         result: resultValue,
         error:
-          isFailedResult &&
-          typeof resultValue === "object" &&
-          resultValue !== null &&
-          typeof (resultValue as { error?: unknown }).error === "string"
-            ? (resultValue as { error: string }).error
+          isFailedResult
+            ? extractStructuredToolError(resultValue)
             : undefined,
       });
+      emittedStructuredToolResult = true;
     }
 
     const sessionUpdate = extractSessionUpdate(record);
@@ -898,7 +922,10 @@ export async function POST(
   const pendingAppliedSteers: string[] = [];
   const memory =
     payload.memory ??
-    (payload.threadId
+    (payload.threadId &&
+    !currentTurnIncludesImageInput(
+      typeof messageInput === "string" ? null : messageInput,
+    )
       ? {
           thread: { id: payload.threadId },
           resource: "web",
@@ -1293,6 +1320,13 @@ export async function POST(
             : emittedToolCompletions.size > 0 || latestPreviewUrl
               ? "done"
               : "idle";
+        const endedEvent: StreamEvent = {
+          type: "stream.event",
+          eventName: "session.ended",
+          status: finalStatus,
+          reason: streamTerminalErrorText,
+        };
+        enqueueJson(controller, endedEvent);
         logger?.info("Mastra stream finished", {
           routeAgentId: agentId,
           threadId: payload.threadId ?? null,

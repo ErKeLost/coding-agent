@@ -1,0 +1,8 @@
+List managed local background processes tracked by the workspace runtime.
+
+Use this to inspect which long-running commands are still active, failed, or stopped.
+
+Helpful for:
+- finding a recent `processId`
+- checking whether a dev server is still running
+- deciding which process logs to read next

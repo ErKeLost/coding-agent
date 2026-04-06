@@ -1,7 +1,7 @@
 Reads a file from the sandbox filesystem. If the User provides a path to a file assume that path is valid. It is okay to read a file that does not exist; an error will be returned.
 
 Usage:
-- Paths are resolved under /workspace (Vite starter project). Relative paths and absolute paths (like /src/app.ts) are treated as /workspace/<path>.
+- Paths are resolved under the current workspace root. Relative paths resolve from workspace root; legacy `/workspace/...` paths are also accepted.
 - By default, it reads up to 2000 lines starting from the beginning of the file
 - You can optionally specify a line offset and limit (especially handy for long files), but it's recommended to read the whole file by not providing these parameters
 - Any lines longer than 2000 characters will be truncated

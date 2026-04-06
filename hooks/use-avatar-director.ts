@@ -13,6 +13,12 @@ type UseAvatarDirectorArgs = {
   threadTitle?: string | null;
   workspaceLabel?: string | null;
   model?: string | null;
+  avatarName?: string | null;
+  avatarDescription?: string | null;
+  avatarPersonalityPrompt?: string | null;
+  avatarSystemPrompt?: string | null;
+  avatarCapabilitiesSummary?: string | null;
+  userBehaviorSummary?: string | null;
   streamStatus: "submitted" | "streaming" | "ready" | "error";
   items: ChatItem[];
 };
@@ -23,9 +29,16 @@ const EMPTY_DIRECTIVE: AvatarDirective = {
   action: "idle",
   emotion: "neutral",
   lookAt: "thread_center",
-  moveTo: "right",
+  moveTo: "left",
   locomotion: "idle",
   priority: "low",
+  bubbleTheme: {
+    borderColor: "#d9e4ff",
+    textColor: "#1f2937",
+    backgroundFrom: "#f8fbff",
+    backgroundTo: "#eef4ff",
+    glowColor: "rgba(94, 151, 255, 0.28)",
+  },
   source: "heuristic",
 };
 
@@ -75,6 +88,12 @@ export function useAvatarDirector({
   threadTitle,
   workspaceLabel,
   model,
+  avatarName,
+  avatarDescription,
+  avatarPersonalityPrompt,
+  avatarSystemPrompt,
+  avatarCapabilitiesSummary,
+  userBehaviorSummary,
   streamStatus,
   items,
 }: UseAvatarDirectorArgs) {
@@ -125,6 +144,7 @@ export function useAvatarDirector({
               moveTo: nextDirective.moveTo,
               locomotion: nextDirective.locomotion,
               priority: nextDirective.priority,
+              bubbleTheme: nextDirective.bubbleTheme,
             });
             if (directiveSignature === lastDirectiveSignatureRef.current) {
               return;
@@ -160,6 +180,12 @@ export function useAvatarDirector({
       threadTitle,
       workspaceLabel,
       model,
+      avatarName,
+      avatarDescription,
+      avatarPersonalityPrompt,
+      avatarSystemPrompt,
+      avatarCapabilitiesSummary,
+      userBehaviorSummary,
       streamStatus,
       recentItems,
     };
@@ -199,7 +225,20 @@ export function useAvatarDirector({
     return () => {
       window.clearTimeout(timeoutId);
     };
-  }, [model, recentItems, streamStatus, threadId, threadTitle, workspaceLabel]);
+  }, [
+    avatarDescription,
+    avatarCapabilitiesSummary,
+    avatarName,
+    avatarPersonalityPrompt,
+    avatarSystemPrompt,
+    userBehaviorSummary,
+    model,
+    recentItems,
+    streamStatus,
+    threadId,
+    threadTitle,
+    workspaceLabel,
+  ]);
 
   return { directive, thinking };
 }

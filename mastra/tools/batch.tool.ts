@@ -2,29 +2,18 @@ import { createTool } from '@mastra/core/tools';
 import { z } from 'zod';
 import { HowOneResultSchema, loadText } from './sandbox-helpers';
 import { bashTool } from './bash.tool';
-import { chmodTool } from './chmod.tool';
 import { codeSearchTool } from './codesearch.tool';
-import { downloadFilesTool } from './download-files.tool';
 import { editTool } from './edit.tool';
 import { globTool } from './glob.tool';
 import { grepTool } from './grep.tool';
 import { listTool } from './list.tool';
-import { lspTool } from './lsp.tool';
-import { mkdirTool } from './mkdir.tool';
-import { multiEditTool } from './multiedit.tool';
-import { mvTool } from './mv.tool';
-import { patchTool } from './patch.tool';
 import { readTool } from './read.tool';
-import { replaceTool } from './replace.tool';
-import { rmTool } from './rm.tool';
 import { skillTool } from './skill.tool';
-import { statTool } from './stat.tool';
 import { taskTool } from './task-delegate.tool';
 import { todoReadTool } from './todoread.tool';
 import { todoWriteTool } from './todowrite.tool';
 import { webFetchTool } from './webfetch.tool';
 import { webSearchTool } from './websearch.tool';
-import { writeFilesTool } from './write-files.tool';
 import { writeTool } from './write.tool';
 
 const BATCH_DESCRIPTION = loadText('batch.txt');
@@ -219,17 +208,7 @@ const toolsForBatch: Record<string, ToolDefinition> = {
   read: readTool,
   write: writeTool,
   edit: editTool,
-  multiedit: multiEditTool,
-  patch: patchTool,
   list: listTool,
-  mkdir: mkdirTool,
-  rm: rmTool,
-  mv: mvTool,
-  stat: statTool,
-  chmod: chmodTool,
-  replace: replaceTool,
-  writeFiles: writeFilesTool,
-  downloadFiles: downloadFilesTool,
   glob: globTool,
   grep: grepTool,
   webfetch: webFetchTool,
@@ -239,7 +218,6 @@ const toolsForBatch: Record<string, ToolDefinition> = {
   todowrite: todoWriteTool,
   todoread: todoReadTool,
   task: taskTool,
-  lsp: lspTool,
 };
 
 const batchToolMap = new Map(Object.entries(toolsForBatch));

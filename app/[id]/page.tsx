@@ -68,7 +68,16 @@ import { WorkspaceComposerShell } from "@/components/rovix/workspace/workspace-c
 import { WorkspaceModelTerminalControls } from "@/components/rovix/workspace/workspace-model-terminal-controls";
 import { WorkspacePageLayout } from "@/components/rovix/workspace/workspace-page-layout";
 import { WorkspacePromptAttachments } from "@/components/rovix/workspace/workspace-prompt-attachments";
-import { AvatarCornerWidget } from "@/components/avatar/avatar-corner-widget";
+import {
+  getAvatarProfileById,
+  getAvatarModelAssetOptions,
+  upsertAvatarProfile as upsertAvatarProfileRecord,
+  type AvatarProfile,
+} from "@/lib/avatar/models";
+import {
+  EMPTY_AVATAR_DIRECTIVE,
+  useAvatarShellStore,
+} from "@/lib/avatar/avatar-shell-store";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -86,6 +95,7 @@ import { useDesktopWorkspace } from "@/hooks/use-desktop-workspace";
 import { useThreadSession } from "@/hooks/use-thread-session";
 import { useAgentStream } from "@/hooks/use-agent-stream";
 import { useAvatarDirector } from "@/hooks/use-avatar-director";
+import { useUserBehaviorStore } from "@/lib/user-behavior-store";
 
 const formatRelativeUpdatedAt = (updatedAt: number) => {
   if (!updatedAt) return "workspace";
@@ -121,6 +131,20 @@ const summarizeThreadTitle = (value?: string | null) => {
   const normalized = (value ?? "").replace(/\s+/g, " ").trim();
   if (!normalized) return "Untitled thread";
   return normalized.length > 42 ? `${normalized.slice(0, 39)}...` : normalized;
+};
+
+const analyzeBehaviorHintsFromText = (value: string | undefined) => {
+  const text = (value ?? "").trim().toLowerCase();
+  return {
+    requestedDevServer:
+      /npm run dev|pnpm dev|bun dev|yarn dev|启动开发服务器|启动 dev server|start dev server/.test(
+        text,
+      ),
+    requestedExplicitCompletion:
+      /done|结束事件|终止事件|完成事件|明确.*结束|明确.*完成|终止标识|done 标识/.test(
+        text,
+      ),
+  };
 };
 
 const ThreadHistoryLoadingState = () => (
@@ -434,6 +458,7 @@ const getToolExtraDetails = (item: Extract<ChatItem, { type: "tool" }>) => {
     const exitCode =
       getNumber(result?.exitCode) ??
       getNumber(metadata?.exitCode) ??
+      getNumber(metadata?.exit) ??
       getNumber(result?.code);
     if (command) {
       details.push(
@@ -451,6 +476,8 @@ const getToolExtraDetails = (item: Extract<ChatItem, { type: "tool" }>) => {
       getString(result?.stderr) ??
       getString(result?.stdout) ??
       getString(result?.output) ??
+      getString(metadata?.stderr) ??
+      getString(metadata?.stdout) ??
       stepOutput;
     if (output) {
       details.push(`输出: ${truncateText(normalizeInlineText(output), 96)}`);
@@ -578,6 +605,68 @@ const getToolResultMetadata = (item: Extract<ChatItem, { type: "tool" }>) => {
   return result && isRecord(result.metadata) ? result.metadata : null;
 };
 
+type ToolResultEnvelope = {
+  success?: boolean;
+  state?: string;
+  stdout?: string;
+  stderr?: string;
+  exitCode?: number;
+  timedOut?: boolean;
+  metadata?: Record<string, unknown>;
+};
+
+const getToolResultEnvelope = (
+  item: Extract<ChatItem, { type: "tool" }>,
+): ToolResultEnvelope | null => {
+  const result = getToolResultRecord(item);
+  const metadata = getToolResultMetadata(item);
+  if (!result && !metadata) return null;
+
+  const success =
+    typeof result?.success === "boolean"
+      ? result.success
+      : typeof metadata?.success === "boolean"
+        ? metadata.success
+        : undefined;
+  const state =
+    getString(result?.state) ??
+    getString(metadata?.state);
+  const stdout =
+    getString(result?.stdout) ??
+    getString(metadata?.stdout);
+  const stderr =
+    getString(result?.stderr) ??
+    getString(metadata?.stderr);
+  const exitCode =
+    getNumber(result?.exitCode) ??
+    getNumber(metadata?.exitCode) ??
+    getNumber(metadata?.exit);
+  const timedOut =
+    typeof result?.timedOut === "boolean"
+      ? result.timedOut
+      : typeof metadata?.timedOut === "boolean"
+        ? metadata.timedOut
+        : state === "timed_out"
+          ? true
+          : undefined;
+  const nestedMetadata =
+    isRecord(result?.metadata)
+      ? result.metadata
+      : isRecord(metadata?.metadata)
+        ? metadata.metadata
+        : undefined;
+
+  return {
+    success,
+    state,
+    stdout,
+    stderr,
+    exitCode,
+    timedOut,
+    metadata: nestedMetadata,
+  };
+};
+
 const parsePatchedFilesFromOutput = (value?: string) => {
   if (!value) return [];
   const files = value
@@ -668,6 +757,11 @@ type ToolStandalonePreview =
       code: string;
     }
   | {
+      kind: "error";
+      title: string;
+      errorText: string;
+    }
+  | {
       kind: "diff";
       filename: string;
       language: string;
@@ -681,6 +775,19 @@ const getToolStandalonePreview = (
   const result = getToolResultRecord(item);
   const metadata = getToolResultMetadata(item);
   const patchText = getPatchTextFromArgs(item.args);
+  const normalizedErrorText = item.errorText?.trim();
+
+  if (
+    item.status === "error" &&
+    normalizedErrorText &&
+    !isInterruptedPlaceholderError(normalizedErrorText)
+  ) {
+    return {
+      kind: "error",
+      title: `${item.name || "tool"} error`,
+      errorText: normalizedErrorText,
+    };
+  }
 
   if (isPatchToolItem(item)) {
     const files = getPatchFilesFromItem(item);
@@ -750,6 +857,19 @@ const ToolResultPreview = ({ preview }: { preview: ToolStandalonePreview }) => {
     );
   }
 
+  if (preview.kind === "error") {
+    return (
+      <div className="overflow-hidden rounded-[12px] border border-rose-300/35 bg-rose-500/[0.045] dark:border-rose-500/20 dark:bg-rose-500/[0.08]">
+        <div className="border-b border-rose-300/35 px-3 py-2 text-[11px] font-medium tracking-[0.02em] text-rose-700/85 dark:border-rose-500/20 dark:text-rose-200/80">
+          {preview.title}
+        </div>
+        <pre className="scrollbar-frost overflow-x-auto px-3 py-2.5 font-mono text-[11.5px] leading-5 whitespace-pre-wrap text-rose-950/88 dark:text-rose-50/88">
+          {preview.errorText}
+        </pre>
+      </div>
+    );
+  }
+
   if (preview.kind === "diff") {
     return (
       <DiffFilePreview
@@ -776,10 +896,43 @@ const isNoiseToolText = (value: string | null | undefined) => {
   );
 };
 
-const getToolResultText = (item: Extract<ChatItem, { type: "tool" }>) => {
-  const result = getToolResultRecord(item);
-  const text = getString(result?.output) ?? getString(result?.message) ?? null;
-  return isNoiseToolText(text) ? null : text;
+const isInterruptedPlaceholderError = (value: string | null | undefined) => {
+  const normalized = value?.trim().toLowerCase() ?? "";
+  if (!normalized) return false;
+  return (
+    normalized ===
+      "tool call was interrupted before completion (stream ended)." ||
+    normalized.includes("tool started but no completed event arrived before stream end")
+  );
+};
+
+const getToolMissingResultHint = (item: Extract<ChatItem, { type: "tool" }>) => {
+  if (item.errorText?.trim() && !isInterruptedPlaceholderError(item.errorText)) {
+    return item.errorText.trim();
+  }
+
+  const envelope = getToolResultEnvelope(item);
+  const state = envelope?.state?.trim();
+  const exitCode = envelope?.exitCode;
+  const stderr =
+    envelope?.stderr ??
+    [...(item.steps ?? [])]
+      .reverse()
+      .map((step) => step.stderr ?? step.message)
+      .find((value) => typeof value === "string" && value.trim().length > 0);
+  const firstLine = stderr?.split("\n")[0]?.trim();
+
+  if (firstLine) return firstLine;
+  if (state === "timed_out" || envelope?.timedOut) return "工具执行超时，未返回完整结果。";
+  if (state === "failed" && exitCode !== undefined) {
+    return `工具执行失败 (exit ${exitCode})。`;
+  }
+  if (envelope?.success === false && exitCode !== undefined) {
+    return `工具执行失败 (exit ${exitCode})。`;
+  }
+  if (envelope?.success === false) return "工具执行失败。";
+  if (state === "failed") return "工具执行失败。";
+  return null;
 };
 
 const renderToolDetail = (detail: string): ReactNode => {
@@ -1204,7 +1357,7 @@ const formatToolMeta = (item: Extract<ChatItem, { type: "tool" }>) => {
   ]);
   const pattern = getString(args.pattern);
   const query = getString(args.query);
-  const command = getString(args.command);
+  const command = getString(args.command) ?? getString(args.cmd);
 
   if (name === "write" && filePath) {
     return toDisplayLeaf(filePath);
@@ -1260,8 +1413,8 @@ const formatToolMeta = (item: Extract<ChatItem, { type: "tool" }>) => {
     return command ? `command: ${command}` : "run command";
   }
   if (name === "write_stdin") {
-    const sessionId = getString(args.sessionId);
-    const input = getString(args.input);
+    const sessionId = getString(args.sessionId) ?? getString(args.session_id);
+    const input = getString(args.input) ?? getString(args.chars);
     if (input) {
       return `stdin: ${truncateText(input.replace(/\s+/g, " ").trim(), 72)}`;
     }
@@ -1430,11 +1583,21 @@ const getActivityVerb = (
   action: ActivityAction,
   status: "pending" | "done" | "error",
   toolName?: string,
+  errorText?: string,
 ) => {
   const normalizedToolName = toolName?.trim().toLowerCase() ?? "";
+  const normalizedError = errorText?.trim().toLowerCase() ?? "";
+  const interrupted =
+    normalizedError.includes("before completion") ||
+    normalizedError.includes("before stream end") ||
+    normalizedError.includes("stream ended") ||
+    normalizedError.includes("interrupted") ||
+    normalizedError.includes("aborted") ||
+    normalizedError.includes("tripwire");
 
   if (normalizedToolName === "apply_patch" || normalizedToolName === "patch") {
-    if (status === "error") return "应用补丁失败";
+    if (status === "error" && interrupted) return "补丁应用完成（中断）";
+    if (status === "error") return "补丁应用完成（报错）";
     if (status === "done") return "已应用补丁";
     return "正在应用补丁";
   }
@@ -1463,7 +1626,10 @@ const getActivityVerb = (
                       : "正在处理";
 
   if (status === "error") {
-    return pendingVerb.replace(/^正在/, "") + "失败";
+    if (interrupted) {
+      return pendingVerb.replace(/^正在/, "已") + "（中断）";
+    }
+    return pendingVerb.replace(/^正在/, "已") + "（报错）";
   }
 
   if (status === "done") {
@@ -1546,7 +1712,7 @@ const getToolPathTail = (item: Extract<ChatItem, { type: "tool" }>) => {
     getString(resultMeta?.title) ??
     getString(resultMeta?.name);
   const resultTitle = isNoiseToolText(rawResultTitle) ? undefined : rawResultTitle;
-  const command = getString(args?.command);
+  const command = getString(args?.command) ?? getString(args?.cmd);
   const query = getString(args?.query);
   const pattern = getString(args?.pattern);
   const url = getString(args?.url);
@@ -1678,17 +1844,31 @@ const isToolRunState = (value: unknown): value is ToolRunState =>
 const getRunInfo = (item: Extract<ChatItem, { type: "tool" }>): RunInfo => {
   const result = item.result;
   if (isRecord(result)) {
+    const resultMeta =
+      result && isRecord(result.metadata) ? result.metadata : null;
     const state = isToolRunState(result.state)
       ? result.state
       : isToolRunState(result.runState)
         ? result.runState
-        : undefined;
-    const sessionId = getString(result.sessionId);
+        : isToolRunState(resultMeta?.state)
+          ? resultMeta.state
+          : isToolRunState(resultMeta?.runState)
+            ? resultMeta.runState
+            : undefined;
+    const sessionId =
+      getString(result.sessionId) ??
+      getString(result.session_id) ??
+      getString(resultMeta?.sessionId) ??
+      getString(resultMeta?.session_id);
     const durationMs =
       typeof result.executionTime === "number"
         ? result.executionTime
+        : typeof resultMeta?.executionTime === "number"
+          ? resultMeta.executionTime
         : typeof result.startupDurationMs === "number"
           ? result.startupDurationMs
+          : typeof resultMeta?.startupDurationMs === "number"
+            ? resultMeta.startupDurationMs
           : undefined;
     if (state || sessionId || durationMs !== undefined) {
       return { state, sessionId, durationMs };
@@ -1933,6 +2113,7 @@ const logWorkspaceDebug = (
 };
 
 export default function Home() {
+  const previousAvatarThreadIdRef = useRef<string | null>(null);
   const hasMounted = useSyncExternalStore(
     () => () => {},
     () => true,
@@ -1940,6 +2121,17 @@ export default function Home() {
   );
   const model = useWorkspaceShellStore((state) => state.model);
   const setModel = useWorkspaceShellStore((state) => state.setModel);
+  const setThreadModel = useWorkspaceShellStore((state) => state.setThreadModel);
+  const syncThreadModel = useWorkspaceShellStore((state) => state.syncThreadModel);
+  const avatarProfileId = useWorkspaceShellStore((state) => state.avatarProfileId);
+  const avatarProfiles = useWorkspaceShellStore((state) => state.avatarProfiles);
+  const setAvatarProfileId = useWorkspaceShellStore((state) => state.setAvatarProfileId);
+  const upsertAvatarProfile = useWorkspaceShellStore(
+    (state) => state.upsertAvatarProfile,
+  );
+  const removeAvatarProfile = useWorkspaceShellStore(
+    (state) => state.removeAvatarProfile,
+  );
   const modelDialogOpen = useWorkspaceShellStore(
     (state) => state.modelDialogOpen,
   );
@@ -1955,6 +2147,7 @@ export default function Home() {
   const resetReasoningOpenState = useWorkspaceShellStore(
     (state) => state.resetReasoningOpenState,
   );
+  const setAvatarDirective = useAvatarShellStore((state) => state.setDirective);
   const gitDialogOpen = useWorkspaceShellStore((state) => state.gitDialogOpen);
   const setGitDialogOpen = useWorkspaceShellStore(
     (state) => state.setGitDialogOpen,
@@ -1965,6 +2158,9 @@ export default function Home() {
   const setTerminalExpanded = useWorkspaceShellStore(
     (state) => state.setTerminalExpanded,
   );
+  const userBehaviorProfileSummary = useUserBehaviorStore((state) => state.summary);
+  const recordBehaviorEvent = useUserBehaviorStore((state) => state.recordEvent);
+  const resetUserBehaviorProfile = useUserBehaviorStore((state) => state.resetProfile);
   const [selectedAgent] = useState(DEFAULT_AGENT_ID);
   const previousThinkingStatusesRef = useRef<
     Record<string, "pending" | "done">
@@ -1972,6 +2168,10 @@ export default function Home() {
   const params = useParams();
   const router = useRouter();
   const selectedModelData = models.find((m) => m.id === model);
+  const selectedAvatarProfile = getAvatarProfileById(
+    avatarProfiles,
+    avatarProfileId,
+  );
   const modelChefs = useMemo(
     () => [...new Set(models.map((entry) => entry.chef))],
     [],
@@ -1999,6 +2199,7 @@ export default function Home() {
     handleNewThread: createThreadSession,
     handleSelectThread: selectThreadSession,
     handleDeleteThread: deleteThreadSession,
+    getThreadRuntimeState,
   } = useThreadSession({
     params,
     router,
@@ -2013,6 +2214,12 @@ export default function Home() {
   const effectiveWorkspaceRoot =
     workspaceRoot ?? activeThreadRecord?.workspaceRoot ?? null;
   const activeWorkspaceLabel = summarizeWorkspaceRoot(effectiveWorkspaceRoot);
+
+  useEffect(() => {
+    if (!threadId) return;
+    syncThreadModel(threadId, model);
+  }, [model, syncThreadModel, threadId]);
+
   const {
     status,
     error,
@@ -2027,17 +2234,19 @@ export default function Home() {
     model,
     selectedAgent,
     selectedModelName: selectedModelData?.name,
+    onGuideUsed: () => {
+      recordBehaviorEvent({
+        kind: "guide_used",
+        workspaceRoot: effectiveWorkspaceRoot,
+      });
+    },
     threadId,
     workspaceRoot,
-    items,
     setItems,
-    setRecentThreads,
     setPreviewUrl,
     setPreviewLogs,
     setPlan,
-    summarizeThreadTitle,
-    summarizeWorkspaceRoot,
-    mergeRecentThreads,
+    getThreadRuntimeState,
     createId,
     parseSseEvent,
     prepareAttachmentForModel,
@@ -2077,9 +2286,35 @@ export default function Home() {
       threadTitle: activeThreadRecord?.title ?? null,
       workspaceLabel: activeWorkspaceLabel,
       model,
+      avatarName: selectedAvatarProfile?.name ?? null,
+      avatarDescription: selectedAvatarProfile?.description ?? null,
+      avatarPersonalityPrompt:
+        selectedAvatarProfile?.personalityPrompt ?? null,
+      avatarSystemPrompt: selectedAvatarProfile?.systemPrompt ?? null,
+      avatarCapabilitiesSummary:
+        selectedAvatarProfile?.capabilities?.summary ?? null,
+      userBehaviorSummary: userBehaviorProfileSummary,
       streamStatus: status,
       items,
     });
+
+  useEffect(() => {
+    const previousThreadId = previousAvatarThreadIdRef.current;
+    previousAvatarThreadIdRef.current = threadId || null;
+
+    const switchedThread =
+      Boolean(previousThreadId) &&
+      Boolean(threadId) &&
+      previousThreadId !== threadId;
+    const isEmptyDirective =
+      JSON.stringify(avatarDirective) === JSON.stringify(EMPTY_AVATAR_DIRECTIVE);
+
+    if (switchedThread && isEmptyDirective) {
+      return;
+    }
+
+    setAvatarDirective(avatarDirective);
+  }, [avatarDirective, setAvatarDirective, threadId]);
 
   useEffect(() => {
     if (!activeError) return;
@@ -2119,6 +2354,7 @@ export default function Home() {
 
   const canStartConversation = Boolean(threadId) && !isHydratingThread;
   const canSubmitChat = canStartConversation && Boolean(model);
+  const isChatRunning = status === "submitted" || status === "streaming";
   const shouldShowEmptyThreadHint =
     !canStartConversation && recentThreads.length === 0;
   const chatDisabledReason = canStartConversation
@@ -2161,8 +2397,12 @@ export default function Home() {
     (initialWorkspaceRoot?: string | null) => {
       resetThreadUiChrome();
       createThreadSession(initialWorkspaceRoot ?? effectiveWorkspaceRoot);
+      recordBehaviorEvent({
+        kind: "thread_created",
+        workspaceRoot: initialWorkspaceRoot ?? effectiveWorkspaceRoot,
+      });
     },
-    [createThreadSession, effectiveWorkspaceRoot, resetThreadUiChrome],
+    [createThreadSession, effectiveWorkspaceRoot, recordBehaviorEvent, resetThreadUiChrome],
   );
 
   const handleSelectThread = useCallback(
@@ -2170,8 +2410,12 @@ export default function Home() {
       if (!nextThreadId || nextThreadId === threadId) return;
       resetThreadUiChrome();
       selectThreadSession(nextThreadId);
+      recordBehaviorEvent({
+        kind: "thread_switched",
+        workspaceRoot: effectiveWorkspaceRoot,
+      });
     },
-    [resetThreadUiChrome, selectThreadSession, threadId],
+    [effectiveWorkspaceRoot, recordBehaviorEvent, resetThreadUiChrome, selectThreadSession, threadId],
   );
 
   const handleDeleteThread = useCallback(
@@ -2208,6 +2452,13 @@ export default function Home() {
   const handleSelectEditorFile = handleOpenWorkspaceFile;
   const handleHeaderBranchChange = handleSwitchWorkspaceBranch;
   const handlePushWorkspace = handlePushWorkspaceBranch;
+  const handleOpenTrackedWorkspaceTerminal = useCallback(async () => {
+    recordBehaviorEvent({
+      kind: "terminal_opened",
+      workspaceRoot: effectiveWorkspaceRoot,
+    });
+    await handleOpenWorkspaceTerminal();
+  }, [effectiveWorkspaceRoot, handleOpenWorkspaceTerminal, recordBehaviorEvent]);
   const handleChatSubmit = useCallback(
     async (message: PromptInputMessage) => {
       if (!canStartConversation) {
@@ -2226,15 +2477,112 @@ export default function Home() {
         files: message.files.map((file) => ({ ...file })),
       });
 
+      const behaviorHints = analyzeBehaviorHintsFromText(message.text);
+      if (behaviorHints.requestedDevServer) {
+        recordBehaviorEvent({
+          kind: "dev_server_requested",
+          workspaceRoot: effectiveWorkspaceRoot,
+        });
+      }
+      if (behaviorHints.requestedExplicitCompletion) {
+        recordBehaviorEvent({
+          kind: "explicit_completion_requested",
+          workspaceRoot: effectiveWorkspaceRoot,
+        });
+      }
+
       await handleSubmit(message);
     },
-    [canStartConversation, handleSubmit, model],
+    [
+      canStartConversation,
+      effectiveWorkspaceRoot,
+      handleSubmit,
+      model,
+      recordBehaviorEvent,
+      setModelDialogOpen,
+    ],
   );
 
   const handleSelectModel = useCallback((nextModel: string) => {
-    setModel(nextModel);
+    if (threadId) {
+      setThreadModel(threadId, nextModel);
+    } else {
+      setModel(nextModel);
+    }
     setModelDialogOpen(false);
-  }, []);
+    recordBehaviorEvent({
+      kind: "model_switched",
+      modelId: nextModel,
+      workspaceRoot: effectiveWorkspaceRoot,
+    });
+  }, [effectiveWorkspaceRoot, recordBehaviorEvent, setModel, setModelDialogOpen, setThreadModel, threadId]);
+
+  const handleSelectAvatarProfile = useCallback((nextProfileId: string) => {
+    setAvatarProfileId(nextProfileId);
+    recordBehaviorEvent({
+      kind: "avatar_switched",
+      avatarId: nextProfileId,
+      workspaceRoot: effectiveWorkspaceRoot,
+    });
+  }, [effectiveWorkspaceRoot, recordBehaviorEvent, setAvatarProfileId]);
+
+  const handleSaveAvatarProfile = useCallback(
+    async ({
+      draft,
+      file,
+    }: {
+      draft: Partial<AvatarProfile> & { name: string };
+      file?: File | null;
+    }) => {
+      let modelPath = draft.modelPath?.trim() ?? "";
+      let capabilities = draft.capabilities;
+
+      if (file) {
+        const formData = new FormData();
+        formData.set("file", file);
+        const response = await fetch("/api/avatar/upload-model", {
+          method: "POST",
+          body: formData,
+        });
+
+        const payload = (await response.json()) as {
+          error?: string;
+          modelPath?: string;
+          capabilities?: AvatarProfile["capabilities"];
+        };
+
+        if (!response.ok || !payload.modelPath) {
+          throw new Error(payload.error ?? "上传 3D 模型失败。");
+        }
+
+        modelPath = payload.modelPath;
+        capabilities = payload.capabilities;
+      }
+
+      const result = upsertAvatarProfileRecord(avatarProfiles, {
+        ...draft,
+        modelPath,
+        capabilities,
+      });
+
+      if (!result.saved) {
+        throw new Error("角色信息不完整，暂时没法保存。");
+      }
+
+      upsertAvatarProfile(result.saved);
+      recordBehaviorEvent({
+        kind: "avatar_profile_saved",
+        avatarId: result.saved.id,
+        workspaceRoot: effectiveWorkspaceRoot,
+      });
+      return result.saved;
+    },
+    [avatarProfiles, effectiveWorkspaceRoot, recordBehaviorEvent, upsertAvatarProfile],
+  );
+
+  const handleDeleteAvatarProfile = useCallback((profileId: string) => {
+    removeAvatarProfile(profileId);
+  }, [removeAvatarProfile]);
 
   const handleCreateBranch = useCallback(async () => {
     if (!isDesktopRuntime) return;
@@ -2255,6 +2603,26 @@ export default function Home() {
         onSelectThread={handleSelectThread}
         onDeleteThread={handleDeleteThread}
         onOpenWorkspace={handleChangeWorkspaceRoot}
+        modelOptions={models.map((entry) => ({
+          id: entry.id,
+          name: entry.name,
+          chef: entry.chef,
+        }))}
+        currentModelId={model}
+        onSelectModel={handleSelectModel}
+        avatarModelOptions={avatarProfiles.map((entry) => ({
+          id: entry.id,
+          name: entry.name,
+          description: entry.description,
+        }))}
+        avatarModelAssetOptions={getAvatarModelAssetOptions(avatarProfiles)}
+        currentAvatarModelId={selectedAvatarProfile?.id ?? null}
+        onSelectAvatarModel={handleSelectAvatarProfile}
+        avatarProfiles={avatarProfiles}
+        onSaveAvatarProfile={handleSaveAvatarProfile}
+        onDeleteAvatarProfile={handleDeleteAvatarProfile}
+        behaviorProfileSummary={userBehaviorProfileSummary}
+        onResetBehaviorProfile={resetUserBehaviorProfile}
         recentThreads={recentThreads}
         workspaceRoot={effectiveWorkspaceRoot}
       />
@@ -2316,7 +2684,7 @@ export default function Home() {
                   ) : items.length === 0 ? (
                     <></>
                   ) : (
-                    items.map((item, itemIndex) => {
+                    items.map((item) => {
                       if (item.type === "thinking") {
                         if (item.status === "done" && !item.content.trim()) {
                           return null;
@@ -2402,34 +2770,33 @@ export default function Home() {
                           action,
                           item.status,
                           visibleToolName,
+                          item.errorText,
                         );
                         const displayText = getToolDisplayText(
                           displayTitle,
                           visibleToolName,
                         );
                         const extraDetails = getToolExtraDetails(item);
-                        const resultText = getToolResultText(item);
                         const patchTool = isPatchToolItem(item);
-                        const hasLaterActivity = items
-                          .slice(itemIndex + 1)
-                          .some(
-                            (entry) =>
-                              entry.type === "tool" ||
-                              entry.type === "agent" ||
-                              entry.type === "message",
-                          );
                         const streamSettled =
                           status !== "submitted" && status !== "streaming";
                         const missingToolResult =
                           item.status === "pending" &&
-                          (streamSettled || hasLaterActivity);
+                          streamSettled;
+                        const missingToolHint = missingToolResult
+                          ? getToolMissingResultHint(item)
+                          : null;
+                        const shouldShowMissingToolResult =
+                          Boolean(missingToolHint);
                         const displayVerb = missingToolResult
                           ? patchTool
                             ? "未收到补丁结果"
                             : "未收到工具结果"
                           : verb;
                         const preview =
-                          item.status === "done" || patchTool
+                          item.status === "done" ||
+                          item.status === "error" ||
+                          patchTool
                             ? getToolStandalonePreview(item)
                             : null;
                         const normalizedToolName = visibleToolName
@@ -2441,18 +2808,9 @@ export default function Home() {
                               normalizedToolName === "cat" ||
                               normalizedToolName === "edit" ||
                               normalizedToolName === "write")) ||
+                            item.status === "error" ||
                             patchTool) &&
                           Boolean(preview);
-                        const showInlineResult =
-                          item.status === "done" &&
-                          Boolean(resultText) &&
-                          normalizedToolName !== "read" &&
-                          normalizedToolName !== "cat" &&
-                          normalizedToolName !== "list" &&
-                          normalizedToolName !== "glob" &&
-                          normalizedToolName !== "grep" &&
-                          !patchTool &&
-                          !previewEnabled;
                         return (
                           <div key={item.id}>
                             {previewEnabled && preview ? (
@@ -2462,35 +2820,50 @@ export default function Home() {
                               >
                                 <summary
                                   className={cn(
-                                    "app-tool-row list-none rounded-[11px] px-3 py-0.5 text-[12px] leading-5 text-foreground/82 hover:bg-transparent hover:border-transparent hover:shadow-none [&::-webkit-details-marker]:hidden",
+                                    "app-tool-row list-none rounded-[11px] px-3 py-0.5 text-[12px] leading-5 text-foreground/82 [&::-webkit-details-marker]:hidden",
                                     item.status === "error" &&
-                                      "text-destructive/90",
+                                      "text-rose-500 dark:text-rose-300",
                                     "cursor-pointer",
                                   )}
                                 >
                                   <div className="flex min-w-0 items-center gap-1.5">
-                                    <span className="text-muted-foreground/82">
+                                    <span
+                                      className={cn(
+                                        "text-muted-foreground/82",
+                                        item.status === "error" &&
+                                          "text-rose-400 dark:text-rose-300/75",
+                                      )}
+                                    >
                                       {displayVerb}
                                     </span>
-                                    <span className="font-mono text-foreground/88 truncate">
+                                    <span
+                                      className={cn(
+                                        "font-mono text-foreground/88 truncate",
+                                        item.status === "error" &&
+                                          "text-rose-500/90 dark:text-rose-200/90",
+                                      )}
+                                    >
                                       {displayText}
                                     </span>
                                     <Icon
                                       icon="lucide:chevron-right"
-                                      className="ml-0.5 size-3 shrink-0 text-muted-foreground/70 group-open:hidden"
+                                      className={cn(
+                                        "ml-0.5 size-3 shrink-0 text-muted-foreground/70 group-open:hidden",
+                                        item.status === "error" &&
+                                          "text-rose-400/70 dark:text-rose-300/60",
+                                      )}
                                       aria-hidden="true"
                                     />
                                     <Icon
                                       icon="lucide:chevron-down"
-                                      className="ml-0.5 hidden size-3 shrink-0 text-muted-foreground/70 group-open:inline"
+                                      className={cn(
+                                        "ml-0.5 hidden size-3 shrink-0 text-muted-foreground/70 group-open:inline",
+                                        item.status === "error" &&
+                                          "text-rose-400/70 dark:text-rose-300/60",
+                                      )}
                                       aria-hidden="true"
                                     />
                                   </div>
-                                  {item.errorText ? (
-                                    <div className="pt-0.5 text-destructive/90">
-                                      {item.errorText}
-                                    </div>
-                                  ) : null}
                                   {extraDetails.length > 0 ? (
                                     <div className="pt-0.5 text-[11px] leading-4 text-muted-foreground/74">
                                       {extraDetails.map((detail, index) => (
@@ -2503,9 +2876,12 @@ export default function Home() {
                                       ))}
                                     </div>
                                   ) : null}
-                                  {missingToolResult ? (
+                                  {shouldShowMissingToolResult ? (
                                     <div className="pt-1 text-[11px] leading-4 text-amber-700/80 dark:text-amber-300/80">
                                       流已结束，但没有收到这次工具调用的结构化结果事件。
+                                      <div className="pt-0.5 text-amber-800/90 dark:text-amber-200/90">
+                                        {missingToolHint}
+                                      </div>
                                     </div>
                                   ) : null}
                                 </summary>
@@ -2516,24 +2892,30 @@ export default function Home() {
                             ) : (
                               <div
                                 className={cn(
-                                  "app-tool-row rounded-[11px] px-3 py-1.5 text-[12px] leading-5 text-foreground/82 hover:bg-transparent hover:border-transparent hover:shadow-none",
+                                  "app-tool-row rounded-[11px] px-3 py-1.5 text-[12px] leading-5 text-foreground/82",
                                   item.status === "error" &&
-                                    "text-destructive/90",
+                                    "text-rose-500 dark:text-rose-300",
                                 )}
                               >
                                 <div className="min-w-0 truncate">
-                                  <span className="text-muted-foreground/82">
+                                  <span
+                                    className={cn(
+                                      "text-muted-foreground/82",
+                                      item.status === "error" &&
+                                        "text-rose-400 dark:text-rose-300/75",
+                                    )}
+                                  >
                                     {displayVerb}
                                   </span>{" "}
-                                  <span className="font-mono text-foreground/88">
+                                  <span
+                                    className={cn(
+                                      "font-mono text-foreground/88",
+                                      item.status === "error" &&
+                                        "text-rose-500/90 dark:text-rose-200/90",
+                                    )}
+                                  >
                                     {displayText}
                                   </span>
-                                  {item.errorText ? (
-                                    <span className="text-destructive/90">
-                                      {" "}
-                                      {item.errorText}
-                                    </span>
-                                  ) : null}
                                 </div>
                                 {extraDetails.length > 0 ? (
                                   <div className="mt-0.5 text-[11px] leading-4 text-muted-foreground/74">
@@ -2547,9 +2929,12 @@ export default function Home() {
                                     ))}
                                   </div>
                                 ) : null}
-                                {showInlineResult ? (
-                                  <div className="mt-1 text-[11px] leading-4 text-muted-foreground/74">
-                                    {resultText}
+                                {shouldShowMissingToolResult ? (
+                                  <div className="mt-1 text-[11px] leading-4 text-amber-700/80 dark:text-amber-300/80">
+                                    流已结束，但没有收到这次工具调用的结构化结果事件。
+                                    <div className="pt-0.5 text-amber-800/90 dark:text-amber-200/90">
+                                      {missingToolHint}
+                                    </div>
                                   </div>
                                 ) : null}
                               </div>
@@ -2676,7 +3061,7 @@ export default function Home() {
                       <PromptInputTools className="shrink-0 gap-2 max-sm:ml-auto">
                         <PromptInputActionMenu>
                           <PromptInputActionMenuTrigger
-                            disabled={!canStartConversation}
+                            disabled={!canStartConversation || isChatRunning}
                           />
                           <PromptInputActionMenuContent>
                             <PromptInputActionAddAttachments />
@@ -2685,7 +3070,7 @@ export default function Home() {
                       </PromptInputTools>
                       <PromptInputSubmit
                         className="app-control size-9 shrink-0 rounded-[10px] border-0 shadow-none"
-                        disabled={!canSubmitChat && status !== "streaming"}
+                        disabled={!canSubmitChat && !isChatRunning}
                         onStop={handleStop}
                         status={status}
                       />
@@ -2697,7 +3082,7 @@ export default function Home() {
                 <BottomTerminalPanel
                   workspaceRoot={effectiveWorkspaceRoot}
                   isDesktopRuntime={isDesktopRuntime}
-                  onOpenSystemTerminal={handleOpenWorkspaceTerminal}
+                  onOpenSystemTerminal={handleOpenTrackedWorkspaceTerminal}
                   expanded={terminalExpanded}
                   onExpandedChange={setTerminalExpanded}
                 />
@@ -2726,7 +3111,6 @@ export default function Home() {
           }}
         />
       </SidebarInset>
-      <AvatarCornerWidget directive={avatarDirective} />
     </SidebarProvider>
   );
 }

@@ -6,13 +6,16 @@ import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import type {
   AvatarAction,
+  AvatarBubbleTheme,
   AvatarDirective,
   AvatarLocomotion,
-  AvatarMoveTarget,
 } from "@/lib/avatar/types";
+import { inferClipGroupsFromAnimationCount } from "@/lib/avatar/models";
 
 type AvatarCornerWidgetProps = {
   directive: AvatarDirective;
+  dock?: "overlay" | "sidebar";
+  modelPath?: string;
 };
 
 type ClipMeta = {
@@ -22,36 +25,32 @@ type ClipMeta = {
 };
 
 const BASE_FACING_YAW = -Math.PI / 2;
-const WALK_RIGHT_YAW = 0;
-const WALK_LEFT_YAW = Math.PI;
-const AVATAR_WIDTH = 298;
-const AVATAR_HEIGHT = 350;
-const STAGE_BOTTOM = 18;
+const WALK_RIGHT_YAW = BASE_FACING_YAW + 0.22;
+const WALK_LEFT_YAW = BASE_FACING_YAW - 0.22;
+const AVATAR_WIDTH = 212;
+const AVATAR_HEIGHT = 268;
+const STAGE_BOTTOM = 0;
+const STAGE_SIDE_PADDING = 14;
+const STAGE_MIN_WIDTH = 360;
 const DEFAULT_IDLE_CLIP = 16;
+const INITIAL_DOCK_X = 8;
+const DRAG_THRESHOLD = 6;
 
-const CLIP_GROUPS: Record<string, number[]> = {
-  idle: [16, 19, 20, 18, 26],
-  walk: [3, 5, 8, 9, 10, 13, 18, 20, 26],
-  hop: [12, 18, 26, 10],
-  thinking: [6, 15, 17, 19, 22, 24, 25],
-  focus: [6, 17, 22, 24, 25],
-  explain: [1, 2, 6, 15, 17, 22],
-  greet: [13, 18, 20, 22],
-  nod: [18, 20, 26],
-  concern: [6, 19, 24, 25],
-  celebrate: [0, 4, 7, 11, 14, 21, 23],
-  dance: [0, 1, 2, 4, 7, 11, 14, 21, 23],
-};
+const getStageWidth = (viewportWidth: number) =>
+  Math.max(viewportWidth, STAGE_MIN_WIDTH);
 
-const STAGE_ANCHORS: Record<Exclude<AvatarMoveTarget, "wander">, number> = {
-  left: 0.035,
-  left_center: 0.18,
-  center: 0.42,
-  right_center: 0.64,
-  composer: 0.76,
-  tool_output: 0.88,
-  right: 0.965,
-};
+const getDockedLeftX = (
+  stageWidth: number,
+  avatarWidth: number,
+  stageSidePadding: number,
+) =>
+  Math.max(
+    stageSidePadding,
+    Math.min(
+      stageWidth - avatarWidth - stageSidePadding,
+      INITIAL_DOCK_X,
+    ),
+  );
 
 const getMeshBounds = (root: THREE.Object3D): THREE.Box3 => {
   const bounds = new THREE.Box3();
@@ -88,52 +87,42 @@ const getMeshBounds = (root: THREE.Object3D): THREE.Box3 => {
 const clampIndex = (index: number, length: number) =>
   Math.max(0, Math.min(length - 1, index));
 
-const getAnchorRatio = (moveTo: AvatarMoveTarget, token: number) => {
-  if (moveTo !== "wander") return STAGE_ANCHORS[moveTo];
-  const wanderPoints = [
-    STAGE_ANCHORS.left,
-    STAGE_ANCHORS.left_center,
-    STAGE_ANCHORS.center,
-    STAGE_ANCHORS.right_center,
-    STAGE_ANCHORS.composer,
-    STAGE_ANCHORS.right,
-  ];
-  return wanderPoints[token % wanderPoints.length];
-};
-
 const pickClipPool = (
   action: AvatarAction,
   locomotion: AvatarLocomotion,
+  clipGroups: Partial<Record<string, number[]>>,
 ): number[] => {
-  if (locomotion === "dance") return CLIP_GROUPS.dance;
-  if (locomotion === "walk") return CLIP_GROUPS.walk;
-  if (locomotion === "hop") return CLIP_GROUPS.hop;
-  if (action === "celebrate") return CLIP_GROUPS.celebrate;
-  if (action === "thinking") return CLIP_GROUPS.thinking;
-  if (action === "focus") return CLIP_GROUPS.focus;
-  if (action === "explain") return CLIP_GROUPS.explain;
-  if (action === "greet") return CLIP_GROUPS.greet;
-  if (action === "nod") return CLIP_GROUPS.nod;
-  if (action === "concern") return CLIP_GROUPS.concern;
-  return CLIP_GROUPS.idle;
+  if (locomotion === "dance") return clipGroups.dance ?? [];
+  if (locomotion === "walk") return clipGroups.walk ?? [];
+  if (locomotion === "hop") return clipGroups.hop ?? [];
+  if (action === "celebrate") return clipGroups.celebrate ?? [];
+  if (action === "thinking") return clipGroups.thinking ?? [];
+  if (action === "focus") return clipGroups.focus ?? [];
+  if (action === "explain") return clipGroups.explain ?? [];
+  if (action === "greet") return clipGroups.greet ?? [];
+  if (action === "nod") return clipGroups.nod ?? [];
+  if (action === "concern") return clipGroups.concern ?? [];
+  return clipGroups.idle ?? [];
 };
 
 const pickClipIndexForDirective = ({
   action,
   locomotion,
   clips,
+  clipGroups,
   poolCursorRef,
 }: {
   action: AvatarAction;
   locomotion: AvatarLocomotion;
   clips: ClipMeta[];
+  clipGroups: Partial<Record<string, number[]>>;
   poolCursorRef: { current: Record<string, number> };
 }) => {
   if (!clips.length) return -1;
 
   const poolKey =
     locomotion !== "idle" ? `locomotion:${locomotion}` : `action:${action}`;
-  const preferredPool = pickClipPool(action, locomotion).filter(
+  const preferredPool = pickClipPool(action, locomotion, clipGroups).filter(
     (index) => index >= 0 && index < clips.length,
   );
 
@@ -153,19 +142,65 @@ const pickClipIndexForDirective = ({
   return next;
 };
 
+const FALLBACK_BUBBLE_THEME_BY_EMOTION: Record<
+  AvatarDirective["emotion"],
+  Required<AvatarBubbleTheme>
+> = {
+  neutral: {
+    borderColor: "#dbe7ff",
+    textColor: "#1f2937",
+    backgroundFrom: "#fbfdff",
+    backgroundTo: "#edf4ff",
+    glowColor: "rgba(105, 156, 255, 0.2)",
+  },
+  warm: {
+    borderColor: "#fde6d5",
+    textColor: "#7c2d12",
+    backgroundFrom: "#fff8f0",
+    backgroundTo: "#ffeede",
+    glowColor: "rgba(251, 146, 60, 0.22)",
+  },
+  focused: {
+    borderColor: "#bfdbfe",
+    textColor: "#1e3a8a",
+    backgroundFrom: "#f5faff",
+    backgroundTo: "#e7f1ff",
+    glowColor: "rgba(59, 130, 246, 0.24)",
+  },
+  excited: {
+    borderColor: "#fbcfe8",
+    textColor: "#831843",
+    backgroundFrom: "#fff2fb",
+    backgroundTo: "#ffe5f5",
+    glowColor: "rgba(236, 72, 153, 0.26)",
+  },
+  concerned: {
+    borderColor: "#fcd34d",
+    textColor: "#451a03",
+    backgroundFrom: "#fff9e9",
+    backgroundTo: "#ffefcc",
+    glowColor: "rgba(245, 158, 11, 0.3)",
+  },
+};
+
 export function AvatarCornerWidget({
   directive,
+  dock = "overlay",
+  modelPath = "/models/baobao.glb",
 }: AvatarCornerWidgetProps) {
-  const initialX =
-    typeof window !== "undefined"
-      ? Math.max(
-          20,
-          Math.min(
-            window.innerWidth - AVATAR_WIDTH - 20,
-            window.innerWidth * STAGE_ANCHORS.right - AVATAR_WIDTH / 2,
-          ),
-        )
-      : 0;
+  const isSidebar = dock === "sidebar";
+  const avatarWidth = isSidebar ? 176 : AVATAR_WIDTH;
+  const avatarHeight = isSidebar ? 220 : AVATAR_HEIGHT;
+  const stageBottom = isSidebar ? 0 : STAGE_BOTTOM;
+  const stageSidePadding = isSidebar ? 10 : STAGE_SIDE_PADDING;
+  const containerRef = useRef<HTMLDivElement | null>(null);
+  const initialViewportWidth = 1440;
+  const initialStageWidth = isSidebar ? 272 : getStageWidth(initialViewportWidth);
+  const initialX = getDockedLeftX(
+    initialStageWidth,
+    avatarWidth,
+    stageSidePadding,
+  );
   const mountRef = useRef<HTMLDivElement | null>(null);
   const modelRef = useRef<THREE.Object3D | null>(null);
   const mixerRef = useRef<THREE.AnimationMixer | null>(null);
@@ -173,16 +208,24 @@ export function AvatarCornerWidget({
   const clipMetaRef = useRef<ClipMeta[]>([]);
   const activeClipIndexRef = useRef(-1);
   const poolCursorRef = useRef<Record<string, number>>({});
+  const clipGroupsRef = useRef<Partial<Record<string, number[]>>>({});
   const currentXRef = useRef(initialX);
   const targetXRef = useRef(initialX);
   const directiveRef = useRef(directive);
   const stageXRef = useRef(initialX);
-  const [failed, setFailed] = useState(false);
+  const dragStateRef = useRef<{
+    pointerId: number;
+    startClientX: number;
+    startClientY: number;
+    originX: number;
+    originBottom: number;
+    moved: boolean;
+  } | null>(null);
   const [stageX, setStageX] = useState(initialX);
-  const [viewportWidth, setViewportWidth] = useState(
-    typeof window !== "undefined" ? window.innerWidth : 1440,
-  );
+  const [stageWidth, setStageWidth] = useState(initialStageWidth);
   const [clearedDirectiveKey, setClearedDirectiveKey] = useState<string | null>(null);
+  const [manualTargetX, setManualTargetX] = useState<number | null>(null);
+  const [manualBottom, setManualBottom] = useState<number | null>(null);
 
   const directiveKey = useMemo(
     () =>
@@ -199,24 +242,10 @@ export function AvatarCornerWidget({
     [directive],
   );
 
-  const anchorRatio = useMemo(() => {
-    const seed = directiveKey
-      .split("")
-      .reduce((sum, char) => sum + char.charCodeAt(0), 0);
-    return getAnchorRatio(directive.moveTo, seed);
-  }, [directive.moveTo, directiveKey]);
-
-  const targetX = useMemo(
-    () =>
-      Math.max(
-        20,
-        Math.min(
-          viewportWidth - AVATAR_WIDTH - 20,
-          viewportWidth * anchorRatio - AVATAR_WIDTH / 2,
-        ),
-      ),
-    [anchorRatio, viewportWidth],
-  );
+  const targetX = useMemo(() => {
+    return manualTargetX ?? getDockedLeftX(stageWidth, avatarWidth, stageSidePadding);
+  }, [avatarWidth, manualTargetX, stageSidePadding, stageWidth]);
+  const effectiveBottom = manualBottom ?? stageBottom;
 
   const activeDirective = useMemo(() => {
     if (clearedDirectiveKey !== directiveKey) return directive;
@@ -250,11 +279,10 @@ export function AvatarCornerWidget({
   }, [directive.bubble, directiveKey]);
 
   const resolvedLocomotion = useMemo(() => {
-    const distance = Math.abs(targetX - stageX);
+    if (manualTargetX != null || manualBottom != null) return "idle";
     if (activeDirective.locomotion === "dance") return "dance";
-    if (distance > 18) return "walk";
     return "idle";
-  }, [activeDirective.locomotion, stageX, targetX]);
+  }, [activeDirective.locomotion, manualBottom, manualTargetX]);
 
   useEffect(() => {
     const actions = actionsRef.current;
@@ -265,6 +293,7 @@ export function AvatarCornerWidget({
       action: activeDirective.action,
       locomotion: resolvedLocomotion,
       clips,
+      clipGroups: clipGroupsRef.current,
       poolCursorRef,
     });
 
@@ -278,17 +307,24 @@ export function AvatarCornerWidget({
     activeClipIndexRef.current = nextIndex;
   }, [activeDirective.action, resolvedLocomotion]);
 
-  const bubbleToneClass = useMemo(() => {
-    if (activeDirective.priority === "high") {
-      return "border-amber-300/60 bg-[rgba(255,250,233,0.96)] text-amber-950";
-    }
-    if (activeDirective.emotion === "excited") {
-      return "border-pink-200/60 bg-[rgba(255,246,252,0.96)] text-slate-900";
-    }
-    return "border-white/60 bg-[rgba(255,255,255,0.94)] text-slate-900";
-  }, [activeDirective.emotion, activeDirective.priority]);
-
   const bubbleVisible = activeDirective.bubble.trim().length > 0;
+  const bubbleTheme = useMemo(() => {
+    const fallback = FALLBACK_BUBBLE_THEME_BY_EMOTION[activeDirective.emotion];
+    return {
+      borderColor:
+        activeDirective.bubbleTheme?.borderColor ??
+        (activeDirective.priority === "high" ? "#f59e0b" : fallback.borderColor),
+      textColor: activeDirective.bubbleTheme?.textColor ?? fallback.textColor,
+      backgroundFrom:
+        activeDirective.bubbleTheme?.backgroundFrom ?? fallback.backgroundFrom,
+      backgroundTo: activeDirective.bubbleTheme?.backgroundTo ?? fallback.backgroundTo,
+      glowColor:
+        activeDirective.bubbleTheme?.glowColor ??
+        (activeDirective.priority === "high"
+          ? "rgba(245, 158, 11, 0.34)"
+          : fallback.glowColor),
+    };
+  }, [activeDirective.bubbleTheme, activeDirective.emotion, activeDirective.priority]);
 
   useEffect(() => {
     const mount = mountRef.current;
@@ -305,7 +341,7 @@ export function AvatarCornerWidget({
     renderer.setClearColor(0x000000, 0);
     renderer.outputColorSpace = THREE.SRGBColorSpace;
     renderer.toneMapping = THREE.ACESFilmicToneMapping;
-    renderer.toneMappingExposure = 1.56;
+    renderer.toneMappingExposure = 1.08;
     mount.appendChild(renderer.domElement);
 
     const controls = new OrbitControls(camera, renderer.domElement);
@@ -315,22 +351,22 @@ export function AvatarCornerWidget({
     controls.enableRotate = false;
     controls.target.set(0, 1.0, 0);
 
-    scene.add(new THREE.AmbientLight(0xffffff, 2.05));
-    scene.add(new THREE.HemisphereLight(0xf7fbff, 0xc8d8f2, 1.95));
+    scene.add(new THREE.AmbientLight(0xffffff, 1.05));
+    scene.add(new THREE.HemisphereLight(0xf7fbff, 0xc8d8f2, 0.9));
 
-    const key = new THREE.DirectionalLight(0xffffff, 2.1);
+    const key = new THREE.DirectionalLight(0xffffff, 1.0);
     key.position.set(2.8, 4.8, 3.8);
     scene.add(key);
 
-    const fill = new THREE.DirectionalLight(0xeaf1ff, 1.55);
+    const fill = new THREE.DirectionalLight(0xeaf1ff, 0.6);
     fill.position.set(-2.6, 2.4, 2.2);
     scene.add(fill);
 
-    const rim = new THREE.DirectionalLight(0xfff1fa, 0.95);
+    const rim = new THREE.DirectionalLight(0xfff1fa, 0.35);
     rim.position.set(-2.8, 2.6, -2.2);
     scene.add(rim);
 
-    const front = new THREE.PointLight(0xffffff, 1.45, 14);
+    const front = new THREE.PointLight(0xffffff, 0.35, 14);
     front.position.set(0, 1.4, 2.3);
     scene.add(front);
 
@@ -354,18 +390,18 @@ export function AvatarCornerWidget({
 
     const loader = new GLTFLoader();
     loader.load(
-      "/models/baobao.glb",
+      modelPath,
       (gltf) => {
         const model = gltf.scene ?? gltf.scenes?.[0];
         if (!model) {
-          setFailed(true);
+          console.warn("[AvatarCornerWidget] GLB loaded without a scene.");
           return;
         }
 
         const box = getMeshBounds(model);
         const size = box.getSize(new THREE.Vector3());
         const maxAxis = Math.max(size.x, size.y, size.z);
-        const scale = maxAxis > 0 ? 1.7 / maxAxis : 1;
+        const scale = maxAxis > 0 ? (isSidebar ? 1.52 : 1.28) / maxAxis : 1;
         model.scale.setScalar(scale);
 
         const scaledBox = getMeshBounds(model);
@@ -391,11 +427,11 @@ export function AvatarCornerWidget({
               material.map.colorSpace = THREE.SRGBColorSpace;
               material.map.needsUpdate = true;
             }
-            if ("aoMapIntensity" in material) material.aoMapIntensity = 0.45;
+            if ("aoMapIntensity" in material) material.aoMapIntensity = 0.75;
             if ("emissiveIntensity" in material) {
               material.emissiveIntensity = Math.max(
-                0.22,
-                material.emissiveIntensity ?? 0.22,
+                0.06,
+                material.emissiveIntensity ?? 0.06,
               );
             }
             material.needsUpdate = true;
@@ -408,6 +444,9 @@ export function AvatarCornerWidget({
 
         if (gltf.animations.length) {
           const mixer = new THREE.AnimationMixer(model);
+          clipGroupsRef.current = inferClipGroupsFromAnimationCount(
+            gltf.animations.length,
+          );
           clipMetaRef.current = gltf.animations.map((clip, index) => ({
             index,
             name: clip.name || `clip-${index + 1}`,
@@ -427,14 +466,16 @@ export function AvatarCornerWidget({
         } else {
           actionsRef.current = [];
           clipMetaRef.current = [];
+          clipGroupsRef.current = {};
         }
 
-        setFailed(meshCount === 0);
+        if (meshCount === 0) {
+          console.warn("[AvatarCornerWidget] GLB loaded without mesh content.");
+        }
       },
       undefined,
       (error) => {
         console.error("[AvatarCornerWidget] GLB load failed:", error);
-        setFailed(true);
       },
     );
 
@@ -449,7 +490,7 @@ export function AvatarCornerWidget({
 
       const targetX = targetXRef.current;
       const currentX = currentXRef.current;
-        const nextX = THREE.MathUtils.lerp(currentX, targetX, 0.016);
+      const nextX = THREE.MathUtils.lerp(currentX, targetX, 0.016);
       currentXRef.current = nextX;
       if (Math.abs(nextX - stageXRef.current) > 0.5) {
         stageXRef.current = nextX;
@@ -473,13 +514,11 @@ export function AvatarCornerWidget({
         const targetYaw = moving ? walkYaw : idleYaw;
         const bobIntensity = moving
           ? active.locomotion === "hop"
-            ? 0.03
-            : 0.018
-          : active.action === "celebrate"
-            ? 0.022
-            : active.action === "thinking" || active.action === "focus"
-              ? 0.01
-              : 0.005;
+            ? 0.025
+            : 0.014
+          : active.action === "thinking" || active.action === "focus"
+            ? 0.008
+            : 0.003;
         const bobSpeed = moving
           ? active.locomotion === "hop"
             ? 8.5
@@ -494,13 +533,11 @@ export function AvatarCornerWidget({
         modelRef.current.rotation.y = THREE.MathUtils.lerp(
           modelRef.current.rotation.y,
           targetYaw,
-          moving ? 0.08 : 0.06,
+          moving ? 0.05 : 0.06,
         );
 
         if (active.action === "thinking") {
           modelRef.current.rotation.z = Math.sin(elapsed * 1.8) * 0.03;
-        } else if (active.action === "celebrate" || active.locomotion === "dance") {
-          modelRef.current.rotation.z = Math.sin(elapsed * 5.5) * 0.065;
         } else if (moving) {
           modelRef.current.rotation.z = THREE.MathUtils.lerp(
             modelRef.current.rotation.z,
@@ -518,24 +555,39 @@ export function AvatarCornerWidget({
 
     animate();
 
-    const onResize = () => {
-      if (!mountRef.current) return;
-      const width = mountRef.current.clientWidth;
-      const height = mountRef.current.clientHeight;
+      const onResize = () => {
+        if (!mountRef.current) return;
+        const width = mountRef.current.clientWidth;
+        const height = mountRef.current.clientHeight;
       camera.aspect = width / height;
-      camera.updateProjectionMatrix();
-      renderer.setSize(width, height);
-      setViewportWidth(window.innerWidth);
-    };
+        camera.updateProjectionMatrix();
+        renderer.setSize(width, height);
+        if (isSidebar) {
+          const sidebarWidth = containerRef.current?.clientWidth ?? width;
+          setStageWidth(Math.max(sidebarWidth, avatarWidth + stageSidePadding * 2));
+        } else {
+          const nextViewportWidth = window.innerWidth;
+          setStageWidth(getStageWidth(nextViewportWidth));
+        }
+      };
 
-    window.addEventListener("resize", onResize);
+      window.addEventListener("resize", onResize);
+      let resizeObserver: ResizeObserver | null = null;
+      if (isSidebar && containerRef.current && typeof ResizeObserver !== "undefined") {
+        resizeObserver = new ResizeObserver(() => {
+          onResize();
+        });
+        resizeObserver.observe(containerRef.current);
+      }
 
     return () => {
       cancelAnimationFrame(rafId);
       window.removeEventListener("resize", onResize);
+      resizeObserver?.disconnect();
       mixerRef.current?.stopAllAction();
       actionsRef.current = [];
       clipMetaRef.current = [];
+      clipGroupsRef.current = {};
       controls.dispose();
       modelRef.current = null;
       renderer.dispose();
@@ -543,30 +595,143 @@ export function AvatarCornerWidget({
         mount.removeChild(renderer.domElement);
       }
     };
-  }, [failed]);
+  }, [avatarWidth, isSidebar, modelPath, stageSidePadding]);
 
-  return (
-    <div className="pointer-events-none fixed inset-x-0 bottom-0 z-[160] h-[400px]">
+  const handlePointerDown = (event: React.PointerEvent<HTMLDivElement>) => {
+    if (isSidebar) return;
+    const originBottom = manualBottom ?? stageBottom;
+    dragStateRef.current = {
+      pointerId: event.pointerId,
+      startClientX: event.clientX,
+      startClientY: event.clientY,
+      originX: currentXRef.current,
+      originBottom,
+      moved: false,
+    };
+    event.currentTarget.setPointerCapture(event.pointerId);
+  };
+
+  const handlePointerMove = (event: React.PointerEvent<HTMLDivElement>) => {
+    if (isSidebar) return;
+    const drag = dragStateRef.current;
+    if (!drag || drag.pointerId !== event.pointerId) return;
+
+    const deltaX = event.clientX - drag.startClientX;
+    const deltaY = event.clientY - drag.startClientY;
+    if (!drag.moved && Math.hypot(deltaX, deltaY) >= DRAG_THRESHOLD) {
+      drag.moved = true;
+    }
+
+    const nextX = Math.max(
+      stageSidePadding,
+      Math.min(
+        stageWidth - avatarWidth - stageSidePadding,
+        drag.originX + deltaX,
+      ),
+    );
+    const viewportHeight =
+      containerRef.current?.clientHeight ?? window.innerHeight ?? 900;
+    const nextBottom = Math.max(
+      0,
+      Math.min(
+        Math.max(0, viewportHeight - avatarHeight - 12),
+        drag.originBottom - deltaY,
+      ),
+    );
+
+    setManualTargetX(nextX);
+    setManualBottom(nextBottom);
+    currentXRef.current = nextX;
+    stageXRef.current = nextX;
+    setStageX(nextX);
+    targetXRef.current = nextX;
+  };
+
+  const handlePointerUp = (event: React.PointerEvent<HTMLDivElement>) => {
+    if (isSidebar) return;
+    const drag = dragStateRef.current;
+    if (!drag || drag.pointerId !== event.pointerId) return;
+    event.currentTarget.releasePointerCapture(event.pointerId);
+    dragStateRef.current = null;
+  };
+
+  const avatarNode = (
+    <>
       <div
         className="absolute"
         style={{
           left: stageX,
-          bottom: STAGE_BOTTOM,
-          width: AVATAR_WIDTH,
-          height: AVATAR_HEIGHT,
+          bottom: effectiveBottom,
+          width: avatarWidth,
+          height: avatarHeight,
         }}
       >
         {bubbleVisible ? (
           <div
-            className={`absolute -top-1 left-1/2 z-30 max-w-[320px] -translate-x-1/2 rounded-2xl border px-3 py-2 text-[12px] leading-5 shadow-lg backdrop-blur-sm ${bubbleToneClass}`}
+        className="absolute -top-2 left-1/2 z-30 w-max max-w-[340px] -translate-x-1/2 overflow-hidden rounded-[22px] border px-3.5 py-2.5 text-[12px] leading-5 shadow-[0_12px_36px_rgba(15,23,42,0.12)] backdrop-blur-md"
+            style={{
+              borderColor: bubbleTheme.borderColor,
+              color: bubbleTheme.textColor,
+              backgroundImage: `linear-gradient(118deg, ${bubbleTheme.backgroundFrom}, ${bubbleTheme.backgroundTo})`,
+              boxShadow: `0 8px 30px ${bubbleTheme.glowColor}`,
+            }}
           >
+            <div
+              className="pointer-events-none absolute inset-0 opacity-60"
+              style={{
+                background:
+                  "linear-gradient(125deg, transparent 10%, rgba(255,255,255,0.35) 42%, transparent 74%)",
+                backgroundSize: "210% 210%",
+                animation: "avatarBubbleShimmer 6.8s ease-in-out infinite",
+              }}
+            />
             {activeDirective.bubble.trim()}
           </div>
         ) : null}
-        <div className="relative h-full w-full overflow-hidden bg-transparent">
+        <div
+          className="pointer-events-auto relative h-full w-full cursor-pointer overflow-visible bg-transparent"
+          onPointerDown={handlePointerDown}
+          onPointerMove={handlePointerMove}
+          onPointerUp={handlePointerUp}
+          onPointerCancel={handlePointerUp}
+          role="button"
+          aria-label="拖动角色"
+          title="拖动可以换位置"
+        >
           <div ref={mountRef} className="h-full w-full" />
         </div>
       </div>
+    </>
+  );
+
+  return (
+    <div
+      ref={containerRef}
+      suppressHydrationWarning
+      className={
+        isSidebar
+          ? "pointer-events-none relative h-[236px] w-full overflow-visible bg-transparent"
+          : "pointer-events-none fixed inset-0 z-[160] overflow-visible"
+      }
+      style={isSidebar ? undefined : { height: "100vh" }}
+    >
+      {avatarNode}
+      <style jsx>{`
+        @keyframes avatarBubbleShimmer {
+          0% {
+            transform: translate3d(-28%, 0, 0);
+            filter: hue-rotate(0deg);
+          }
+          50% {
+            transform: translate3d(12%, 0, 0);
+            filter: hue-rotate(14deg);
+          }
+          100% {
+            transform: translate3d(-28%, 0, 0);
+            filter: hue-rotate(0deg);
+          }
+        }
+      `}</style>
     </div>
   );
 }

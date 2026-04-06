@@ -11,7 +11,7 @@ import {
   type PreviewLog,
   type StreamPayload,
 } from "@/lib/stream-event-bus";
-import type { ThreadRecord } from "@/lib/thread-session";
+import type { ThreadRuntimeState } from "@/hooks/use-thread-session";
 
 export type QueuedSubmission = {
   id: string;
@@ -54,17 +54,20 @@ type UseAgentStreamOptions = {
   model: string;
   selectedAgent: string;
   selectedModelName?: string;
+  onGuideUsed?: (text: string) => void;
   threadId: string;
   workspaceRoot: string | null;
-  items: ChatItem[];
-  setItems: React.Dispatch<React.SetStateAction<ChatItem[]>>;
-  setRecentThreads: React.Dispatch<React.SetStateAction<ThreadRecord[]>>;
-  setPreviewUrl: (value: string | null) => void;
-  setPreviewLogs: React.Dispatch<React.SetStateAction<PreviewLog[]>>;
-  setPlan: (value: SerializablePlan | null) => void;
-  summarizeThreadTitle: (value?: string | null) => string;
-  summarizeWorkspaceRoot: (value: string | null | undefined) => string;
-  mergeRecentThreads: (nextRecord: ThreadRecord, current: ThreadRecord[]) => ThreadRecord[];
+  setItems: (
+    updater: ChatItem[] | ((previous: ChatItem[]) => ChatItem[]),
+    targetThreadId?: string,
+  ) => void;
+  setPreviewUrl: (value: string | null, targetThreadId?: string) => void;
+  setPreviewLogs: (
+    updater: PreviewLog[] | ((previous: PreviewLog[]) => PreviewLog[]),
+    targetThreadId?: string,
+  ) => void;
+  setPlan: (value: SerializablePlan | null, targetThreadId?: string) => void;
+  getThreadRuntimeState: (threadId: string) => ThreadRuntimeState;
   createId: () => string;
   parseSseEvent: (raw: string) => { event?: string; data: string } | null;
   prepareAttachmentForModel: (file: FileUIPart) => Promise<{
@@ -80,75 +83,159 @@ export function useAgentStream({
   model,
   selectedAgent,
   selectedModelName,
+  onGuideUsed,
   threadId,
   workspaceRoot,
-  items,
   setItems,
-  setRecentThreads,
   setPreviewUrl,
   setPreviewLogs,
   setPlan,
-  summarizeThreadTitle,
-  summarizeWorkspaceRoot,
-  mergeRecentThreads,
+  getThreadRuntimeState,
   createId,
   parseSseEvent,
   prepareAttachmentForModel,
 }: UseAgentStreamOptions) {
-  const [status, setStatus] = useState<"submitted" | "streaming" | "ready" | "error">("ready");
-  const [error, setError] = useState<string | null>(null);
-  const [queuedSubmissions, setQueuedSubmissions] = useState<QueuedSubmission[]>([]);
-  const [guideState, setGuideState] = useState<GuideState>("idle");
-  const [guideText, setGuideText] = useState<string | null>(null);
-
-  const abortRef = useRef<AbortController | null>(null);
-  const assistantIdRef = useRef<string | null>(null);
-  const [, setStreamingMessageId] = useState<string | null>(null);
-  const itemsRef = useRef<ChatItem[]>(items);
-  const postToolPendingRef = useRef(false);
-  const dequeuingSubmissionRef = useRef(false);
-
-  itemsRef.current = items;
-
-  const streamBus = useMemo(
-    () =>
-      createStreamEventBus({
-        setItems,
-        setError,
-        setStatus,
-        setPreviewUrl,
-        setStreamingMessageId,
-        assistantIdRef,
-        itemsRef: itemsRef as MutableRefObject<ChatItem[]>,
-        postToolPendingRef,
-        createId,
-        appendPreviewLog: (log) =>
-          setPreviewLogs((prev) => [...prev.slice(-200), log]),
-        getModelId: () => model,
-        setPlan,
-      }),
-    [createId, model, setItems, setPlan, setPreviewLogs, setPreviewUrl],
+  const [statusByThread, setStatusByThread] = useState<
+    Record<string, "submitted" | "streaming" | "ready" | "error">
+  >({});
+  const [errorByThread, setErrorByThread] = useState<Record<string, string | null>>(
+    {},
   );
+  const [queuedSubmissionsByThread, setQueuedSubmissionsByThread] = useState<
+    Record<string, QueuedSubmission[]>
+  >({});
+  const [guideStateByThread, setGuideStateByThread] = useState<
+    Record<string, GuideState>
+  >({});
+  const [guideTextByThread, setGuideTextByThread] = useState<
+    Record<string, string | null>
+  >({});
+
+  const abortRef = useRef<Record<string, AbortController | null>>({});
+  const assistantIdRef = useRef<Record<string, string | null>>({});
+  const dequeuingSubmissionRef = useRef<Record<string, boolean>>({});
+  const streamingMessageIdRef = useRef<Record<string, string | null>>({});
+
+  const activeStatus =
+    (threadId && statusByThread[threadId]) || "ready";
+  const activeError = (threadId && errorByThread[threadId]) || null;
+  const activeQueuedSubmissions = useMemo(
+    () => (threadId && queuedSubmissionsByThread[threadId]) || [],
+    [queuedSubmissionsByThread, threadId],
+  );
+  const activeGuideState =
+    (threadId && guideStateByThread[threadId]) || "idle";
+  const activeGuideText = (threadId && guideTextByThread[threadId]) || null;
+
+  const setThreadStatus = useCallback((
+    targetThreadId: string,
+    nextStatus: "submitted" | "streaming" | "ready" | "error",
+  ) => {
+    if (!targetThreadId) return;
+    setStatusByThread((previous) =>
+      previous[targetThreadId] === nextStatus
+        ? previous
+        : {
+            ...previous,
+            [targetThreadId]: nextStatus,
+          },
+    );
+  }, []);
+
+  const setThreadError = useCallback((targetThreadId: string, value: string | null) => {
+    if (!targetThreadId) return;
+    setErrorByThread((previous) =>
+      previous[targetThreadId] === value
+        ? previous
+        : {
+            ...previous,
+            [targetThreadId]: value,
+          },
+    );
+  }, []);
+
+  const createScopedStreamBus = useCallback((targetThreadId: string, targetModel: string) => {
+    const scopedAssistantIdRef = {
+      get current() {
+        return assistantIdRef.current[targetThreadId] ?? null;
+      },
+      set current(value: string | null) {
+        assistantIdRef.current[targetThreadId] = value;
+      },
+    } as MutableRefObject<string | null>;
+    const scopedItemsRef = {
+      get current() {
+        return getThreadRuntimeState(targetThreadId).items;
+      },
+      set current(_value: ChatItem[]) {
+        // no-op
+      },
+    } as MutableRefObject<ChatItem[]>;
+    const scopedPostToolPendingRef = {
+      current: false,
+    };
+
+    return createStreamEventBus({
+      setItems: (updater) => setItems(updater, targetThreadId),
+      setError: (value) => setThreadError(targetThreadId, value),
+      setStatus: (value) => setThreadStatus(targetThreadId, value),
+      setPreviewUrl: (value) => setPreviewUrl(value, targetThreadId),
+      setStreamingMessageId: (value) => {
+        streamingMessageIdRef.current[targetThreadId] = value;
+      },
+      assistantIdRef: scopedAssistantIdRef,
+      itemsRef: scopedItemsRef,
+      postToolPendingRef: scopedPostToolPendingRef,
+      createId,
+      appendPreviewLog: (log) =>
+        setPreviewLogs(
+          (previous) => [...previous.slice(-200), log],
+          targetThreadId,
+        ),
+      getModelId: () => targetModel,
+      setPlan: (value) => setPlan(value, targetThreadId),
+    });
+  }, [
+    createId,
+    getThreadRuntimeState,
+    setItems,
+    setPlan,
+    setPreviewLogs,
+    setPreviewUrl,
+    setThreadError,
+    setThreadStatus,
+  ]);
 
   const processSubmission = useCallback(async (
     message: PromptInputMessage,
-    options?: { mode?: SubmissionMode },
+    options?: { mode?: SubmissionMode; targetThreadId?: string; targetWorkspaceRoot?: string | null; targetModel?: string },
   ) => {
     const text = message.text?.trim();
     const attachments = message.files ?? [];
     if (!text && attachments.length === 0) return;
     const mode = options?.mode ?? "default";
     const isGuide = mode === "guide";
+    const targetThreadId =
+      options?.targetThreadId ??
+      threadId ??
+      (typeof ("id" in (params ?? {}) ? (params as { id?: string | string[] }).id : undefined) ===
+      "string"
+        ? (params as { id?: string }).id
+        : undefined);
+
+    if (!targetThreadId) return;
+
+    const targetModel = options?.targetModel ?? model;
+    const targetWorkspaceRoot =
+      options?.targetWorkspaceRoot ?? getThreadRuntimeState(targetThreadId).workspaceRoot ?? workspaceRoot;
 
     if (!isGuide) {
-      setPlan(null);
-      setPreviewUrl(null);
+      setPlan(null, targetThreadId);
+      setPreviewUrl(null, targetThreadId);
     }
-    setStatus("submitted");
-    setError(null);
+    setThreadStatus(targetThreadId, "submitted");
+    setThreadError(targetThreadId, null);
 
-    const threadTitleInput =
-      text || attachments.find((file) => file.filename)?.filename || "Image request";
     const userImages: NonNullable<ChatItem["images"]> = [];
 
     const userMessage: ChatItem = {
@@ -161,7 +248,7 @@ export function useAgentStream({
     };
 
     const assistantId = createId();
-    assistantIdRef.current = assistantId;
+    assistantIdRef.current[targetThreadId] = assistantId;
 
     const assistantMessage: ChatItem = {
       id: assistantId,
@@ -169,7 +256,7 @@ export function useAgentStream({
       role: "assistant",
       content: "",
       images: [],
-      modelId: model,
+      modelId: targetModel,
     };
 
     const optimisticThinking: ChatItem = {
@@ -180,12 +267,12 @@ export function useAgentStream({
       status: "pending",
     };
 
-    setItems((prev) => [...prev, userMessage, assistantMessage, optimisticThinking]);
+    setItems((previous) => [...previous, userMessage, assistantMessage, optimisticThinking], targetThreadId);
 
     const controller = new AbortController();
-    abortRef.current = controller;
-    setStreamingMessageId(assistantId);
-    setStatus("submitted");
+    abortRef.current[targetThreadId] = controller;
+    streamingMessageIdRef.current[targetThreadId] = assistantId;
+    const streamBus = createScopedStreamBus(targetThreadId, targetModel);
 
     try {
       const preparedAttachments = attachments.length
@@ -194,11 +281,6 @@ export function useAgentStream({
       userMessage.images = preparedAttachments
         .map((file) => file.previewImage ?? null)
         .filter((image): image is NonNullable<typeof image> => Boolean(image));
-
-      const rawId = "id" in (params ?? {}) ? (params as { id?: string | string[] }).id : undefined;
-      const routeId = Array.isArray(rawId) ? rawId[0] : rawId;
-      const effectiveThreadId =
-        threadId || (typeof routeId === "string" ? routeId : undefined);
 
       const content: ModelContentPart[] = [
         ...(text ? [{ type: "text" as const, text }] : []),
@@ -232,10 +314,10 @@ export function useAgentStream({
                 ],
               }
             : { message: text }),
-          threadId: effectiveThreadId,
-          model,
+          threadId: targetThreadId,
+          model: targetModel,
           requestContext: {
-            workspaceRoot,
+            workspaceRoot: targetWorkspaceRoot,
             ...(isGuide
               ? {
                   guideMode: "steer",
@@ -248,11 +330,11 @@ export function useAgentStream({
       });
 
       if (!response.ok || !response.body) {
-        const text = await response.text();
-        throw new Error(text || "Mastra stream failed");
+        const responseText = await response.text();
+        throw new Error(responseText || "Mastra stream failed");
       }
 
-      setStatus("streaming");
+      setThreadStatus(targetThreadId, "streaming");
       const reader = response.body.getReader();
       const decoder = new TextDecoder();
       let buffer = "";
@@ -279,48 +361,63 @@ export function useAgentStream({
             data.type === "stream.event" &&
             data.eventName === "guide.applied"
           ) {
-            setGuideState("applied");
-            setGuideText(typeof data.text === "string" ? data.text : null);
+            setGuideStateByThread((previous) => ({
+              ...previous,
+              [targetThreadId]: "applied",
+            }));
+            setGuideTextByThread((previous) => ({
+              ...previous,
+              [targetThreadId]: typeof data.text === "string" ? data.text : null,
+            }));
           }
           streamBus.handlePayload(data);
         }
       }
 
-      setStatus("ready");
+      streamBus.finalize();
+      setThreadStatus(targetThreadId, "ready");
     } catch (err) {
       const rawMessage = err instanceof Error ? err.message : "未知错误";
       const message = rawMessage.includes("No endpoints found that support image input")
-        ? `当前模型 ${selectedModelName ?? model} 返回了图片输入不支持错误。`
+        ? `当前模型 ${selectedModelName ?? targetModel} 返回了图片输入不支持错误。`
         : rawMessage;
       const aborted =
         controller.signal.aborted ||
         (err instanceof DOMException && err.name === "AbortError") ||
         /aborted|aborterror|signal is aborted/i.test(rawMessage);
       if (aborted) {
-        setError(null);
-        setStatus("ready");
+        streamBus.finalize({
+          errorText:
+            "Tool execution was interrupted because the model response was aborted (tripwire).",
+        });
+        setThreadError(targetThreadId, null);
+        setThreadStatus(targetThreadId, "ready");
       } else {
-        setError(message);
-        setStatus("error");
+        streamBus.finalize({ errorText: message });
+        setThreadError(targetThreadId, message);
+        setThreadStatus(targetThreadId, "error");
       }
     } finally {
-      const finalAssistantId = assistantIdRef.current ?? assistantId;
+      const finalAssistantId = assistantIdRef.current[targetThreadId] ?? assistantId;
       if (finalAssistantId) {
-        setItems((prev) =>
-          prev.map((item) =>
-            item.type === "thinking" && item.messageId === finalAssistantId
-              ? { ...item, status: "done" }
-              : item,
-          ),
+        setItems(
+          (previous) =>
+            previous.map((item) =>
+              item.type === "thinking" && item.messageId === finalAssistantId
+                ? { ...item, status: "done" }
+                : item,
+            ),
+          targetThreadId,
         );
       }
-      abortRef.current = null;
-      assistantIdRef.current = null;
-      postToolPendingRef.current = false;
-      setStreamingMessageId(null);
+      abortRef.current[targetThreadId] = null;
+      assistantIdRef.current[targetThreadId] = null;
+      streamingMessageIdRef.current[targetThreadId] = null;
     }
   }, [
     createId,
+    createScopedStreamBus,
+    getThreadRuntimeState,
     model,
     params,
     parseSseEvent,
@@ -330,65 +427,78 @@ export function useAgentStream({
     setItems,
     setPlan,
     setPreviewUrl,
-    streamBus,
+    setThreadError,
+    setThreadStatus,
     threadId,
     workspaceRoot,
   ]);
 
   const handleSubmit = useCallback(async (message: PromptInputMessage) => {
-    await (async () => {
+    const targetThreadId = threadId;
+    if (!targetThreadId) return;
     const text = message.text?.trim();
     const attachments = message.files ?? [];
     if (!text && attachments.length === 0) return;
 
-    if (status === "submitted" || status === "streaming") {
-      setQueuedSubmissions((previous) => [
+    if (activeStatus === "submitted" || activeStatus === "streaming") {
+      setQueuedSubmissionsByThread((previous) => ({
         ...previous,
-        {
-          id: createId(),
-          text: text ?? "",
-          files: attachments,
-        },
-      ]);
+        [targetThreadId]: [
+          ...(previous[targetThreadId] ?? []),
+          {
+            id: createId(),
+            text: text ?? "",
+            files: attachments,
+          },
+        ],
+      }));
       return;
     }
 
-    await processSubmission(message);
-    })();
-  }, [createId, processSubmission, status]);
+    await processSubmission(message, { targetThreadId });
+  }, [activeStatus, createId, processSubmission, threadId]);
 
   const handleGuideSubmit = useCallback(async (message: PromptInputMessage) => {
+    const targetThreadId = threadId;
+    if (!targetThreadId) return;
     const text = message.text?.trim();
     const attachments = message.files ?? [];
     if (!text && attachments.length === 0) return;
-    const hasRunningSubmission = status === "submitted" || status === "streaming";
+    const hasRunningSubmission =
+      activeStatus === "submitted" || activeStatus === "streaming";
 
     if (attachments.length > 0) {
-      setGuideState("error");
-      setGuideText("引导暂不支持直接附加文件，请先用 @ 文件引用或发送纯文本引导。");
+      setGuideStateByThread((previous) => ({
+        ...previous,
+        [targetThreadId]: "error",
+      }));
+      setGuideTextByThread((previous) => ({
+        ...previous,
+        [targetThreadId]:
+          "引导暂不支持直接附加文件，请先用 @ 文件引用或发送纯文本引导。",
+      }));
       return;
     }
 
     if (hasRunningSubmission) {
-      const rawId = "id" in (params ?? {}) ? (params as { id?: string | string[] }).id : undefined;
-      const routeId = Array.isArray(rawId) ? rawId[0] : rawId;
-      const effectiveThreadId =
-        threadId || (typeof routeId === "string" ? routeId : undefined);
-      if (!effectiveThreadId) {
-        setGuideState("error");
-        setGuideText("当前没有可用线程，无法挂起引导。");
-        return;
+      if (text) {
+        onGuideUsed?.(text);
       }
-
-      setGuideState("queued");
-      setGuideText(text ?? null);
+      setGuideStateByThread((previous) => ({
+        ...previous,
+        [targetThreadId]: "queued",
+      }));
+      setGuideTextByThread((previous) => ({
+        ...previous,
+        [targetThreadId]: text ?? null,
+      }));
 
       try {
         const response = await fetch(`/api/agents/${selectedAgent}/steer`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
-            threadId: effectiveThreadId,
+            threadId: targetThreadId,
             text,
           }),
         });
@@ -399,73 +509,104 @@ export function useAgentStream({
         }
         return;
       } catch (err) {
-        setGuideState("error");
-        setGuideText(err instanceof Error ? err.message : "Failed to queue guide");
+        setGuideStateByThread((previous) => ({
+          ...previous,
+          [targetThreadId]: "error",
+        }));
+        setGuideTextByThread((previous) => ({
+          ...previous,
+          [targetThreadId]:
+            err instanceof Error ? err.message : "Failed to queue guide",
+        }));
         return;
       }
     }
 
-    await processSubmission(message, { mode: "guide" });
-    setGuideState("idle");
-    setGuideText(null);
-  }, [params, processSubmission, selectedAgent, status, threadId]);
+    if (text) {
+      onGuideUsed?.(text);
+    }
+    await processSubmission(message, { mode: "guide", targetThreadId });
+    setGuideStateByThread((previous) => ({
+      ...previous,
+      [targetThreadId]: "idle",
+    }));
+    setGuideTextByThread((previous) => ({
+      ...previous,
+      [targetThreadId]: null,
+    }));
+  }, [activeStatus, onGuideUsed, processSubmission, selectedAgent, threadId]);
 
   const promoteQueuedSubmissionToGuide = useCallback(async () => {
-    const nextSubmission = queuedSubmissions[0];
+    if (!threadId) return;
+    const nextSubmission = activeQueuedSubmissions[0];
     if (!nextSubmission) return;
 
-    setQueuedSubmissions((previous) => previous.slice(1));
+    setQueuedSubmissionsByThread((previous) => ({
+      ...previous,
+      [threadId]: (previous[threadId] ?? []).slice(1),
+    }));
     await handleGuideSubmit({
       text: nextSubmission.text,
       files: nextSubmission.files,
     });
-  }, [handleGuideSubmit, queuedSubmissions]);
+  }, [activeQueuedSubmissions, handleGuideSubmit, threadId]);
 
   const drainSubmissionQueue = useCallback(async () => {
-    if (status !== "ready") return;
-    if (dequeuingSubmissionRef.current) return;
-    const nextSubmission = queuedSubmissions[0];
+    if (!threadId) return;
+    if (activeStatus !== "ready") return;
+    if (dequeuingSubmissionRef.current[threadId]) return;
+    const nextSubmission = activeQueuedSubmissions[0];
     if (!nextSubmission) return;
 
-    dequeuingSubmissionRef.current = true;
-    setQueuedSubmissions((previous) => previous.slice(1));
+    dequeuingSubmissionRef.current[threadId] = true;
+    setQueuedSubmissionsByThread((previous) => ({
+      ...previous,
+      [threadId]: (previous[threadId] ?? []).slice(1),
+    }));
 
-    await processSubmission({
-      text: nextSubmission.text,
-      files: nextSubmission.files,
-    }).finally(() => {
-      dequeuingSubmissionRef.current = false;
+    await processSubmission(
+      {
+        text: nextSubmission.text,
+        files: nextSubmission.files,
+      },
+      { targetThreadId: threadId },
+    ).finally(() => {
+      dequeuingSubmissionRef.current[threadId] = false;
     });
-  }, [processSubmission, queuedSubmissions, status]);
+  }, [activeQueuedSubmissions, activeStatus, processSubmission, threadId]);
 
   const handleStop = useCallback(() => {
-    const currentAssistantId = assistantIdRef.current;
+    if (!threadId) return;
+    const currentAssistantId = assistantIdRef.current[threadId];
     if (currentAssistantId) {
-      setItems((prev) =>
-        prev.map((item) =>
-          item.type === "thinking" && item.messageId === currentAssistantId
-            ? { ...item, status: "done" }
-            : item,
-        ),
+      setItems(
+        (previous) =>
+          previous.map((item) =>
+            item.type === "thinking" && item.messageId === currentAssistantId
+              ? { ...item, status: "done" }
+              : item,
+          ),
+        threadId,
       );
     }
-    abortRef.current?.abort();
-    abortRef.current = null;
-    setStatus("ready");
-    postToolPendingRef.current = false;
-    setStreamingMessageId(null);
-  }, [setItems]);
+    abortRef.current[threadId]?.abort();
+    abortRef.current[threadId] = null;
+    setThreadStatus(threadId, "ready");
+    streamingMessageIdRef.current[threadId] = null;
+  }, [setItems, setThreadStatus, threadId]);
 
-  const queuedSubmissionPreview = queuedSubmissions[0] ?? null;
+  const queuedSubmissionPreview = activeQueuedSubmissions[0] ?? null;
 
   return {
-    status,
-    setStatus,
-    error,
-    setError,
-    guideState,
-    guideText,
-    queuedSubmissions,
+    status: activeStatus,
+    setStatus: (value: "submitted" | "streaming" | "ready" | "error") =>
+      threadId ? setThreadStatus(threadId, value) : undefined,
+    error: activeError,
+    setError: (value: string | null) =>
+      threadId ? setThreadError(threadId, value) : undefined,
+    guideState: activeGuideState,
+    guideText: activeGuideText,
+    queuedSubmissions: activeQueuedSubmissions,
     queuedSubmissionPreview,
     handleSubmit,
     handleGuideSubmit,

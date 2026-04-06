@@ -43,6 +43,15 @@ export class ContinuationProcessor implements Processor<"continuation-context"> 
     systemMessages,
     requestContext,
   }: ProcessInputArgs): Promise<ProcessInputResult> {
+    const inputMode = getRequestContextString(requestContext, "inputMode");
+    const currentTurnIncludesImages = getRequestContextString(
+      requestContext,
+      "currentTurnIncludesImages",
+    );
+    if (inputMode === "image-analysis" || currentTurnIncludesImages === "1") {
+      return { messages, systemMessages };
+    }
+
     const threadId = getRequestContextString(requestContext, "threadId");
     if (!threadId) return { messages, systemMessages };
 

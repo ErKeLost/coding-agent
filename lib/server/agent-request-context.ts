@@ -144,11 +144,19 @@ export async function buildAgentRequestContext(
   }
 
   const currentMessageText = extractCurrentInputText(normalizedMessages ?? payload.message);
-  if (currentTurnIncludesImageInput(normalizedMessages)) {
+  const hasCurrentTurnImageInput = currentTurnIncludesImageInput(normalizedMessages);
+  if (hasCurrentTurnImageInput) {
     requestContext.set("currentTurnIncludesImages", "1");
   }
-  requestContext.set("inputMode", deriveAgentInputMode(normalizedMessages ?? payload.message));
-  const continuationContext = inferContinuationContext(threadSession, currentMessageText);
+  const inputMode = deriveAgentInputMode(normalizedMessages ?? payload.message);
+  requestContext.set("inputMode", inputMode);
+  if (inputMode === "image-analysis") {
+    requestContext.set("imageAnalysisFreshAttachment", "1");
+  }
+  const continuationContext =
+    inputMode === "image-analysis"
+      ? { isContinuation: false } as const
+      : inferContinuationContext(threadSession, currentMessageText);
   if (continuationContext.isContinuation) {
     requestContext.set("continuationMode", "resume");
     if (continuationContext.lastUserGoal) {

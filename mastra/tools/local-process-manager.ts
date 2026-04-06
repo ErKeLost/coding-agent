@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
-import { ChildProcess, spawn } from 'node:child_process';
-import { appendFileSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { ChildProcess, spawn, spawnSync } from 'node:child_process';
+import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import type { LocalProcessRecord } from '@/lib/local-process';
@@ -46,10 +46,107 @@ function ensureLogDir() {
 
 function createLogFile(kind: ManagedProcessKind) {
   const logDir = ensureLogDir();
-  const logPath = path.join(logDir, `${kind}-${Date.now()}.log`);
+  const logPath = path.join(logDir, `${kind}-${Date.now()}-${randomUUID()}.log`);
   writeFileSync(logPath, '');
   return logPath;
 }
+
+function resolveShellExecutable() {
+  if (process.platform === 'win32') {
+    return process.env.ComSpec || 'cmd.exe';
+  }
+
+  const preferred = process.env.SHELL;
+  if (preferred && existsSync(preferred)) {
+    return preferred;
+  }
+
+  const candidates = ['/bin/sh', '/usr/bin/sh', '/bin/bash', '/usr/bin/bash'];
+  for (const candidate of candidates) {
+    if (existsSync(candidate)) return candidate;
+  }
+
+  return null;
+}
+
+const commandNeedsShell = (command: string) =>
+  /[|&;<>()`$\\\n]/.test(command);
+
+const splitCommand = (command: string) => {
+  const tokens: string[] = [];
+  let current = '';
+  let quote: "'" | '"' | null = null;
+  let escaped = false;
+
+  for (let i = 0; i < command.length; i += 1) {
+    const char = command[i];
+
+    if (escaped) {
+      current += char;
+      escaped = false;
+      continue;
+    }
+
+    if (char === '\\') {
+      escaped = true;
+      continue;
+    }
+
+    if (quote) {
+      if (char === quote) {
+        quote = null;
+      } else {
+        current += char;
+      }
+      continue;
+    }
+
+    if (char === "'" || char === '"') {
+      quote = char;
+      continue;
+    }
+
+    if (/\s/.test(char)) {
+      if (current) {
+        tokens.push(current);
+        current = '';
+      }
+      continue;
+    }
+
+    current += char;
+  }
+
+  if (escaped || quote) return null;
+  if (current) tokens.push(current);
+  return tokens;
+};
+
+const shellSeemsExecutable = (shell: string) => {
+  if (process.platform === 'win32') return true;
+  const probe = spawnSync(shell, ['-c', 'exit 0'], {
+    stdio: 'ignore',
+    timeout: 1500,
+  });
+  return !probe.error;
+};
+
+const maybeRewriteExplicitShellWrapper = (command: string) => {
+  const wrapperMatch =
+    command.match(/^(\S+)\s+-lc\s+(['"])([\s\S]*)\2$/) ??
+    command.match(/^(\S+)\s+-c\s+(['"])([\s\S]*)\2$/);
+  if (!wrapperMatch) return command;
+
+  const shellPath = wrapperMatch[1];
+  const inner = wrapperMatch[3]?.trim();
+  if (!inner) return command;
+
+  if (existsSync(shellPath) && shellSeemsExecutable(shellPath)) {
+    return command;
+  }
+
+  return inner;
+};
 
 function tailText(text: string, lines: number) {
   return text.split(/\r?\n/).slice(-lines).join('\n').trim();
@@ -75,22 +172,83 @@ export function startManagedProcess({
   detached = false,
   metadata,
 }: StartManagedProcessOptions) {
+  const commandToRun = maybeRewriteExplicitShellWrapper(command);
   const processId = `${kind}-${randomUUID()}`;
   const logPath = createLogFile(kind);
-
-  const child = spawn(command, {
-    cwd,
-    detached,
-    env: { ...process.env },
-    shell: true,
-    stdio: ['pipe', 'pipe', 'pipe'],
-  });
-
   const now = new Date().toISOString();
+  const directTokens = !commandNeedsShell(commandToRun)
+    ? splitCommand(commandToRun)
+    : null;
+  const canRunDirect = Array.isArray(directTokens) && directTokens.length > 0;
+  const shellExecutable = canRunDirect ? null : resolveShellExecutable();
+
+  if (!canRunDirect && (!shellExecutable || !shellSeemsExecutable(shellExecutable))) {
+    const output = '[process error] No shell executable available for command execution\n';
+    appendFileSync(logPath, output);
+    const record: LocalProcessRecord = {
+      id: processId,
+      kind,
+      command: commandToRun,
+      workingDirectory: cwd,
+      ...metadata,
+      logPath,
+      status: 'failed',
+      exitCode: 1,
+      createdAt: now,
+      updatedAt: now,
+    };
+    upsertProcessRecord(record);
+    return {
+      processId,
+      pid: undefined,
+      logPath,
+    };
+  }
+
+  let child: ChildProcess;
+  try {
+    child = canRunDirect
+      ? spawn(directTokens[0], directTokens.slice(1), {
+          cwd,
+          detached,
+          env: { ...process.env },
+          shell: false,
+          stdio: ['pipe', 'pipe', 'pipe'],
+        })
+      : spawn(commandToRun, {
+          cwd,
+          detached,
+          env: { ...process.env },
+          shell: shellExecutable ?? undefined,
+          stdio: ['pipe', 'pipe', 'pipe'],
+        });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    appendFileSync(logPath, `[process error] ${message}\n`);
+    const record: LocalProcessRecord = {
+      id: processId,
+      kind,
+      command: commandToRun,
+      workingDirectory: cwd,
+      ...metadata,
+      logPath,
+      status: 'failed',
+      exitCode: 1,
+      createdAt: now,
+      updatedAt: now,
+    };
+    upsertProcessRecord(record);
+    return {
+      processId,
+      pid: undefined,
+      logPath,
+    };
+  }
+
   const record: LocalProcessRecord = {
     id: processId,
     kind,
-    command,
+    command: commandToRun,
     workingDirectory: cwd,
     ...metadata,
     pid: child.pid ?? undefined,
@@ -261,6 +419,7 @@ export async function readManagedProcessLogs(
   return {
     processId: record.id,
     status: resolveManagedProcessRecord(processId)?.status ?? record.status,
+    exitCode: resolveManagedProcessRecord(processId)?.exitCode ?? record.exitCode,
     logPath: record.logPath,
     output,
   };
@@ -307,22 +466,28 @@ export async function writeManagedProcessStdin(
     throw new Error(`Process is not attached to the current app session: ${processId}`);
   }
 
-  const stdin = state.child.stdin;
-  if (!stdin || stdin.destroyed || state.record.status !== 'running') {
+  if (state.record.status !== 'running') {
     throw new Error(`stdin is not available for process ${processId}`);
   }
-
+  const trimmedInput = input ?? '';
   const initialVersion = state.outputVersion;
 
-  await new Promise<void>((resolve, reject) => {
-    stdin.write(input, (error) => {
-      if (error) {
-        reject(error);
-        return;
-      }
-      resolve();
+  if (trimmedInput.length > 0) {
+    const stdin = state.child.stdin;
+    if (!stdin || stdin.destroyed) {
+      throw new Error(`stdin is not available for process ${processId}`);
+    }
+
+    await new Promise<void>((resolve, reject) => {
+      stdin.write(trimmedInput, (error) => {
+        if (error) {
+          reject(error);
+          return;
+        }
+        resolve();
+      });
     });
-  });
+  }
 
   if (options?.waitForMs && options.waitForMs > 0) {
     await waitForOutputVersion(state, initialVersion, options.waitForMs);

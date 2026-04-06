@@ -1,0 +1,14 @@
+Write input to a managed local process session and optionally wait for new output.
+
+Use this for interactive long-running commands that are still attached to the current app session.
+
+Helpful for:
+- sending input to an interactive CLI
+- polling for more output by sending an empty string
+- continuing a running command after the initial launch
+
+Notes:
+- `sessionId` is preferred
+- `processId` is accepted for backward compatibility
+- `input` may be empty when you only want to wait for fresh output
+- `waitForMs` lets the tool wait briefly for new output before returning

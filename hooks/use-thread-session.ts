@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { AppRouterInstance } from "next/dist/shared/lib/app-router-context.shared-runtime";
 import type { ReadonlyURLSearchParams } from "next/navigation";
 import type { ChatItem, PreviewLog } from "@/lib/stream-event-bus";
@@ -21,6 +21,20 @@ type SerializablePlan = {
   }>;
 };
 
+export type ThreadRuntimeState = {
+  items: ChatItem[];
+  previewUrl: string | null;
+  previewLogs: PreviewLog[];
+  plan: SerializablePlan | null;
+  workspaceRoot: string | null;
+  hydrated: boolean;
+  loading: boolean;
+};
+
+type ThreadRuntimeUpdater =
+  | Partial<ThreadRuntimeState>
+  | ((previous: ThreadRuntimeState) => ThreadRuntimeState);
+
 type UseThreadSessionOptions = {
   params: ReadonlyURLSearchParams | Record<string, string | string[] | undefined> | null | undefined;
   router: AppRouterInstance;
@@ -33,6 +47,42 @@ type UseThreadSessionOptions = {
   isPlanRecord: (value: unknown) => value is SerializablePlan;
   onClearDesktopState?: () => void;
 };
+
+const EMPTY_RUNTIME: ThreadRuntimeState = {
+  items: [],
+  previewUrl: null,
+  previewLogs: [],
+  plan: null,
+  workspaceRoot: null,
+  hydrated: false,
+  loading: false,
+};
+
+const getRuntime = (
+  state: Record<string, ThreadRuntimeState>,
+  threadId: string,
+) => state[threadId] ?? EMPTY_RUNTIME;
+
+const arePreviewLogsEqual = (a: PreviewLog[], b: PreviewLog[]) =>
+  a.length === b.length &&
+  a.every(
+    (entry, index) =>
+      entry.level === b[index]?.level &&
+      entry.message === b[index]?.message &&
+      entry.timestamp.getTime() === b[index]?.timestamp.getTime(),
+  );
+
+const areRuntimeStatesEqual = (
+  previous: ThreadRuntimeState,
+  next: ThreadRuntimeState,
+) =>
+  previous.workspaceRoot === next.workspaceRoot &&
+  previous.previewUrl === next.previewUrl &&
+  previous.hydrated === next.hydrated &&
+  previous.loading === next.loading &&
+  previous.plan === next.plan &&
+  previous.items === next.items &&
+  previous.previewLogs === next.previewLogs;
 
 export function useThreadSession({
   params,
@@ -48,34 +98,141 @@ export function useThreadSession({
 }: UseThreadSessionOptions) {
   const [threadId, setThreadId] = useState<string>("");
   const [recentThreads, setRecentThreads] = useState<ThreadRecord[]>([]);
-  const [workspaceRoot, setWorkspaceRoot] = useState<string | null>(null);
-  const [hydratedThreadId, setHydratedThreadId] = useState<string | null>(null);
   const [pendingNewThreadId, setPendingNewThreadId] = useState<string | null>(null);
-  const [items, setItems] = useState<ChatItem[]>([]);
-  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
-  const [previewLogs, setPreviewLogs] = useState<PreviewLog[]>([]);
-  const [plan, setPlan] = useState<SerializablePlan | null>(null);
+  const [threadRuntimeById, setThreadRuntimeById] = useState<
+    Record<string, ThreadRuntimeState>
+  >({});
+
+  const runtimeRef = useRef(threadRuntimeById);
+  const recentThreadsRef = useRef(recentThreads);
+  const persistTimersRef = useRef<Record<string, number>>({});
+
+  useEffect(() => {
+    runtimeRef.current = threadRuntimeById;
+  }, [threadRuntimeById]);
+
+  useEffect(() => {
+    recentThreadsRef.current = recentThreads;
+  }, [recentThreads]);
 
   const activeThreadRecord = useMemo(
     () => recentThreads.find((entry) => entry.id === threadId),
     [recentThreads, threadId],
   );
 
-  const isHydratingThread =
-    Boolean(threadId) &&
-    hydratedThreadId !== threadId &&
-    pendingNewThreadId !== threadId;
+  const activeRuntime = useMemo(
+    () => getRuntime(threadRuntimeById, threadId),
+    [threadRuntimeById, threadId],
+  );
+
+  const isHydratingThread = Boolean(threadId) && activeRuntime.loading;
 
   const mergeRecentThreads = useCallback((nextRecord: ThreadRecord, current: ThreadRecord[]) => {
     return [nextRecord, ...current.filter((entry) => entry.id !== nextRecord.id)].slice(0, 16);
   }, []);
 
-  const resetConversationState = useCallback(() => {
-    setItems([]);
-    setPlan(null);
-    setPreviewUrl(null);
-    setPreviewLogs([]);
-  }, []);
+  const schedulePersistThread = useCallback((targetThreadId: string) => {
+    if (!targetThreadId || typeof window === "undefined") return;
+
+    const existing = persistTimersRef.current[targetThreadId];
+    if (existing) {
+      window.clearTimeout(existing);
+    }
+
+    persistTimersRef.current[targetThreadId] = window.setTimeout(() => {
+      delete persistTimersRef.current[targetThreadId];
+
+      const runtime = runtimeRef.current[targetThreadId];
+      if (!runtime?.hydrated) return;
+
+      const threadRecord = recentThreadsRef.current.find(
+        (entry) => entry.id === targetThreadId,
+      );
+      const shouldPersistThread =
+        Boolean(threadRecord) ||
+        Boolean(runtime.workspaceRoot) ||
+        runtime.items.length > 0 ||
+        Boolean(runtime.plan) ||
+        Boolean(runtime.previewUrl) ||
+        runtime.previewLogs.length > 0;
+
+      if (!shouldPersistThread) return;
+
+      const latestUserMessage = [...runtime.items]
+        .reverse()
+        .find((item) => item.type === "message" && item.role === "user");
+      const title = latestUserMessage?.content
+        ? summarizeThreadTitle(latestUserMessage.content)
+        : threadRecord?.title ??
+          (targetThreadId.startsWith("thread-")
+            ? targetThreadId.slice(7)
+            : targetThreadId);
+
+      void fetch(`/api/threads/${targetThreadId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          title,
+          subtitle: summarizeWorkspaceRoot(runtime.workspaceRoot),
+          state: {
+            workspaceRoot: runtime.workspaceRoot,
+            previewUrl: runtime.previewUrl,
+            items: serializeItemsForThread(runtime.items),
+            plan: runtime.plan,
+            previewLogs: runtime.previewLogs.map((entry) => ({
+              ...entry,
+              timestamp: entry.timestamp.toISOString(),
+            })),
+          },
+        }),
+      }).catch(() => {
+        // Ignore persistence failures.
+      });
+    }, 700);
+  }, [serializeItemsForThread, summarizeThreadTitle, summarizeWorkspaceRoot]);
+
+  const updateThreadRuntime = useCallback((
+    targetThreadId: string,
+    updater: ThreadRuntimeUpdater,
+    options?: { persist?: boolean },
+  ) => {
+    if (!targetThreadId) return;
+
+    setThreadRuntimeById((previous) => {
+      const current = getRuntime(previous, targetThreadId);
+      const next =
+        typeof updater === "function"
+          ? updater(current)
+          : { ...current, ...updater };
+      if (areRuntimeStatesEqual(current, next)) {
+        return previous;
+      }
+      return {
+        ...previous,
+        [targetThreadId]: next,
+      };
+    });
+
+    if (options?.persist !== false) {
+      schedulePersistThread(targetThreadId);
+    }
+  }, [schedulePersistThread]);
+
+  const resetConversationState = useCallback((targetThreadId?: string) => {
+    const effectiveThreadId = targetThreadId ?? threadId;
+    if (!effectiveThreadId) return;
+    updateThreadRuntime(
+      effectiveThreadId,
+      (previous) => ({
+        ...previous,
+        items: [],
+        plan: null,
+        previewUrl: null,
+        previewLogs: [],
+      }),
+      { persist: false },
+    );
+  }, [threadId, updateThreadRuntime]);
 
   const loadThreadList = useCallback(async () => {
     try {
@@ -103,6 +260,17 @@ export function useThreadSession({
     const routeId = Array.isArray(rawId) ? rawId[0] : rawId;
     if (routeId && typeof routeId === "string") {
       setThreadId(routeId);
+      setThreadRuntimeById((previous) =>
+        previous[routeId]
+          ? previous
+          : {
+              ...previous,
+              [routeId]: {
+                ...EMPTY_RUNTIME,
+                loading: true,
+              },
+            },
+      );
     }
   }, [params]);
 
@@ -147,33 +315,51 @@ export function useThreadSession({
   useEffect(() => {
     if (!threadId) {
       logWorkspaceDebug("hydrateThread:no-thread", {});
-      setHydratedThreadId(null);
-      setWorkspaceRoot(null);
       return;
     }
 
     if (pendingNewThreadId === threadId) {
       logWorkspaceDebug("hydrateThread:pending-new-thread", {
         threadId,
-        workspaceRoot,
+        workspaceRoot: getRuntime(runtimeRef.current, threadId).workspaceRoot,
       });
-      resetConversationState();
-      setHydratedThreadId(threadId);
+      updateThreadRuntime(
+        threadId,
+        (previous) => ({
+          ...previous,
+          hydrated: true,
+          loading: false,
+        }),
+        { persist: false },
+      );
       setPendingNewThreadId(null);
       return;
     }
 
     let cancelled = false;
-    setHydratedThreadId(null);
+    updateThreadRuntime(
+      threadId,
+      (previous) => ({
+        ...previous,
+        loading: true,
+      }),
+      { persist: false },
+    );
 
     const loadThreadSession = async () => {
       try {
         const response = await fetch(`/api/threads/${threadId}`, { cache: "no-store" });
         if (cancelled) return;
         if (response.status === 404) {
-          resetConversationState();
-          setWorkspaceRoot(null);
-          setHydratedThreadId(threadId);
+          updateThreadRuntime(
+            threadId,
+            {
+              ...EMPTY_RUNTIME,
+              hydrated: true,
+              loading: false,
+            },
+            { persist: false },
+          );
           return;
         }
         if (!response.ok) {
@@ -201,6 +387,16 @@ export function useThreadSession({
           typeof state?.workspaceRoot === "string" && state.workspaceRoot.trim()
             ? state.workspaceRoot.trim()
             : null;
+        const nextItems = Array.isArray(state?.items) ? (state.items as ChatItem[]) : [];
+        const nextPlan = isPlanRecord(state?.plan) ? state.plan : null;
+        const nextPreviewUrl =
+          typeof state?.previewUrl === "string" ? state.previewUrl : null;
+        const nextPreviewLogs = Array.isArray(state?.previewLogs)
+          ? state.previewLogs.map((entry) => ({
+              ...entry,
+              timestamp: new Date(entry.timestamp),
+            }))
+          : [];
 
         logWorkspaceDebug("hydrateThread:loaded", {
           threadId,
@@ -208,7 +404,6 @@ export function useThreadSession({
           title: payload.thread?.title ?? null,
         });
 
-        setWorkspaceRoot(hydratedWorkspaceRoot);
         setRecentThreads((prev) =>
           prev.map((entry) =>
             entry.id === threadId
@@ -220,21 +415,35 @@ export function useThreadSession({
               : entry,
           ),
         );
-        setItems(Array.isArray(state?.items) ? (state.items as ChatItem[]) : []);
-        setPlan(isPlanRecord(state?.plan) ? state.plan : null);
-        setPreviewUrl(typeof state?.previewUrl === "string" ? state.previewUrl : null);
-        setPreviewLogs(
-          Array.isArray(state?.previewLogs)
-            ? state.previewLogs.map((entry) => ({
-                ...entry,
-                timestamp: new Date(entry.timestamp),
-              }))
-            : [],
+        updateThreadRuntime(
+          threadId,
+          (previous) => ({
+            items:
+              previous.items.length > nextItems.length ? previous.items : nextItems,
+            plan: previous.plan ?? nextPlan,
+            previewUrl: previous.previewUrl ?? nextPreviewUrl,
+            previewLogs:
+              previous.previewLogs.length > 0 &&
+              previous.previewLogs.length >= nextPreviewLogs.length
+                ? previous.previewLogs
+                : nextPreviewLogs,
+            workspaceRoot: previous.workspaceRoot ?? hydratedWorkspaceRoot,
+            hydrated: true,
+            loading: false,
+          }),
+          { persist: false },
         );
-        setHydratedThreadId(threadId);
       } catch {
         if (cancelled) return;
-        setHydratedThreadId(threadId);
+        updateThreadRuntime(
+          threadId,
+          (previous) => ({
+            ...previous,
+            hydrated: true,
+            loading: false,
+          }),
+          { persist: false },
+        );
       }
     };
 
@@ -247,72 +456,9 @@ export function useThreadSession({
     isPlanRecord,
     logWorkspaceDebug,
     pendingNewThreadId,
-    resetConversationState,
     summarizeWorkspaceRoot,
     threadId,
-    workspaceRoot,
-  ]);
-
-  useEffect(() => {
-    if (!threadId || hydratedThreadId !== threadId) return;
-
-    const shouldPersistThread =
-      Boolean(activeThreadRecord) ||
-      Boolean(workspaceRoot) ||
-      items.length > 0 ||
-      Boolean(plan) ||
-      Boolean(previewUrl) ||
-      previewLogs.length > 0;
-
-    if (!shouldPersistThread) return;
-
-    const timeout = window.setTimeout(() => {
-      const latestUserMessage = [...items]
-        .reverse()
-        .find((item) => item.type === "message" && item.role === "user");
-      const title = latestUserMessage?.content
-        ? summarizeThreadTitle(latestUserMessage.content)
-        : activeThreadRecord?.title ??
-          (threadId.startsWith("thread-") ? threadId.slice(7) : threadId);
-
-      void fetch(`/api/threads/${threadId}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          title,
-          subtitle: summarizeWorkspaceRoot(workspaceRoot),
-          state: {
-            workspaceRoot,
-            previewUrl,
-            items: serializeItemsForThread(items),
-            plan,
-            previewLogs: previewLogs.map((entry) => ({
-              ...entry,
-              timestamp: entry.timestamp.toISOString(),
-            })),
-          },
-        }),
-      }).catch(() => {
-        // Ignore persistence failures.
-      });
-    }, 1200);
-
-    return () => {
-      window.clearTimeout(timeout);
-    };
-  }, [
-    activeThreadRecord?.title,
-    activeThreadRecord,
-    hydratedThreadId,
-    items,
-    plan,
-    previewLogs,
-    previewUrl,
-    serializeItemsForThread,
-    summarizeThreadTitle,
-    summarizeWorkspaceRoot,
-    threadId,
-    workspaceRoot,
+    updateThreadRuntime,
   ]);
 
   const handleNewThread = useCallback((initialWorkspaceRoot?: string | null) => {
@@ -338,10 +484,17 @@ export function useThreadSession({
     setRecentThreads((prev) => mergeRecentThreads(nextRecord, prev));
     setPendingNewThreadId(nextId);
     setThreadId(nextId);
-    setHydratedThreadId(nextId);
-    setWorkspaceRoot(normalizedWorkspaceRoot);
+    updateThreadRuntime(
+      nextId,
+      {
+        ...EMPTY_RUNTIME,
+        workspaceRoot: normalizedWorkspaceRoot,
+        hydrated: true,
+        loading: false,
+      },
+      { persist: false },
+    );
     router.push(`/${nextId}`);
-    resetConversationState();
 
     void fetch(`/api/threads/${nextId}`, {
       method: "PATCH",
@@ -364,18 +517,24 @@ export function useThreadSession({
     createThreadId,
     logWorkspaceDebug,
     mergeRecentThreads,
-    resetConversationState,
     router,
     summarizeWorkspaceRoot,
+    updateThreadRuntime,
   ]);
 
   const handleSelectThread = useCallback((nextThreadId: string) => {
     if (!nextThreadId || nextThreadId === threadId) return;
     setThreadId(nextThreadId);
-    setHydratedThreadId(null);
-    resetConversationState();
+    updateThreadRuntime(
+      nextThreadId,
+      (previous) => ({
+        ...previous,
+        loading: !previous.hydrated,
+      }),
+      { persist: false },
+    );
     router.push(`/${nextThreadId}`);
-  }, [resetConversationState, router, threadId]);
+  }, [router, threadId, updateThreadRuntime]);
 
   const handleDeleteThread = useCallback(async (targetThreadId: string) => {
     if (!targetThreadId) return;
@@ -397,6 +556,17 @@ export function useThreadSession({
 
     const remainingThreads = recentThreads.filter((entry) => entry.id !== targetThreadId);
     setRecentThreads(remainingThreads);
+    setThreadRuntimeById((previous) => {
+      const next = { ...previous };
+      delete next[targetThreadId];
+      return next;
+    });
+
+    const pendingTimer = persistTimersRef.current[targetThreadId];
+    if (pendingTimer) {
+      window.clearTimeout(pendingTimer);
+      delete persistTimersRef.current[targetThreadId];
+    }
 
     if (threadId !== targetThreadId) {
       return;
@@ -409,35 +579,119 @@ export function useThreadSession({
     }
 
     setThreadId("");
-    setHydratedThreadId(null);
-    resetConversationState();
-    setWorkspaceRoot(null);
     onClearDesktopState?.();
   }, [
     handleSelectThread,
     onClearDesktopState,
     recentThreads,
-    resetConversationState,
     setError,
     threadId,
   ]);
 
+  const setItems = useCallback(
+    (
+      updater:
+        | ChatItem[]
+        | ((previous: ChatItem[]) => ChatItem[]),
+      targetThreadId?: string,
+    ) => {
+      const effectiveThreadId = targetThreadId ?? threadId;
+      if (!effectiveThreadId) return;
+      updateThreadRuntime(effectiveThreadId, (previous) => ({
+        ...previous,
+        items:
+          typeof updater === "function"
+            ? updater(previous.items)
+            : updater,
+      }));
+    },
+    [threadId, updateThreadRuntime],
+  );
+
+  const setPlan = useCallback((value: SerializablePlan | null, targetThreadId?: string) => {
+    const effectiveThreadId = targetThreadId ?? threadId;
+    if (!effectiveThreadId) return;
+    updateThreadRuntime(effectiveThreadId, (previous) => ({
+      ...previous,
+      plan: value,
+    }));
+  }, [threadId, updateThreadRuntime]);
+
+  const setPreviewUrl = useCallback((value: string | null, targetThreadId?: string) => {
+    const effectiveThreadId = targetThreadId ?? threadId;
+    if (!effectiveThreadId) return;
+    updateThreadRuntime(effectiveThreadId, (previous) => ({
+      ...previous,
+      previewUrl: value,
+    }));
+  }, [threadId, updateThreadRuntime]);
+
+  const setPreviewLogs = useCallback((
+    updater:
+      | PreviewLog[]
+      | ((previous: PreviewLog[]) => PreviewLog[]),
+    targetThreadId?: string,
+  ) => {
+    const effectiveThreadId = targetThreadId ?? threadId;
+    if (!effectiveThreadId) return;
+    updateThreadRuntime(effectiveThreadId, (previous) => {
+      const nextPreviewLogs =
+        typeof updater === "function"
+          ? updater(previous.previewLogs)
+          : updater;
+      if (arePreviewLogsEqual(previous.previewLogs, nextPreviewLogs)) {
+        return previous;
+      }
+      return {
+        ...previous,
+        previewLogs: nextPreviewLogs,
+      };
+    });
+  }, [threadId, updateThreadRuntime]);
+
+  const setWorkspaceRoot = useCallback((value: string | null, targetThreadId?: string) => {
+    const effectiveThreadId = targetThreadId ?? threadId;
+    if (!effectiveThreadId) return;
+    const normalizedWorkspaceRoot =
+      typeof value === "string" && value.trim() ? value.trim() : null;
+    updateThreadRuntime(effectiveThreadId, (previous) => ({
+      ...previous,
+      workspaceRoot: normalizedWorkspaceRoot,
+    }));
+    setRecentThreads((prev) =>
+      prev.map((entry) =>
+        entry.id === effectiveThreadId
+          ? {
+              ...entry,
+              subtitle: summarizeWorkspaceRoot(normalizedWorkspaceRoot),
+              workspaceRoot: normalizedWorkspaceRoot,
+            }
+          : entry,
+      ),
+    );
+  }, [threadId, summarizeWorkspaceRoot, updateThreadRuntime]);
+
+  const getThreadRuntimeState = useCallback(
+    (targetThreadId: string) => getRuntime(runtimeRef.current, targetThreadId),
+    [],
+  );
+
   return {
-    items,
+    items: activeRuntime.items,
     setItems,
-    plan,
+    plan: activeRuntime.plan,
     setPlan,
-    previewUrl,
+    previewUrl: activeRuntime.previewUrl,
     setPreviewUrl,
-    previewLogs,
+    previewLogs: activeRuntime.previewLogs,
     setPreviewLogs,
     threadId,
     setThreadId,
     recentThreads,
     setRecentThreads,
-    workspaceRoot,
+    workspaceRoot: activeRuntime.workspaceRoot,
     setWorkspaceRoot,
-    hydratedThreadId,
+    hydratedThreadId: activeRuntime.hydrated ? threadId : null,
     pendingNewThreadId,
     activeThreadRecord,
     isHydratingThread,
@@ -447,5 +701,8 @@ export function useThreadSession({
     handleNewThread,
     handleSelectThread,
     handleDeleteThread,
+    threadRuntimeById,
+    updateThreadRuntime,
+    getThreadRuntimeState,
   };
 }

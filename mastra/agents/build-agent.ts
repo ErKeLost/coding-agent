@@ -5,24 +5,21 @@ import { SkillSearchProcessor, TokenLimiterProcessor } from '@mastra/core/proces
 import { buildAgentMemory } from '../memory';
 import {
   applyPatchTool,
+  batchTool,
   bashTool,
-  cleanBackgroundTerminalsTool,
-  execCommandTool,
+  codeSearchTool,
   editTool,
-  imageGenerateTool,
-  listTool,
+  execCommandTool,
+  globTool,
+  grepTool,
   listLocalProcessesTool,
+  questionTool,
   readTool,
   readLocalProcessLogsTool,
-  shellTool,
   skillTool,
-  startLocalDevServerTool,
   stopLocalProcessTool,
-  todoReadTool,
+  taskTool,
   todoWriteTool,
-  toolSearchTool,
-  toolSuggestTool,
-  unifiedExecTool,
   webFetchTool,
   webSearchTool,
   writeStdinTool,
@@ -37,24 +34,21 @@ import { ContinuationProcessor } from './processors/continuation-processor';
 
 const staticTools = {
   apply_patch: applyPatchTool,
+  batch: batchTool,
   bash: bashTool,
-  clean_background_terminals: cleanBackgroundTerminalsTool,
+  codesearch: codeSearchTool,
   edit: editTool,
   exec_command: execCommandTool,
-  imageGenerate: imageGenerateTool,
-  list: listTool,
+  glob: globTool,
+  grep: grepTool,
   listLocalProcesses: listLocalProcessesTool,
+  question: questionTool,
   read: readTool,
   readLocalProcessLogs: readLocalProcessLogsTool,
-  shell: shellTool,
   skill: skillTool,
-  startLocalDevServer: startLocalDevServerTool,
   stopLocalProcess: stopLocalProcessTool,
-  todoread: todoReadTool,
+  task: taskTool,
   todowrite: todoWriteTool,
-  tool_search: toolSearchTool,
-  tool_suggest: toolSuggestTool,
-  unified_exec: unifiedExecTool,
   webfetch: webFetchTool,
   websearch: webSearchTool,
   write_stdin: writeStdinTool,
@@ -103,18 +97,24 @@ const buildInstructions = ({ requestContext }: { requestContext: RequestContext 
   const runtimeDirectives = [
     `Execution contract:
 - For coding work, prefer concrete tool actions before explanatory prose.
-- Start by reading or locating the relevant files with read/list/grep when context is incomplete.
+- Start by reading or locating the relevant files with read/glob/grep when context is incomplete.
 - Use write/edit only after you understand the target files.
 - Avoid re-reading the same file with the same intent unless the file changed, the first read was incomplete, or you need a different range for verification.
 - Use bash for validation or project commands.
-- Use shell or unified_exec when a Codex-style command execution surface is more appropriate.
-- Prefer exec_command + write_stdin for long-running or interactive background terminal sessions.
-- Use list for directory listing and apply_patch for unified diff patch application.
-- Use tool_search or tool_suggest when you need to discover the right tool quickly.
-- Use startLocalDevServer for long-running dev servers such as bun dev, npm run dev, pnpm dev, or yarn dev.
-- Use listLocalProcesses, readLocalProcessLogs, and stopLocalProcess to manage long-running services after they start.
-- Use clean_background_terminals when you want to terminate all still-running background terminal sessions.
-- Do not use getProcessOutput with wait=true to watch a long-running dev server.
+- Use \`exec_command\` as the default protocol for long-running or interactive commands.
+- For \`exec_command\`, prefer Codex-style arguments: \`cmd\`, \`workdir\`, and optional \`yield_time_ms\`.
+- Treat the returned \`session_id\` / \`sessionId\` from \`exec_command\` as the canonical follow-up session handle.
+- Use \`write_stdin\` with empty \`chars\` to poll more output, or non-empty \`chars\` to send input.
+- Do not use \`bash\` with \`run_in_background: true\` as the primary path for dev servers, watchers, or interactive commands unless you are explicitly recovering an older process.
+- After starting a dev server or watcher, if the first \`exec_command\` result does not yet show the requested ready signal, port, or URL, immediately continue with \`write_stdin\` polling until you either see the exact output or the session exits.
+- Never guess a localhost port or say "usually 5173" when tool output has not confirmed it. Report the exact emitted URL if present, otherwise clearly say the process is still running and has not printed one yet.
+- Use \`readLocalProcessLogs\` only as a compatibility fallback for older \`bash\` background sessions.
+- Use \`listLocalProcesses\`, \`readLocalProcessLogs\`, and \`stopLocalProcess\` mainly for recovery, inspection, or compatibility with older background sessions.
+- Use glob to find files by pattern and grep/codesearch to locate code quickly.
+- Prefer apply_patch for deterministic code edits; use edit/write when patch is not the best fit.
+- Use task for explicit subagent delegation only when delegation materially helps.
+- Use batch to run independent tool calls in parallel.
+- Use question only when required details are missing and a safe assumption is risky.
 - Use todowrite for multi-step implementation work.`,
   ];
 
@@ -149,6 +149,8 @@ ${guideText ? `- Active guidance: ${guideText}` : ''}`.trim());
 - The current user turn includes one or more uploaded images.
 - The primary task for this turn is to analyze the uploaded image, not the workspace.
 - Resolve phrases like "this image", "this picture", or "analyze it" against the uploaded attachment.
+- Treat the latest uploaded attachment in the current turn as the source of truth.
+- Ignore earlier image discussions from the thread unless the user explicitly asks for comparison, continuation, or multi-image reasoning.
 - Your first response must describe and answer based on the visible image content.
 - Do not switch to repository, workspace, or project analysis unless the user explicitly asks for that.`);
   }

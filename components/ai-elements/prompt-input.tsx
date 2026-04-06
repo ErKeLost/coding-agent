@@ -1091,11 +1091,11 @@ export const PromptInputSubmit = ({
   children,
   ...props
 }: PromptInputSubmitProps) => {
-  const isGenerating = status === "streaming";
+  const isGenerating = status === "submitted" || status === "streaming";
 
   let Icon = <CornerDownLeftIcon className="size-4" />;
 
-  if (status === "streaming") {
+  if (isGenerating) {
     Icon = <SquareIcon className="size-4" />;
   } else if (status === "error") {
     Icon = <XIcon className="size-4" />;

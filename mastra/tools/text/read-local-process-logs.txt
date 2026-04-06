@@ -1,0 +1,13 @@
+Read the latest output from a managed local background process started earlier by the Bash tool.
+
+Use this after a command was started with `run_in_background: true` and returned a `processId`.
+
+Helpful for:
+- checking whether a dev server finished booting
+- finding the actual local URL or port
+- reading startup failures from a long-running command
+
+Notes:
+- `processId` is required
+- `waitForMs` lets the tool wait briefly for fresh output before returning
+- `lines` controls how many trailing log lines to read

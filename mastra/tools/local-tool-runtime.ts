@@ -70,9 +70,27 @@ export function resolveWorkspaceFsPath(inputPath: string) {
 }
 
 export function resolveWorkspaceDiskPath(workspaceRoot: string, inputPath: string) {
-  const { relativePath } = normalizeWorkspacePath(inputPath);
-  const absoluteDiskPath = path.resolve(workspaceRoot, relativePath);
-  const relativeDiskPath = path.relative(workspaceRoot, absoluteDiskPath);
+  const trimmed = inputPath.trim();
+  const normalizedRoot = path.resolve(workspaceRoot);
+  const posixInput = trimmed.replaceAll('\\', '/');
+
+  const toWorkspacePath = (relativeLike: string) =>
+    path.resolve(normalizedRoot, normalizeWorkspacePath(relativeLike).relativePath);
+
+  // Compatibility for legacy sandbox-style absolute paths.
+  // Old tool prompts frequently use "/workspace" or "/workspace/<file>".
+  let absoluteDiskPath: string;
+  if (posixInput === '/workspace' || posixInput === '/workspace/') {
+    absoluteDiskPath = normalizedRoot;
+  } else if (posixInput.startsWith('/workspace/')) {
+    const suffix = posixInput.slice('/workspace/'.length);
+    absoluteDiskPath = toWorkspacePath(`/${suffix}`);
+  } else if (path.isAbsolute(trimmed)) {
+    absoluteDiskPath = path.resolve(trimmed);
+  } else {
+    absoluteDiskPath = toWorkspacePath(trimmed);
+  }
+  const relativeDiskPath = path.relative(normalizedRoot, absoluteDiskPath);
   if (relativeDiskPath.startsWith('..') || path.isAbsolute(relativeDiskPath)) {
     throw new Error(`Path must stay inside the workspace: ${inputPath}`);
   }

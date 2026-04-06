@@ -29,6 +29,14 @@ export type AvatarMoveTarget =
 
 export type AvatarLocomotion = "idle" | "walk" | "hop" | "dance";
 
+export type AvatarBubbleTheme = {
+  borderColor?: string;
+  textColor?: string;
+  backgroundFrom?: string;
+  backgroundTo?: string;
+  glowColor?: string;
+};
+
 export type AvatarDirective = {
   bubble: string;
   speak: boolean;
@@ -38,6 +46,7 @@ export type AvatarDirective = {
   moveTo: AvatarMoveTarget;
   locomotion: AvatarLocomotion;
   priority: "low" | "medium" | "high";
+  bubbleTheme?: AvatarBubbleTheme;
   source: "heuristic" | "llm";
 };
 
@@ -54,6 +63,12 @@ export type AvatarDirectorRequest = {
   threadId: string;
   threadTitle?: string | null;
   model?: string | null;
+  avatarName?: string | null;
+  avatarDescription?: string | null;
+  avatarPersonalityPrompt?: string | null;
+  avatarSystemPrompt?: string | null;
+  avatarCapabilitiesSummary?: string | null;
+  userBehaviorSummary?: string | null;
   streamStatus: "submitted" | "streaming" | "ready" | "error";
   workspaceLabel?: string | null;
   ambientTick?: number;

@@ -103,6 +103,8 @@ export type StreamPayload = {
   stderr?: string;
   durationMs?: number;
   previewUrl?: string;
+  reason?: string;
+  status?: "done" | "idle" | "error" | string;
   runState?: "started" | "running" | "completed" | "failed" | "timed_out";
   sessionId?: string;
   agentId?: string;
@@ -143,6 +145,7 @@ type StreamEventPayload =
         | "tool.call.failed"
         | "usage.updated"
         | "session.updated"
+        | "session.ended"
         | "agent.stream.delta"
         | "agent.handoff.started"
         | "agent.handoff.completed";
@@ -164,6 +167,17 @@ type EventBusParams = {
     title: string;
     todos: Array<{ id: string; label: string; status: "pending" | "in_progress" | "completed" | "cancelled"; description?: string }>;
   } | null) => void;
+};
+
+type ToolTerminalState = {
+  status: "pending" | "done" | "error";
+  timer?: ReturnType<typeof setTimeout>;
+};
+
+type CachedToolResult = {
+  toolName?: string;
+  result: unknown;
+  costUSD?: number;
 };
 
 const extractTextFromParts = (
@@ -401,8 +415,46 @@ const getToolFailureMessage = (result: unknown) => {
   const record = result as {
     message?: unknown;
     error?: unknown;
+    success?: unknown;
+    state?: unknown;
+    exitCode?: unknown;
+    metadata?: {
+      state?: unknown;
+      exit?: unknown;
+      exitCode?: unknown;
+      stderr?: unknown;
+      stdout?: unknown;
+      timedOut?: unknown;
+    };
     validationErrors?: unknown;
   };
+  const topLevelState =
+    typeof record.state === "string" ? record.state.trim().toLowerCase() : "";
+  const metadataState =
+    typeof record.metadata?.state === "string"
+      ? record.metadata.state.trim().toLowerCase()
+      : "";
+  const state = topLevelState || metadataState;
+  const timedOut =
+    state === "timed_out" || record.metadata?.timedOut === true;
+
+  const exitCode =
+    typeof record.exitCode === "number"
+      ? record.exitCode
+      : typeof record.metadata?.exitCode === "number"
+        ? record.metadata.exitCode
+        : typeof record.metadata?.exit === "number"
+          ? record.metadata.exit
+          : undefined;
+  const stderr =
+    typeof record.metadata?.stderr === "string" && record.metadata.stderr.trim()
+      ? record.metadata.stderr.trim()
+      : undefined;
+  const stdout =
+    typeof record.metadata?.stdout === "string" && record.metadata.stdout.trim()
+      ? record.metadata.stdout.trim()
+      : undefined;
+
   if (
     record.validationErrors &&
     typeof record.message === "string" &&
@@ -412,6 +464,18 @@ const getToolFailureMessage = (result: unknown) => {
   }
   if (typeof record.error === "string" && record.error.trim()) {
     return record.error.trim();
+  }
+  if (record.success === false || state === "failed" || timedOut) {
+    const detail = stderr ?? stdout;
+    const detailLine = detail?.split("\n")[0]?.trim();
+    if (timedOut) {
+      return detailLine
+        ? `Command timed out: ${detailLine}`
+        : "Command timed out";
+    }
+    if (detailLine) return detailLine;
+    if (exitCode !== undefined) return `Command failed with exit code ${exitCode}`;
+    return "Command failed";
   }
   if (typeof record.message === "string" && /validation failed|invalid input/i.test(record.message)) {
     return record.message.trim();
@@ -433,6 +497,64 @@ export const createStreamEventBus = ({
   getModelId,
   setPlan,
 }: EventBusParams) => {
+  const toolTerminalState = new Map<string, ToolTerminalState>();
+  const rawResultCache = new Map<string, CachedToolResult>();
+  let streamTerminalToolErrorText: string | undefined;
+
+  const clearToolTimer = (toolCallId: string) => {
+    const state = toolTerminalState.get(toolCallId);
+    if (state?.timer) {
+      clearTimeout(state.timer);
+      state.timer = undefined;
+    }
+  };
+
+  const finalizeToolStates = (errorText?: string) => {
+    const terminalError = errorText?.trim() || streamTerminalToolErrorText;
+    for (const [toolCallId, state] of toolTerminalState.entries()) {
+      const cached = rawResultCache.get(toolCallId);
+      if (cached) {
+        clearToolTimer(toolCallId);
+        toolTerminalState.set(toolCallId, { status: "done" });
+        upsertTool({
+          id: toolCallId,
+          name:
+            pickPreferredToolName(
+              cached.toolName,
+              findToolNameById(toolCallId)
+            ) ?? "未命名工具",
+          status: "done",
+          result: cached.result,
+          costUSD: cached.costUSD,
+        });
+        continue;
+      }
+      if (state.status !== "done") {
+        clearToolTimer(toolCallId);
+        toolTerminalState.set(toolCallId, { status: "error" });
+          upsertTool({
+            id: toolCallId,
+            name: pickPreferredToolName(findToolNameById(toolCallId)) ?? "未命名工具",
+            status: "error",
+            errorText: terminalError,
+          });
+        }
+      }
+  };
+  const findToolNameById = (toolCallId?: string) => {
+    if (!toolCallId) return undefined;
+    const found = [...itemsRef.current]
+      .reverse()
+      .find(
+        (item) =>
+          item.type === "tool" &&
+          item.id === toolCallId &&
+          typeof item.name === "string" &&
+          item.name.trim().length > 0
+      ) as Extract<ChatItem, { type: "tool" }> | undefined;
+    return found?.name;
+  };
+
   const appendAssistantText = (text: string) => {
     if (!text) return;
     const assistantId = assistantIdRef.current;
@@ -671,8 +793,9 @@ export const createStreamEventBus = ({
       const updated = [...prev];
       const existing = updated[index] as Extract<ChatItem, { type: "tool" }>;
       const nextStatus =
-        (existing.status === "done" || existing.status === "error") &&
-        tool.status === "pending"
+        existing.status === "done"
+          ? "done"
+          : existing.status === "error" && tool.status === "pending"
           ? existing.status
           : tool.status;
       updated[index] = {
@@ -686,6 +809,29 @@ export const createStreamEventBus = ({
       };
       updated[index].status = nextStatus;
       return updated;
+    });
+  };
+
+  const markToolDone = (toolCallId: string) => {
+    clearToolTimer(toolCallId);
+    toolTerminalState.set(toolCallId, { status: "done" });
+  };
+
+  const markToolPending = (toolCallId: string) => {
+    clearToolTimer(toolCallId);
+    toolTerminalState.set(toolCallId, { status: "pending" });
+  };
+
+  const cacheToolResult = (payload: {
+    toolCallId: string;
+    toolName?: string;
+    result: unknown;
+    costUSD?: number;
+  }) => {
+    rawResultCache.set(payload.toolCallId, {
+      toolName: payload.toolName,
+      result: payload.result,
+      costUSD: payload.costUSD,
     });
   };
 
@@ -860,7 +1006,10 @@ export const createStreamEventBus = ({
   };
 
   const handlePayload = (payload: StreamPayload | string) => {
-    if (payload === "[DONE]") return;
+    if (payload === "[DONE]") {
+      finalizeToolStates();
+      return;
+    }
 
     const normalized = normalizePayload(payload);
 
@@ -873,7 +1022,13 @@ export const createStreamEventBus = ({
       return;
     }
 
-    if (normalized.error) {
+    const isStructuredStreamEvent =
+      typeof normalized === "object" &&
+      normalized !== null &&
+      normalized.type === "stream.event" &&
+      typeof normalized.eventName === "string";
+
+    if (normalized.error && !isStructuredStreamEvent) {
       markAssistantThinkingDone();
       const message =
         typeof normalized.error === "string"
@@ -881,6 +1036,9 @@ export const createStreamEventBus = ({
           : normalized.error instanceof Error
             ? normalized.error.message
             : JSON.stringify(normalized.error);
+      if (message.trim()) {
+        streamTerminalToolErrorText = message.trim();
+      }
       setError(message);
       setStatus("error");
       return;
@@ -920,11 +1078,18 @@ export const createStreamEventBus = ({
         return;
       }
       if (codexEvent.eventName === "tool.call.started") {
-        if (!codexEvent.toolCallId || !codexEvent.toolName) return;
+        if (!codexEvent.toolCallId) return;
+        markToolPending(codexEvent.toolCallId);
+        const toolName =
+          pickPreferredToolName(
+            codexEvent.toolName,
+            normalized.name,
+            findToolNameById(codexEvent.toolCallId)
+          ) ?? "未命名工具";
         markAssistantThinkingDone();
         upsertTool({
           id: codexEvent.toolCallId,
-          name: codexEvent.toolName,
+          name: toolName,
           status: "pending",
           args: codexEvent.args,
           agentId: codexEvent.agentId,
@@ -955,15 +1120,28 @@ export const createStreamEventBus = ({
         return;
       }
       if (codexEvent.eventName === "tool.call.completed") {
-        if (!codexEvent.toolCallId || !codexEvent.toolName) return;
-        if (updatePlanFromResult(codexEvent.toolName, codexEvent.result)) {
+        if (!codexEvent.toolCallId) return;
+        markToolDone(codexEvent.toolCallId);
+        cacheToolResult({
+          toolCallId: codexEvent.toolCallId,
+          toolName: codexEvent.toolName,
+          result: codexEvent.result,
+          costUSD: extractCostUSD(codexEvent),
+        });
+        const toolName =
+          pickPreferredToolName(
+            codexEvent.toolName,
+            normalized.name,
+            findToolNameById(codexEvent.toolCallId)
+          ) ?? "未命名工具";
+        if (updatePlanFromResult(toolName, codexEvent.result)) {
           postToolPendingRef.current = true;
           return;
         }
         const failureMessage = getToolFailureMessage(codexEvent.result);
         upsertTool({
           id: codexEvent.toolCallId,
-          name: codexEvent.toolName,
+          name: toolName,
           status: failureMessage ? "error" : "done",
           args: codexEvent.args,
           result: codexEvent.result,
@@ -987,13 +1165,32 @@ export const createStreamEventBus = ({
         return;
       }
       if (codexEvent.eventName === "tool.call.failed") {
-        const toolId = codexEvent.toolCallId ?? createId();
+        const hasCallId =
+          typeof codexEvent.toolCallId === "string" &&
+          codexEvent.toolCallId.trim().length > 0;
+        const failureText =
+          typeof codexEvent.error === "string" && codexEvent.error.trim()
+            ? codexEvent.error.trim()
+            : undefined;
+        if (!hasCallId) {
+          if (failureText) {
+            streamTerminalToolErrorText = failureText;
+          }
+          return;
+        }
+        const toolId = codexEvent.toolCallId as string;
+        clearToolTimer(toolId);
+        toolTerminalState.set(toolId, { status: "error" });
         upsertTool({
           id: toolId,
           name:
-            pickPreferredToolName(codexEvent.toolName) ?? "未命名工具",
+            pickPreferredToolName(
+              codexEvent.toolName,
+              normalized.name,
+              findToolNameById(toolId)
+            ) ?? "未命名工具",
           status: "error",
-          errorText: codexEvent.error,
+          errorText: failureText ?? "Tool failed",
           costUSD: extractCostUSD(codexEvent),
           agentId: codexEvent.agentId,
           parentToolCallId: codexEvent.parentToolCallId,
@@ -1009,6 +1206,12 @@ export const createStreamEventBus = ({
       if (codexEvent.eventName === "session.updated") {
         if (typeof codexEvent.previewUrl === "string" && codexEvent.previewUrl) {
           setPreviewUrl(codexEvent.previewUrl);
+        }
+        return;
+      }
+      if (codexEvent.eventName === "session.ended") {
+        if (typeof codexEvent.reason === "string" && codexEvent.reason.trim()) {
+          streamTerminalToolErrorText = codexEvent.reason.trim();
         }
         return;
       }
@@ -1089,6 +1292,13 @@ export const createStreamEventBus = ({
           normalized.name
         ) ?? "未命名工具";
       const result = normalized.toolResult?.result ?? normalized.result;
+      cacheToolResult({
+        toolCallId: toolId,
+        toolName,
+        result,
+        costUSD,
+      });
+      markToolDone(toolId);
       if (updatePlanFromResult(toolName, result)) {
         postToolPendingRef.current = true;
         return;
@@ -1194,5 +1404,10 @@ export const createStreamEventBus = ({
     appendAssistantText(text);
   };
 
-  return { handlePayload };
+  return {
+    handlePayload,
+    finalize: (options?: { errorText?: string }) => {
+      finalizeToolStates(options?.errorText);
+    },
+  };
 };

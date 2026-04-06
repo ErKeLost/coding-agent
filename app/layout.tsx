@@ -5,6 +5,7 @@ import "goey-toast/styles.css";
 import { ThemeProvider } from "@/components/theme-provider";
 import { AppGooeyToaster } from "@/components/ui/gooey-toaster";
 import { DesktopUpdateCheck } from "@/components/desktop-update-check";
+import { GlobalAvatarShell } from "@/components/avatar/global-avatar-shell";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -47,6 +48,7 @@ export default function RootLayout({
       >
         <ThemeProvider attribute="class" defaultTheme="light" enableSystem>
           {children}
+          <GlobalAvatarShell />
           <DesktopUpdateCheck />
           <AppGooeyToaster />
         </ThemeProvider>

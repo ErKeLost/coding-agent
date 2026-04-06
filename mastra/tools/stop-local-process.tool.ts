@@ -1,21 +1,28 @@
 import { createTool } from '@mastra/core/tools';
-import z from 'zod';
+import { z } from 'zod';
 import { stopManagedProcess } from './local-process-manager';
+import { HowOneResultSchema, loadText } from './sandbox-helpers';
+
+const DESCRIPTION = loadText('stop-local-process.txt');
 
 export const stopLocalProcessTool = createTool({
   id: 'stopLocalProcess',
-  description:
-    'Stop a local long-running process started by the agent, such as a dev server.',
+  description: DESCRIPTION,
   inputSchema: z.object({
-    processId: z.string().describe('Process id returned by startLocalDevServer or listLocalProcesses'),
-    force: z.boolean().default(false).describe('Use SIGKILL instead of SIGTERM'),
+    processId: z.string().min(1),
+    force: z.boolean().optional(),
   }),
-  outputSchema: z.object({
-    processId: z.string(),
-    stopped: z.boolean(),
-    status: z.enum(['running', 'stopped', 'failed']),
-  }),
-  execute: async inputData => {
-    return stopManagedProcess(inputData.processId, inputData.force);
+  outputSchema: HowOneResultSchema,
+  execute: async (inputData) => {
+    const payload = await stopManagedProcess(
+      inputData.processId,
+      inputData.force ?? false,
+    );
+
+    return {
+      title: `${inputData.processId} stopped`,
+      output: JSON.stringify(payload, null, 2),
+      metadata: payload,
+    };
   },
 });

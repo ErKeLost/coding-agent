@@ -1,7 +1,7 @@
 Executes a given bash command in a persistent shell session with optional timeout, ensuring proper handling and security measures.
 
 All commands run in ${directory} by default. Use the `workdir` parameter if you need to run a command in a different directory. AVOID using `cd <directory> && <command>` patterns - use `workdir` instead.
-The sandbox default working directory is /workspace, and it contains a Vite starter project.
+The default working directory is the current workspace root.
 
 IMPORTANT: This tool is for terminal operations like git, npm, docker, etc. DO NOT use it for file operations (reading, writing, editing, searching, finding files) - use the specialized tools for this instead.
 
@@ -27,6 +27,7 @@ Usage notes:
   - It is very helpful if you write a clear, concise description of what this command does in 5-10 words.
   - If the output exceeds 30000 characters, output will be truncated before being returned to you.
   - You can use the `run_in_background` parameter to run the command in the background, which allows you to continue working while the command runs. You can monitor the output using the Bash tool as it becomes available. You do not need to use '&' at the end of the command when using this parameter.
+  - When `run_in_background` is true, the result may include a `processId` and an initial startup log snapshot. Use that `processId` with `readLocalProcessLogs`, `write_stdin`, `listLocalProcesses`, or `stopLocalProcess` to continue interacting with the long-running command instead of guessing from defaults.
 
   - Avoid using Bash with the `find`, `grep`, `cat`, `head`, `tail`, `sed`, `awk`, or `echo` commands, unless explicitly instructed or when these commands are truly necessary for the task. Instead, always prefer using the dedicated tools for these commands:
     - File search: Use Glob (NOT find or ls)

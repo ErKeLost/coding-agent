@@ -2,7 +2,10 @@ import { NextResponse } from "next/server";
 import { mastra } from "@/mastra";
 import { getModelTuning } from "@/lib/model-tuning";
 import { buildAgentRequestContext } from "@/lib/server/agent-request-context";
-import { normalizeAgentMessageInput } from "@/lib/server/agent-input";
+import {
+  currentTurnIncludesImageInput,
+  normalizeAgentMessageInput,
+} from "@/lib/server/agent-input";
 
 export const runtime = "nodejs";
 const BUILD_AGENT_ID = "build-agent";
@@ -54,7 +57,10 @@ export async function POST(
       providerOptions: tuning.providerOptions,
       memory:
         payload.memory ??
-        (payload.threadId
+        (payload.threadId &&
+        !currentTurnIncludesImageInput(
+          typeof messageInput === "string" ? null : messageInput,
+        )
           ? {
               thread: { id: payload.threadId },
               resource: "web",
