@@ -1,11 +1,14 @@
 import "server-only";
 
+import { createServer, type Server as HttpServer } from "node:http";
 import type { AddressInfo } from "node:net";
 import { WebSocketServer, type WebSocket } from "ws";
 import type { AvatarDirectorRequest, AvatarDirective } from "@/lib/avatar/types";
 import { resolveAvatarDirective } from "@/lib/avatar/director";
 
-const AVATAR_WS_PORT = Number(process.env.AVATAR_WS_PORT ?? 3457);
+const DEFAULT_AVATAR_WS_PORT =
+  process.env.NODE_ENV === "production" ? 3457 : 0;
+const AVATAR_WS_PORT = Number(process.env.AVATAR_WS_PORT ?? DEFAULT_AVATAR_WS_PORT);
 
 type AvatarClientMessage =
   | {
@@ -40,8 +43,10 @@ type SocketWithState = WebSocket & {
 declare global {
   var __avatarWsServer:
     | {
-        wss: WebSocketServer;
+        wss: WebSocketServer | null;
+        httpServer: HttpServer | null;
         port: number;
+        external?: boolean;
       }
     | undefined;
   var __avatarWsCleanupRegistered: boolean | undefined;
@@ -52,19 +57,20 @@ const send = (socket: WebSocket, payload: AvatarServerMessage) => {
   socket.send(JSON.stringify(payload));
 };
 
-const getBoundPort = (wss: WebSocketServer) => {
-  const address = wss.address();
+const getBoundPort = (server: HttpServer | null) => {
+  const address = server?.address();
   if (address && typeof address === "object") {
     return (address as AddressInfo).port;
   }
-  return AVATAR_WS_PORT;
+  return AVATAR_WS_PORT || 3457;
 };
 
 const cleanupAvatarWsServer = () => {
   const server = globalThis.__avatarWsServer;
   if (!server) return;
   try {
-    server.wss.close();
+    server.wss?.close();
+    server.httpServer?.close();
   } catch {
     // Ignore cleanup failures during shutdown.
   } finally {
@@ -92,9 +98,40 @@ export function ensureAvatarWsServer() {
     return globalThis.__avatarWsServer;
   }
 
-  let wss: WebSocketServer;
+  let httpServer: HttpServer | null = null;
+  let wss: WebSocketServer | null = null;
   try {
-    wss = new WebSocketServer({ port: AVATAR_WS_PORT });
+    httpServer = createServer();
+    wss = new WebSocketServer({ noServer: true });
+
+    httpServer.once("error", (error: NodeJS.ErrnoException) => {
+      if (error.code === "EADDRINUSE") {
+        console.warn(
+          `[avatar-ws] Port ${AVATAR_WS_PORT} already in use, reusing existing websocket server.`,
+        );
+        globalThis.__avatarWsServer = {
+          wss: null,
+          httpServer: null,
+          port: AVATAR_WS_PORT,
+          external: true,
+        };
+        return;
+      }
+      console.error("[avatar-ws] failed to start server", error);
+    });
+
+    httpServer.on("upgrade", (request, socket, head) => {
+      if (!wss) {
+        socket.destroy();
+        return;
+      }
+
+      wss.handleUpgrade(request, socket, head, (client) => {
+        wss?.emit("connection", client, request);
+      });
+    });
+
+    httpServer.listen(AVATAR_WS_PORT);
   } catch (error) {
     if (
       error instanceof Error &&
@@ -102,16 +139,22 @@ export function ensureAvatarWsServer() {
       error.code === "EADDRINUSE"
     ) {
       console.warn(
-        `[avatar-ws] Port ${AVATAR_WS_PORT} already in use, falling back to a random free port.`,
+        `[avatar-ws] Port ${AVATAR_WS_PORT} already in use, reusing existing websocket server.`,
       );
-      wss = new WebSocketServer({ port: 0 });
+      globalThis.__avatarWsServer = {
+        wss: null,
+        httpServer: null,
+        port: AVATAR_WS_PORT,
+        external: true,
+      };
+      return globalThis.__avatarWsServer;
     } else {
       throw error;
     }
   }
 
   registerCleanupHandlers();
-  const resolvedPort = getBoundPort(wss);
+  const resolvedPort = getBoundPort(httpServer);
 
   wss.on("connection", (socket: SocketWithState) => {
     send(socket, { type: "avatar.ready", port: resolvedPort });
@@ -156,6 +199,7 @@ export function ensureAvatarWsServer() {
 
   globalThis.__avatarWsServer = {
     wss,
+    httpServer,
     port: resolvedPort,
   };
 

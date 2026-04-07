@@ -479,12 +479,15 @@ export function AvatarCornerWidget({
       },
     );
 
-    const clock = new THREE.Clock();
+    const timer = new THREE.Timer();
+    timer.connect(document);
+    timer.reset();
     let rafId = 0;
 
     const animate = () => {
-      const delta = clock.getDelta();
-      const elapsed = clock.elapsedTime;
+      timer.update();
+      const delta = timer.getDelta();
+      const elapsed = timer.getElapsed();
       mixerRef.current?.update(delta);
       controls.update();
 
@@ -582,6 +585,7 @@ export function AvatarCornerWidget({
 
     return () => {
       cancelAnimationFrame(rafId);
+      timer.dispose();
       window.removeEventListener("resize", onResize);
       resizeObserver?.disconnect();
       mixerRef.current?.stopAllAction();
