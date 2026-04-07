@@ -8,6 +8,13 @@ export const MAX_WEBFETCH_SIZE = 5 * 1024 * 1024;
 const TEXT_BY_NAME: Record<string, string> = {
   'batch.txt': readFileSync(new URL('./text/batch.txt', import.meta.url), 'utf8'),
   'bash.txt': readFileSync(new URL('./text/bash.txt', import.meta.url), 'utf8'),
+  'browser-click.txt': readFileSync(new URL('./text/browser-click.txt', import.meta.url), 'utf8'),
+  'browser-close.txt': readFileSync(new URL('./text/browser-close.txt', import.meta.url), 'utf8'),
+  'browser-list-sessions.txt': readFileSync(new URL('./text/browser-list-sessions.txt', import.meta.url), 'utf8'),
+  'browser-open.txt': readFileSync(new URL('./text/browser-open.txt', import.meta.url), 'utf8'),
+  'browser-snapshot.txt': readFileSync(new URL('./text/browser-snapshot.txt', import.meta.url), 'utf8'),
+  'browser-type.txt': readFileSync(new URL('./text/browser-type.txt', import.meta.url), 'utf8'),
+  'browser-wait.txt': readFileSync(new URL('./text/browser-wait.txt', import.meta.url), 'utf8'),
   'edit.txt': readFileSync(new URL('./text/edit.txt', import.meta.url), 'utf8'),
   'glob.txt': readFileSync(new URL('./text/glob.txt', import.meta.url), 'utf8'),
   'grep.txt': readFileSync(new URL('./text/grep.txt', import.meta.url), 'utf8'),

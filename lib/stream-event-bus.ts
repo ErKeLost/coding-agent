@@ -1,6 +1,7 @@
 "use client";
 
 import type { Experimental_GeneratedImage, LanguageModelUsage } from "ai";
+import type { ThreadContextWindowState } from "@/lib/context-window";
 import type {
   Dispatch,
   MutableRefObject,
@@ -131,6 +132,7 @@ export type StreamPayload = {
       };
     };
   };
+  contextWindow?: ThreadContextWindowState | null;
 };
 
 type StreamEventPayload =
@@ -144,6 +146,7 @@ type StreamEventPayload =
         | "tool.call.completed"
         | "tool.call.failed"
         | "usage.updated"
+        | "context.updated"
         | "session.updated"
         | "session.ended"
         | "agent.stream.delta"
@@ -163,6 +166,7 @@ type EventBusParams = {
   createId: () => string;
   appendPreviewLog?: (log: PreviewLog) => void;
   getModelId?: () => string | undefined;
+  setContextWindow?: (value: ThreadContextWindowState | null) => void;
   setPlan?: (plan: {
     title: string;
     todos: Array<{ id: string; label: string; status: "pending" | "in_progress" | "completed" | "cancelled"; description?: string }>;
@@ -495,6 +499,7 @@ export const createStreamEventBus = ({
   createId,
   appendPreviewLog,
   getModelId,
+  setContextWindow,
   setPlan,
 }: EventBusParams) => {
   const toolTerminalState = new Map<string, ToolTerminalState>();
@@ -1201,6 +1206,16 @@ export const createStreamEventBus = ({
       }
       if (codexEvent.eventName === "usage.updated") {
         attachAssistantUsage(codexEvent.usage, codexEvent.costUSD);
+        return;
+      }
+      if (codexEvent.eventName === "context.updated") {
+        if (
+          codexEvent.contextWindow &&
+          typeof codexEvent.contextWindow === "object" &&
+          setContextWindow
+        ) {
+          setContextWindow(codexEvent.contextWindow as ThreadContextWindowState);
+        }
         return;
       }
       if (codexEvent.eventName === "session.updated") {

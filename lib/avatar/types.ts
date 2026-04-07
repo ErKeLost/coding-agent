@@ -48,6 +48,14 @@ export type AvatarDirective = {
   priority: "low" | "medium" | "high";
   bubbleTheme?: AvatarBubbleTheme;
   source: "heuristic" | "llm";
+  sourceDetail?:
+    | "default"
+    | "openrouter"
+    | "no-api-key"
+    | "http-error"
+    | "empty-content"
+    | "invalid-json"
+    | "exception";
 };
 
 export type AvatarContextItem = {

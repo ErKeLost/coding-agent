@@ -12,7 +12,7 @@ import {
 import { getUsage } from "tokenlens";
 import type { LanguageModelUsage } from "ai";
 import type { FileUIPart } from "ai";
-import { useParams, useRouter } from "next/navigation";
+import { useParams } from "next/navigation";
 import { Icon } from "@iconify/react";
 
 import {
@@ -90,6 +90,7 @@ import {
 } from "@/lib/desktop-workspace";
 import { gooeyToast } from "goey-toast";
 
+import { buildContextWindowState, type ThreadContextWindowState } from "@/lib/context-window";
 import { type ChatItem, type ToolStep } from "@/lib/stream-event-bus";
 import { useDesktopWorkspace } from "@/hooks/use-desktop-workspace";
 import { useThreadSession } from "@/hooks/use-thread-session";
@@ -267,7 +268,7 @@ const summarizeUiError = (value: string) => {
 
 const getStepTone = (status: ToolStep["status"]) => {
   if (status === "done") return "text-emerald-700/80 dark:text-emerald-300/80";
-  if (status === "error") return "text-destructive/80";
+  if (status === "error") return "text-amber-700/80 dark:text-amber-300/80";
   return "text-amber-700/80 dark:text-amber-300/80";
 };
 
@@ -2166,7 +2167,6 @@ export default function Home() {
     Record<string, "pending" | "done">
   >({});
   const params = useParams();
-  const router = useRouter();
   const selectedModelData = models.find((m) => m.id === model);
   const selectedAvatarProfile = getAvatarProfileById(
     avatarProfiles,
@@ -2186,6 +2186,8 @@ export default function Home() {
     setItems,
     plan,
     setPlan,
+    contextWindow,
+    setContextWindow,
     setPreviewUrl,
     setPreviewLogs,
     threadId,
@@ -2202,7 +2204,6 @@ export default function Home() {
     getThreadRuntimeState,
   } = useThreadSession({
     params,
-    router,
     setError: setThreadSessionError,
     createThreadId,
     serializeItemsForThread,
@@ -2214,6 +2215,30 @@ export default function Home() {
   const effectiveWorkspaceRoot =
     workspaceRoot ?? activeThreadRecord?.workspaceRoot ?? null;
   const activeWorkspaceLabel = summarizeWorkspaceRoot(effectiveWorkspaceRoot);
+  const effectiveContextWindow = useMemo<ThreadContextWindowState | null>(() => {
+    if (contextWindow) {
+      return contextWindow;
+    }
+
+    if (items.length === 0) {
+      return null;
+    }
+
+    const latestAssistantWithUsage = [...items]
+      .reverse()
+      .find(
+        (item): item is Extract<ChatItem, { type: "message"; role: "assistant" }> =>
+          item.type === "message" && item.role === "assistant" && Boolean(item.usage),
+      );
+
+    return buildContextWindowState({
+      items,
+      actualPromptTokens: latestAssistantWithUsage?.usage?.inputTokens,
+      outputTokens: latestAssistantWithUsage?.usage?.outputTokens,
+      totalTokens: latestAssistantWithUsage?.usage?.totalTokens,
+      modelId: model,
+    });
+  }, [contextWindow, items, model]);
 
   useEffect(() => {
     if (!threadId) return;
@@ -2246,6 +2271,7 @@ export default function Home() {
     setPreviewUrl,
     setPreviewLogs,
     setPlan,
+    setContextWindow,
     getThreadRuntimeState,
     createId,
     parseSseEvent,
@@ -2352,7 +2378,8 @@ export default function Home() {
     return null;
   }, [guideState]);
 
-  const canStartConversation = Boolean(threadId) && !isHydratingThread;
+  const shouldShowThreadLoadingState = isHydratingThread && items.length === 0;
+  const canStartConversation = Boolean(threadId) && !shouldShowThreadLoadingState;
   const canSubmitChat = canStartConversation && Boolean(model);
   const isChatRunning = status === "submitted" || status === "streaming";
   const shouldShowEmptyThreadHint =
@@ -2666,6 +2693,7 @@ export default function Home() {
                       ? formatRelativeUpdatedAt(activeThreadRecord.updatedAt)
                       : "just now"
                   }
+                  contextWindow={effectiveContextWindow}
                   workspaceBranches={workspaceBranches}
                   workspaceBranchLoading={workspaceBranchLoading}
                   onOpenSearch={() => setWorkspaceSearchOpen(true)}
@@ -2679,7 +2707,7 @@ export default function Home() {
                 <WorkspaceConversationPanel
                   chatColumnClassName={CHAT_COLUMN_CLASS}
                 >
-                  {isHydratingThread ? (
+                  {shouldShowThreadLoadingState ? (
                     <ThreadHistoryLoadingState />
                   ) : items.length === 0 ? (
                     <></>
@@ -2739,7 +2767,7 @@ export default function Home() {
                               className={cn(
                                 "app-tool-row rounded-[14px] px-3 py-2 text-[12px] leading-5 text-foreground/82",
                                 item.status === "error" &&
-                                  "text-destructive/90",
+                                  "text-amber-700/90 dark:text-amber-300/90",
                               )}
                             >
                               <div className="min-w-0 truncate">
@@ -2822,7 +2850,7 @@ export default function Home() {
                                   className={cn(
                                     "app-tool-row list-none rounded-[11px] px-3 py-0.5 text-[12px] leading-5 text-foreground/82 [&::-webkit-details-marker]:hidden",
                                     item.status === "error" &&
-                                      "text-rose-500 dark:text-rose-300",
+                                      "text-amber-700 dark:text-amber-300",
                                     "cursor-pointer",
                                   )}
                                 >
@@ -2831,7 +2859,7 @@ export default function Home() {
                                       className={cn(
                                         "text-muted-foreground/82",
                                         item.status === "error" &&
-                                          "text-rose-400 dark:text-rose-300/75",
+                                          "text-amber-600 dark:text-amber-300/75",
                                       )}
                                     >
                                       {displayVerb}
@@ -2840,7 +2868,7 @@ export default function Home() {
                                       className={cn(
                                         "font-mono text-foreground/88 truncate",
                                         item.status === "error" &&
-                                          "text-rose-500/90 dark:text-rose-200/90",
+                                          "text-amber-700/90 dark:text-amber-200/90",
                                       )}
                                     >
                                       {displayText}
@@ -2850,7 +2878,7 @@ export default function Home() {
                                       className={cn(
                                         "ml-0.5 size-3 shrink-0 text-muted-foreground/70 group-open:hidden",
                                         item.status === "error" &&
-                                          "text-rose-400/70 dark:text-rose-300/60",
+                                          "text-amber-500/70 dark:text-amber-300/60",
                                       )}
                                       aria-hidden="true"
                                     />
@@ -2891,28 +2919,28 @@ export default function Home() {
                               </details>
                             ) : (
                               <div
-                                className={cn(
-                                  "app-tool-row rounded-[11px] px-3 py-1.5 text-[12px] leading-5 text-foreground/82",
-                                  item.status === "error" &&
-                                    "text-rose-500 dark:text-rose-300",
-                                )}
+                              className={cn(
+                                "app-tool-row rounded-[11px] px-3 py-1.5 text-[12px] leading-5 text-foreground/82",
+                                item.status === "error" &&
+                                    "text-amber-700 dark:text-amber-300",
+                              )}
                               >
                                 <div className="min-w-0 truncate">
                                   <span
-                                    className={cn(
-                                      "text-muted-foreground/82",
-                                      item.status === "error" &&
-                                        "text-rose-400 dark:text-rose-300/75",
-                                    )}
+                                  className={cn(
+                                    "text-muted-foreground/82",
+                                    item.status === "error" &&
+                                        "text-amber-600 dark:text-amber-300/75",
+                                  )}
                                   >
                                     {displayVerb}
                                   </span>{" "}
                                   <span
-                                    className={cn(
-                                      "font-mono text-foreground/88",
-                                      item.status === "error" &&
-                                        "text-rose-500/90 dark:text-rose-200/90",
-                                    )}
+                                  className={cn(
+                                    "font-mono text-foreground/88",
+                                    item.status === "error" &&
+                                        "text-amber-700/90 dark:text-amber-200/90",
+                                  )}
                                   >
                                     {displayText}
                                   </span>
@@ -3001,6 +3029,7 @@ export default function Home() {
                 <WorkspaceComposerShell
                   chatColumnClassName={CHAT_COLUMN_CLASS}
                   activePlan={activePlan}
+                  contextWindow={effectiveContextWindow}
                   queuedSubmissionPreview={queuedSubmissionPreview}
                   queuedSubmissionSummary={
                     queuedSubmissionPreview

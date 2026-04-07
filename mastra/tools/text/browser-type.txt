@@ -1,0 +1,11 @@
+Fill a text-capable element inside an existing browser session.
+
+Use this for:
+- search boxes
+- login forms
+- chat inputs
+- filters
+- any UI that requires typed input in a rendered page
+
+Target the element with `selector`, `placeholder`, `label`, or `role` + `name`.
+Reuse the same `sessionId` / `session_id` from `browser_open`.

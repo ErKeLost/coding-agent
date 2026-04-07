@@ -10,6 +10,8 @@ const CHUNK_RELOAD_GUARD_KEY = "desktop-chunk-reload-at";
 const CHUNK_RELOAD_COOLDOWN_MS = 30_000;
 const UPDATE_PENDING_VERSION_KEY = "desktop-update-pending-version";
 const UPDATE_FAILED_VERSION_KEY = "desktop-update-failed-version";
+const UPDATE_RELAUNCH_REQUESTED_VERSION_KEY = "desktop-update-relaunch-requested-version";
+const UPDATE_RESTART_TOAST_ID = "desktop-update-restart-toast";
 
 const getStoredValue = (key: string) => {
   try {
@@ -51,6 +53,70 @@ const isChunkLoadFailure = (message: string) => {
   );
 };
 
+const clearPendingUpdateState = () => {
+  removeStoredValue(UPDATE_PENDING_VERSION_KEY);
+  removeStoredValue(UPDATE_FAILED_VERSION_KEY);
+  removeStoredValue(UPDATE_RELAUNCH_REQUESTED_VERSION_KEY);
+};
+
+const markUpdateReady = (version: string) => {
+  setStoredValue(UPDATE_PENDING_VERSION_KEY, version);
+  removeStoredValue(UPDATE_FAILED_VERSION_KEY);
+};
+
+const promptForRestart = (
+  targetVersion: string,
+  currentVersion?: string,
+  toastId: string | number = UPDATE_RESTART_TOAST_ID,
+) => {
+  const description = currentVersion
+    ? `新版本 ${targetVersion} 已安装，但当前仍在运行 ${currentVersion}。请重启应用完成切换。`
+    : `新版本 ${targetVersion} 已安装，请重启应用完成切换。`;
+
+  gooeyToast.warning("更新已安装，等待重启", {
+    id: toastId,
+    description,
+    duration: Infinity,
+    action: {
+      label: "立即重启",
+      onClick: () => {
+        void requestAppRelaunch(targetVersion, toastId);
+      },
+    },
+  });
+};
+
+const requestAppRelaunch = async (targetVersion: string, toastId: string | number) => {
+  try {
+    markUpdateReady(targetVersion);
+    setStoredValue(UPDATE_RELAUNCH_REQUESTED_VERSION_KEY, targetVersion);
+
+    gooeyToast.update(toastId, {
+      title: "正在重启应用",
+      description: "如果几秒内没有关闭，请稍后手动退出后重新打开。",
+      type: "info",
+      action: undefined,
+    });
+
+    const { relaunch } = await import("@tauri-apps/plugin-process");
+    await relaunch();
+  } catch (error) {
+    gooeyToast.update(toastId, {
+      title: "自动重启失败",
+      description: "更新已经安装，但应用暂时无法自动重启。请手动退出后重新打开正式安装的应用。",
+      type: "error",
+      action: {
+        label: "刷新界面",
+        onClick: () => window.location.reload(),
+      },
+    });
+
+    if (process.env.NODE_ENV !== "production") {
+      console.warn("[desktop-updater] relaunch failed", error);
+    }
+  }
+};
+
 export function DesktopUpdateCheck() {
   const hasCheckedRef = useRef(false);
 
@@ -66,10 +132,11 @@ export function DesktopUpdateCheck() {
       try {
         const { getVersion } = await import("@tauri-apps/api/app");
         const currentVersion = await getVersion();
+        const relaunchRequestedVersion = getStoredValue(UPDATE_RELAUNCH_REQUESTED_VERSION_KEY);
 
         if (currentVersion === pendingVersion) {
-          removeStoredValue(UPDATE_PENDING_VERSION_KEY);
-          removeStoredValue(UPDATE_FAILED_VERSION_KEY);
+          clearPendingUpdateState();
+          gooeyToast.dismiss(UPDATE_RESTART_TOAST_ID);
 
           gooeyToast.success(`已更新到 ${currentVersion}`, {
             description: "应用已经切换到新版本。",
@@ -78,13 +145,16 @@ export function DesktopUpdateCheck() {
           return;
         }
 
-        setStoredValue(UPDATE_FAILED_VERSION_KEY, pendingVersion);
-        removeStoredValue(UPDATE_PENDING_VERSION_KEY);
+        if (relaunchRequestedVersion === pendingVersion) {
+          setStoredValue(UPDATE_FAILED_VERSION_KEY, pendingVersion);
 
-        gooeyToast.error("更新后版本没有切换成功", {
-          description: `目标版本 ${pendingVersion} 没有生效，已暂停自动重试，避免反复下载。请确认你启动的是安装后的正式应用，而不是旧副本或磁盘镜像里的应用。`,
-          duration: 8000,
-        });
+          gooeyToast.error("重启后仍然是旧版本", {
+            description: `目标版本 ${pendingVersion} 已安装，但当前仍是 ${currentVersion}。这通常说明你打开的是旧副本、磁盘镜像里的应用，或系统仍拉起了旧路径。请完全退出后，从正式安装位置重新打开。`,
+            duration: 9000,
+          });
+        }
+
+        promptForRestart(pendingVersion, currentVersion);
       } catch {
         // Ignore version probe failures and let the normal updater flow proceed.
       }
@@ -221,46 +291,15 @@ export function DesktopUpdateCheck() {
 
             if (event.event === "Finished") {
               gooeyToast.update(toastId, {
-                title: "更新已准备完成",
-                description: "新版本已经下载并安装完成，点击即可重启应用。",
-                type: "success",
-                action: {
-                  label: "立即重启",
-                  onClick: () => {
-                    void (async () => {
-                      try {
-                        setStoredValue(UPDATE_PENDING_VERSION_KEY, update.version);
-                        gooeyToast.update(toastId, {
-                          title: "正在重启应用",
-                          description: "如果几秒内没有关闭，请稍后手动重启。",
-                          type: "info",
-                        });
-
-                        const { relaunch } = await import("@tauri-apps/plugin-process");
-                        await relaunch();
-                      } catch (error) {
-                        gooeyToast.update(toastId, {
-                          title: "自动重启失败",
-                          description: "更新已经安装，但应用暂时无法自动重启。可以先刷新界面；如果仍异常，请手动退出后重新打开。",
-                          type: "error",
-                          action: {
-                            label: "刷新界面",
-                            onClick: () => window.location.reload(),
-                          },
-                        });
-
-                        if (process.env.NODE_ENV !== "production") {
-                          console.warn("[desktop-updater] relaunch failed", error);
-                        }
-
-                        removeStoredValue(UPDATE_PENDING_VERSION_KEY);
-                      }
-                    })();
-                  },
-                },
+                title: "更新包下载完成",
+                description: "正在安装更新…",
+                type: "info",
               });
             }
           });
+
+          markUpdateReady(update.version);
+          promptForRestart(update.version, undefined, toastId);
         } catch (error) {
           gooeyToast.update(toastId, {
             title: "更新安装失败",

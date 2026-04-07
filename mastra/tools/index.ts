@@ -1,4 +1,11 @@
 export { bashTool } from './bash.tool';
+export { browserClickTool } from './browser-click.tool';
+export { browserCloseTool } from './browser-close.tool';
+export { browserListSessionsTool } from './browser-list-sessions.tool';
+export { browserOpenTool } from './browser-open.tool';
+export { browserSnapshotTool } from './browser-snapshot.tool';
+export { browserTypeTool } from './browser-type.tool';
+export { browserWaitTool } from './browser-wait.tool';
 export { applyPatchTool } from './apply-patch.tool';
 export { batchTool } from './batch.tool';
 export { codeSearchTool } from './codesearch.tool';

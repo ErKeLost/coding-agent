@@ -12,6 +12,7 @@ import {
   type StreamPayload,
 } from "@/lib/stream-event-bus";
 import type { ThreadRuntimeState } from "@/hooks/use-thread-session";
+import type { ThreadContextWindowState } from "@/lib/context-window";
 
 export type QueuedSubmission = {
   id: string;
@@ -67,6 +68,10 @@ type UseAgentStreamOptions = {
     targetThreadId?: string,
   ) => void;
   setPlan: (value: SerializablePlan | null, targetThreadId?: string) => void;
+  setContextWindow: (
+    value: ThreadContextWindowState | null,
+    targetThreadId?: string,
+  ) => void;
   getThreadRuntimeState: (threadId: string) => ThreadRuntimeState;
   createId: () => string;
   parseSseEvent: (raw: string) => { event?: string; data: string } | null;
@@ -90,6 +95,7 @@ export function useAgentStream({
   setPreviewUrl,
   setPreviewLogs,
   setPlan,
+  setContextWindow,
   getThreadRuntimeState,
   createId,
   parseSseEvent,
@@ -193,12 +199,14 @@ export function useAgentStream({
           targetThreadId,
         ),
       getModelId: () => targetModel,
+      setContextWindow: (value) => setContextWindow(value, targetThreadId),
       setPlan: (value) => setPlan(value, targetThreadId),
     });
   }, [
     createId,
     getThreadRuntimeState,
     setItems,
+    setContextWindow,
     setPlan,
     setPreviewLogs,
     setPreviewUrl,

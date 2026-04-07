@@ -1,0 +1,3 @@
+List currently active browser sessions.
+
+Use this to recover a browser workflow, inspect which browser sessions are still alive, or find the `sessionId` you should reuse for later browser actions.

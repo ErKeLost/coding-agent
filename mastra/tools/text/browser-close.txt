@@ -1,0 +1,3 @@
+Close an existing browser session and release its resources.
+
+Use this when a browser workflow is finished, or when a stale session should be cleaned up before starting a fresh one.

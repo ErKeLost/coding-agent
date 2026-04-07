@@ -1,0 +1,9 @@
+Wait for browser state to become true inside an existing browser session.
+
+Useful conditions include:
+- a target element becomes available
+- specific text appears
+- the URL contains a substring
+- the page title changes
+
+Use this after clicks, form submissions, navigations, lazy rendering, or client-side transitions.

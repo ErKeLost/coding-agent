@@ -1,0 +1,12 @@
+Click an element inside an existing browser session.
+
+Provide a structured target such as:
+- `selector`
+- `text`
+- `role` + `name`
+- `placeholder`
+- `label`
+
+Use this when a browser step needs a real click, such as expanding menus, switching tabs, submitting forms, or navigating single-page applications.
+
+Always reuse the same `sessionId` / `session_id` from `browser_open`.

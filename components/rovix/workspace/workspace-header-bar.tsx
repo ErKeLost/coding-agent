@@ -2,6 +2,13 @@
 
 import { Button } from "@/components/ui/button";
 import {
+  Context,
+  ContextContent,
+  ContextContentBody,
+  ContextContentHeader,
+  ContextTrigger,
+} from "@/components/ai-elements/context";
+import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
@@ -12,6 +19,7 @@ import {
 import { SidebarTrigger } from "@/components/ui/sidebar";
 import { BranchPicker } from "@/components/rovix/branch-picker";
 import type { WorkspaceBranchPayload } from "@/lib/desktop-workspace";
+import type { ThreadContextWindowState } from "@/lib/context-window";
 import { Icon } from "@iconify/react";
 import { cn } from "@/lib/utils";
 
@@ -20,6 +28,7 @@ type WorkspaceHeaderBarProps = {
   title: string;
   workspaceLabel: string;
   updatedLabel: string;
+  contextWindow?: ThreadContextWindowState | null;
   workspaceBranches: WorkspaceBranchPayload | null;
   workspaceBranchLoading: boolean;
   onOpenSearch: () => void;
@@ -34,6 +43,7 @@ export function WorkspaceHeaderBar({
   title,
   workspaceLabel,
   updatedLabel,
+  contextWindow,
   workspaceBranches,
   workspaceBranchLoading,
   onOpenSearch,
@@ -75,6 +85,59 @@ export function WorkspaceHeaderBar({
           <Icon icon="solar:magnifer-linear" className="size-4" aria-hidden="true" />
           搜索
         </Button>
+
+        {contextWindow ? (
+          <Context
+            usedTokens={
+              contextWindow.actualPromptTokens ?? contextWindow.estimatedPromptTokens
+            }
+            maxTokens={contextWindow.limitTokens}
+          >
+            <ContextTrigger className="app-control h-9 rounded-lg border-0 px-3 text-[12px] font-normal text-foreground/78 shadow-none transition-colors hover:text-foreground" />
+            <ContextContent align="end" className="w-[320px] rounded-[16px] border-border/60">
+              <ContextContentHeader>
+                <div className="flex items-center justify-between gap-3 text-xs">
+                  <div className="space-y-1">
+                    <p className="font-medium text-foreground/92">线程上下文</p>
+                    <p className="text-[11px] text-muted-foreground/78">
+                      {contextWindow.source === "actual" ? "本轮已校准" : "切线程时为估算值"}
+                    </p>
+                  </div>
+                  <span className="rounded-full border border-border/60 px-2 py-0.5 text-[10px] text-muted-foreground/85">
+                    {contextWindow.status}
+                  </span>
+                </div>
+              </ContextContentHeader>
+              <ContextContentBody className="space-y-2.5 text-[11px]">
+                <div className="flex items-center justify-between">
+                  <span className="text-muted-foreground/78">最近消息</span>
+                  <span>{new Intl.NumberFormat("en-US", { notation: "compact" }).format(contextWindow.recentMessagesTokens)}</span>
+                </div>
+                <div className="flex items-center justify-between">
+                  <span className="text-muted-foreground/78">系统指令</span>
+                  <span>{new Intl.NumberFormat("en-US", { notation: "compact" }).format(contextWindow.systemTokens)}</span>
+                </div>
+                <div className="flex items-center justify-between">
+                  <span className="text-muted-foreground/78">当前输入</span>
+                  <span>{new Intl.NumberFormat("en-US", { notation: "compact" }).format(contextWindow.currentInputTokens)}</span>
+                </div>
+                <div className="flex items-center justify-between">
+                  <span className="text-muted-foreground/78">召回预留</span>
+                  <span>{new Intl.NumberFormat("en-US", { notation: "compact" }).format(contextWindow.recallReserveTokens)}</span>
+                </div>
+                <div className="flex items-center justify-between">
+                  <span className="text-muted-foreground/78">工具预留</span>
+                  <span>{new Intl.NumberFormat("en-US", { notation: "compact" }).format(contextWindow.toolsTokens)}</span>
+                </div>
+                {contextWindow.summaryActive ? (
+                  <div className="rounded-[12px] border border-amber-300/40 bg-amber-500/[0.06] px-3 py-2 text-[11px] leading-5 text-amber-900/80 dark:border-amber-500/20 dark:bg-amber-500/[0.08] dark:text-amber-100/80">
+                    已启用 compact summary，当前只保留最近 {contextWindow.preservedRecentMessages} 条原始消息进入主上下文。
+                  </div>
+                ) : null}
+              </ContextContentBody>
+            </ContextContent>
+          </Context>
+        ) : null}
 
         {workspaceBranches?.hasGit ? (
           <div className="flex h-9 max-w-full items-center overflow-hidden rounded-[14px] border border-border/60 bg-background/75 p-1 shadow-[0_8px_20px_rgba(0,0,0,0.07)] backdrop-blur-xl dark:bg-background/55">

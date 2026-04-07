@@ -1,0 +1,8 @@
+Capture the current browser page state from an existing browser session.
+
+This tool returns:
+- a visible-text excerpt
+- a short list of interactive elements
+- an optional screenshot attachment
+
+Use it to verify UI state, inspect rendered output, or give the model a fresh page summary before the next browser action.

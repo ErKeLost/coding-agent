@@ -86,8 +86,8 @@ export const getStatusBadge = (status: ToolPart["state"]) => {
     "approval-requested": <ClockIcon className="size-3 text-yellow-600" />,
     "approval-responded": <CheckCircleIcon className="size-3 text-blue-600" />,
     "output-available": <CheckCircleIcon className="size-3 text-emerald-500" />,
-    "output-error": <XCircleIcon className="size-3 text-red-500" />,
-    "output-denied": <XCircleIcon className="size-3 text-orange-500" />,
+    "output-error": <XCircleIcon className="size-3 text-amber-500" />,
+    "output-denied": <XCircleIcon className="size-3 text-amber-500" />,
   };
 
   return (
@@ -166,7 +166,7 @@ const getStatusTone = (status: ToolPart["state"]) => {
       return "bg-emerald-500/8 text-emerald-700 border-emerald-500/20";
     case "output-error":
     case "output-denied":
-      return "bg-destructive/8 text-destructive border-destructive/20";
+      return "bg-amber-500/8 text-amber-700 border-amber-500/20";
     case "input-available":
     case "input-streaming":
     case "approval-requested":
@@ -449,6 +449,19 @@ const extractImageOutputs = (
       (typeof img.url === "string" ? img.url : undefined)
     )]
     .filter((src): src is string => typeof src === "string");
+  const attachments = Array.isArray(record.attachments)
+    ? (record.attachments as Array<Record<string, unknown>>)
+    : [];
+  const attachmentImages = attachments
+    .map((item) => {
+      const mime = typeof item.mime === "string" ? item.mime : "";
+      const data = typeof item.data === "string" ? item.data : undefined;
+      return mime.startsWith("image/") ? data : undefined;
+    })
+    .filter((src): src is string => typeof src === "string");
+  if (attachmentImages.length > 0) {
+    gallery.push(...attachmentImages);
+  }
   return { primary: url ? { src: url } : undefined, gallery };
 };
 
@@ -503,7 +516,9 @@ export const ToolOutput = ({
   let Output = <div>{output as ReactNode}</div>;
   const imageOutputs = useMemo(() => extractImageOutputs(output), [output]);
   const allowImagePreview =
-    toolNameLower.includes("image") || toolNameLower.includes("img");
+    toolNameLower.includes("image") ||
+    toolNameLower.includes("img") ||
+    toolNameLower.includes("browser");
 
   if (patchDiff) {
     Output = null;

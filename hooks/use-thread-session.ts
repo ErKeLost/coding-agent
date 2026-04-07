@@ -1,8 +1,8 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { AppRouterInstance } from "next/dist/shared/lib/app-router-context.shared-runtime";
 import type { ReadonlyURLSearchParams } from "next/navigation";
+import type { ThreadContextWindowState } from "@/lib/context-window";
 import type { ChatItem, PreviewLog } from "@/lib/stream-event-bus";
 import {
   LAST_ACTIVE_THREAD_STORAGE_KEY,
@@ -10,6 +10,14 @@ import {
 } from "@/lib/thread-session";
 
 const PENDING_NEW_THREAD_STORAGE_KEY = "chat-pending-new-thread";
+const getThreadIdFromPathname = (pathname: string) => {
+  const normalized = pathname.trim();
+  if (!normalized || normalized === "/") return "";
+  const [withoutQuery] = normalized.split("?");
+  const [withoutHash] = withoutQuery.split("#");
+  const segments = withoutHash.split("/").filter(Boolean);
+  return segments[0] ?? "";
+};
 
 type SerializablePlan = {
   title: string;
@@ -26,6 +34,7 @@ export type ThreadRuntimeState = {
   previewUrl: string | null;
   previewLogs: PreviewLog[];
   plan: SerializablePlan | null;
+  contextWindow: ThreadContextWindowState | null;
   workspaceRoot: string | null;
   hydrated: boolean;
   loading: boolean;
@@ -37,7 +46,6 @@ type ThreadRuntimeUpdater =
 
 type UseThreadSessionOptions = {
   params: ReadonlyURLSearchParams | Record<string, string | string[] | undefined> | null | undefined;
-  router: AppRouterInstance;
   setError: (value: string | null) => void;
   createThreadId: () => string;
   serializeItemsForThread: (items: ChatItem[]) => ChatItem[];
@@ -53,6 +61,7 @@ const EMPTY_RUNTIME: ThreadRuntimeState = {
   previewUrl: null,
   previewLogs: [],
   plan: null,
+  contextWindow: null,
   workspaceRoot: null,
   hydrated: false,
   loading: false,
@@ -81,12 +90,12 @@ const areRuntimeStatesEqual = (
   previous.hydrated === next.hydrated &&
   previous.loading === next.loading &&
   previous.plan === next.plan &&
+  previous.contextWindow === next.contextWindow &&
   previous.items === next.items &&
   previous.previewLogs === next.previewLogs;
 
 export function useThreadSession({
   params,
-  router,
   setError,
   createThreadId,
   serializeItemsForThread,
@@ -96,7 +105,16 @@ export function useThreadSession({
   isPlanRecord,
   onClearDesktopState,
 }: UseThreadSessionOptions) {
-  const [threadId, setThreadId] = useState<string>("");
+  const rawInitialId =
+    "id" in (params ?? {}) ? (params as { id?: string | string[] }).id : undefined;
+  const initialRouteThreadId =
+    typeof rawInitialId === "string"
+      ? rawInitialId
+      : Array.isArray(rawInitialId)
+        ? (rawInitialId[0] ?? "")
+        : "";
+
+  const [threadId, setThreadId] = useState<string>(initialRouteThreadId);
   const [recentThreads, setRecentThreads] = useState<ThreadRecord[]>([]);
   const [pendingNewThreadId, setPendingNewThreadId] = useState<string | null>(null);
   const [threadRuntimeById, setThreadRuntimeById] = useState<
@@ -106,6 +124,8 @@ export function useThreadSession({
   const runtimeRef = useRef(threadRuntimeById);
   const recentThreadsRef = useRef(recentThreads);
   const persistTimersRef = useRef<Record<string, number>>({});
+  const hydrationRequestsRef = useRef<Record<string, Promise<void>>>({});
+  const initializedRouteRef = useRef(false);
 
   useEffect(() => {
     runtimeRef.current = threadRuntimeById;
@@ -153,6 +173,7 @@ export function useThreadSession({
         Boolean(runtime.workspaceRoot) ||
         runtime.items.length > 0 ||
         Boolean(runtime.plan) ||
+        Boolean(runtime.contextWindow) ||
         Boolean(runtime.previewUrl) ||
         runtime.previewLogs.length > 0;
 
@@ -179,6 +200,7 @@ export function useThreadSession({
             previewUrl: runtime.previewUrl,
             items: serializeItemsForThread(runtime.items),
             plan: runtime.plan,
+            contextWindow: runtime.contextWindow,
             previewLogs: runtime.previewLogs.map((entry) => ({
               ...entry,
               timestamp: entry.timestamp.toISOString(),
@@ -218,6 +240,156 @@ export function useThreadSession({
     }
   }, [schedulePersistThread]);
 
+  const navigateToThread = useCallback((nextThreadId: string) => {
+    if (!nextThreadId || typeof window === "undefined") return;
+    const nextPath = `/${nextThreadId}`;
+    if (window.location.pathname !== nextPath) {
+      window.history.pushState(null, "", nextPath);
+    }
+  }, []);
+
+  const hydrateThreadSession = useCallback(async (
+    targetThreadId: string,
+    options?: { force?: boolean },
+  ) => {
+    if (!targetThreadId) return;
+
+    const currentRuntime = getRuntime(runtimeRef.current, targetThreadId);
+    if (currentRuntime.hydrated && !options?.force) {
+      return;
+    }
+
+    const existingRequest = hydrationRequestsRef.current[targetThreadId];
+    if (existingRequest) {
+      await existingRequest;
+      return;
+    }
+
+    updateThreadRuntime(
+      targetThreadId,
+      (previous) => ({
+        ...previous,
+        loading: true,
+      }),
+      { persist: false },
+    );
+
+    const request = (async () => {
+      try {
+        const response = await fetch(`/api/threads/${targetThreadId}`, { cache: "no-store" });
+        if (response.status === 404) {
+          updateThreadRuntime(
+            targetThreadId,
+            {
+              ...EMPTY_RUNTIME,
+              hydrated: true,
+              loading: false,
+            },
+            { persist: false },
+          );
+          return;
+        }
+        if (!response.ok) {
+          throw new Error("Failed to load thread session");
+        }
+
+        const payload = (await response.json()) as {
+          thread?: {
+            title?: string;
+            state?: {
+              workspaceRoot?: string | null;
+              previewUrl?: string | null;
+              items?: unknown[];
+              plan?: unknown;
+              contextWindow?: ThreadContextWindowState | null;
+              previewLogs?: Array<{
+                level: "log" | "warn" | "error";
+                message: string;
+                timestamp: string | Date;
+              }>;
+            };
+          };
+        };
+        const state = payload.thread?.state;
+        const hydratedWorkspaceRoot =
+          typeof state?.workspaceRoot === "string" && state.workspaceRoot.trim()
+            ? state.workspaceRoot.trim()
+            : null;
+        const nextItems = Array.isArray(state?.items) ? (state.items as ChatItem[]) : [];
+        const nextPlan = isPlanRecord(state?.plan) ? state.plan : null;
+        const nextPreviewUrl =
+          typeof state?.previewUrl === "string" ? state.previewUrl : null;
+        const nextContextWindow =
+          state?.contextWindow && typeof state.contextWindow === "object"
+            ? (state.contextWindow as ThreadContextWindowState)
+            : null;
+        const nextPreviewLogs = Array.isArray(state?.previewLogs)
+          ? state.previewLogs.map((entry) => ({
+              ...entry,
+              timestamp: new Date(entry.timestamp),
+            }))
+          : [];
+
+        logWorkspaceDebug("hydrateThread:loaded", {
+          threadId: targetThreadId,
+          hydratedWorkspaceRoot,
+          title: payload.thread?.title ?? null,
+        });
+
+        setRecentThreads((prev) =>
+          prev.map((entry) =>
+            entry.id === targetThreadId
+              ? {
+                  ...entry,
+                  subtitle: summarizeWorkspaceRoot(hydratedWorkspaceRoot),
+                  workspaceRoot: hydratedWorkspaceRoot,
+                }
+              : entry,
+          ),
+        );
+        updateThreadRuntime(
+          targetThreadId,
+          (previous) => ({
+            items:
+              previous.items.length > nextItems.length ? previous.items : nextItems,
+            plan: previous.plan ?? nextPlan,
+            contextWindow: previous.contextWindow ?? nextContextWindow,
+            previewUrl: previous.previewUrl ?? nextPreviewUrl,
+            previewLogs:
+              previous.previewLogs.length > 0 &&
+              previous.previewLogs.length >= nextPreviewLogs.length
+                ? previous.previewLogs
+                : nextPreviewLogs,
+            workspaceRoot: previous.workspaceRoot ?? hydratedWorkspaceRoot,
+            hydrated: true,
+            loading: false,
+          }),
+          { persist: false },
+        );
+      } catch {
+        updateThreadRuntime(
+          targetThreadId,
+          (previous) => ({
+            ...previous,
+            hydrated: true,
+            loading: false,
+          }),
+          { persist: false },
+        );
+      } finally {
+        delete hydrationRequestsRef.current[targetThreadId];
+      }
+    })();
+
+    hydrationRequestsRef.current[targetThreadId] = request;
+    await request;
+  }, [
+    isPlanRecord,
+    logWorkspaceDebug,
+    summarizeWorkspaceRoot,
+    updateThreadRuntime,
+  ]);
+
   const resetConversationState = useCallback((targetThreadId?: string) => {
     const effectiveThreadId = targetThreadId ?? threadId;
     if (!effectiveThreadId) return;
@@ -227,6 +399,7 @@ export function useThreadSession({
         ...previous,
         items: [],
         plan: null,
+        contextWindow: null,
         previewUrl: null,
         previewLogs: [],
       }),
@@ -256,23 +429,55 @@ export function useThreadSession({
   }, [loadThreadList]);
 
   useEffect(() => {
-    const rawId = "id" in (params ?? {}) ? (params as { id?: string | string[] }).id : undefined;
-    const routeId = Array.isArray(rawId) ? rawId[0] : rawId;
-    if (routeId && typeof routeId === "string") {
-      setThreadId(routeId);
+    if (initializedRouteRef.current) {
+      return;
+    }
+
+    initializedRouteRef.current = true;
+
+    if (!initialRouteThreadId) {
+      return;
+    }
+
+    setThreadRuntimeById((previous) =>
+      previous[initialRouteThreadId]
+        ? previous
+        : {
+            ...previous,
+            [initialRouteThreadId]: {
+              ...EMPTY_RUNTIME,
+              loading: true,
+            },
+          },
+    );
+  }, [initialRouteThreadId]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+
+    const handlePopState = () => {
+      const nextThreadId = getThreadIdFromPathname(window.location.pathname);
+      if (!nextThreadId || nextThreadId === threadId) return;
+
+      setThreadId(nextThreadId);
       setThreadRuntimeById((previous) =>
-        previous[routeId]
+        previous[nextThreadId]
           ? previous
           : {
               ...previous,
-              [routeId]: {
+              [nextThreadId]: {
                 ...EMPTY_RUNTIME,
                 loading: true,
               },
             },
       );
-    }
-  }, [params]);
+    };
+
+    window.addEventListener("popstate", handlePopState);
+    return () => {
+      window.removeEventListener("popstate", handlePopState);
+    };
+  }, [threadId]);
 
   useEffect(() => {
     try {
@@ -335,130 +540,12 @@ export function useThreadSession({
       setPendingNewThreadId(null);
       return;
     }
-
-    let cancelled = false;
-    updateThreadRuntime(
-      threadId,
-      (previous) => ({
-        ...previous,
-        loading: true,
-      }),
-      { persist: false },
-    );
-
-    const loadThreadSession = async () => {
-      try {
-        const response = await fetch(`/api/threads/${threadId}`, { cache: "no-store" });
-        if (cancelled) return;
-        if (response.status === 404) {
-          updateThreadRuntime(
-            threadId,
-            {
-              ...EMPTY_RUNTIME,
-              hydrated: true,
-              loading: false,
-            },
-            { persist: false },
-          );
-          return;
-        }
-        if (!response.ok) {
-          throw new Error("Failed to load thread session");
-        }
-
-        const payload = (await response.json()) as {
-          thread?: {
-            title?: string;
-            state?: {
-              workspaceRoot?: string | null;
-              previewUrl?: string | null;
-              items?: unknown[];
-              plan?: unknown;
-              previewLogs?: Array<{
-                level: "log" | "warn" | "error";
-                message: string;
-                timestamp: string | Date;
-              }>;
-            };
-          };
-        };
-        const state = payload.thread?.state;
-        const hydratedWorkspaceRoot =
-          typeof state?.workspaceRoot === "string" && state.workspaceRoot.trim()
-            ? state.workspaceRoot.trim()
-            : null;
-        const nextItems = Array.isArray(state?.items) ? (state.items as ChatItem[]) : [];
-        const nextPlan = isPlanRecord(state?.plan) ? state.plan : null;
-        const nextPreviewUrl =
-          typeof state?.previewUrl === "string" ? state.previewUrl : null;
-        const nextPreviewLogs = Array.isArray(state?.previewLogs)
-          ? state.previewLogs.map((entry) => ({
-              ...entry,
-              timestamp: new Date(entry.timestamp),
-            }))
-          : [];
-
-        logWorkspaceDebug("hydrateThread:loaded", {
-          threadId,
-          hydratedWorkspaceRoot,
-          title: payload.thread?.title ?? null,
-        });
-
-        setRecentThreads((prev) =>
-          prev.map((entry) =>
-            entry.id === threadId
-              ? {
-                  ...entry,
-                  subtitle: summarizeWorkspaceRoot(hydratedWorkspaceRoot),
-                  workspaceRoot: hydratedWorkspaceRoot,
-                }
-              : entry,
-          ),
-        );
-        updateThreadRuntime(
-          threadId,
-          (previous) => ({
-            items:
-              previous.items.length > nextItems.length ? previous.items : nextItems,
-            plan: previous.plan ?? nextPlan,
-            previewUrl: previous.previewUrl ?? nextPreviewUrl,
-            previewLogs:
-              previous.previewLogs.length > 0 &&
-              previous.previewLogs.length >= nextPreviewLogs.length
-                ? previous.previewLogs
-                : nextPreviewLogs,
-            workspaceRoot: previous.workspaceRoot ?? hydratedWorkspaceRoot,
-            hydrated: true,
-            loading: false,
-          }),
-          { persist: false },
-        );
-      } catch {
-        if (cancelled) return;
-        updateThreadRuntime(
-          threadId,
-          (previous) => ({
-            ...previous,
-            hydrated: true,
-            loading: false,
-          }),
-          { persist: false },
-        );
-      }
-    };
-
-    void loadThreadSession();
-
-    return () => {
-      cancelled = true;
-    };
+    void hydrateThreadSession(threadId);
   }, [
-    isPlanRecord,
+    hydrateThreadSession,
     logWorkspaceDebug,
     pendingNewThreadId,
-    summarizeWorkspaceRoot,
     threadId,
-    updateThreadRuntime,
   ]);
 
   const handleNewThread = useCallback((initialWorkspaceRoot?: string | null) => {
@@ -494,7 +581,7 @@ export function useThreadSession({
       },
       { persist: false },
     );
-    router.push(`/${nextId}`);
+    navigateToThread(nextId);
 
     void fetch(`/api/threads/${nextId}`, {
       method: "PATCH",
@@ -507,6 +594,7 @@ export function useThreadSession({
           previewUrl: null,
           items: [],
           plan: null,
+          contextWindow: null,
           previewLogs: [],
         },
       }),
@@ -517,24 +605,27 @@ export function useThreadSession({
     createThreadId,
     logWorkspaceDebug,
     mergeRecentThreads,
-    router,
+    navigateToThread,
     summarizeWorkspaceRoot,
     updateThreadRuntime,
   ]);
 
   const handleSelectThread = useCallback((nextThreadId: string) => {
     if (!nextThreadId || nextThreadId === threadId) return;
-    setThreadId(nextThreadId);
-    updateThreadRuntime(
-      nextThreadId,
-      (previous) => ({
-        ...previous,
-        loading: !previous.hydrated,
-      }),
-      { persist: false },
-    );
-    router.push(`/${nextThreadId}`);
-  }, [router, threadId, updateThreadRuntime]);
+    const nextRuntime = getRuntime(runtimeRef.current, nextThreadId);
+
+    if (nextRuntime.hydrated) {
+      setThreadId(nextThreadId);
+      navigateToThread(nextThreadId);
+      return;
+    }
+
+    void (async () => {
+      await hydrateThreadSession(nextThreadId);
+      setThreadId(nextThreadId);
+      navigateToThread(nextThreadId);
+    })();
+  }, [hydrateThreadSession, navigateToThread, threadId]);
 
   const handleDeleteThread = useCallback(async (targetThreadId: string) => {
     if (!targetThreadId) return;
@@ -617,6 +708,18 @@ export function useThreadSession({
     }));
   }, [threadId, updateThreadRuntime]);
 
+  const setContextWindow = useCallback((
+    value: ThreadContextWindowState | null,
+    targetThreadId?: string,
+  ) => {
+    const effectiveThreadId = targetThreadId ?? threadId;
+    if (!effectiveThreadId) return;
+    updateThreadRuntime(effectiveThreadId, (previous) => ({
+      ...previous,
+      contextWindow: value,
+    }));
+  }, [threadId, updateThreadRuntime]);
+
   const setPreviewUrl = useCallback((value: string | null, targetThreadId?: string) => {
     const effectiveThreadId = targetThreadId ?? threadId;
     if (!effectiveThreadId) return;
@@ -681,6 +784,8 @@ export function useThreadSession({
     setItems,
     plan: activeRuntime.plan,
     setPlan,
+    contextWindow: activeRuntime.contextWindow,
+    setContextWindow,
     previewUrl: activeRuntime.previewUrl,
     setPreviewUrl,
     previewLogs: activeRuntime.previewLogs,

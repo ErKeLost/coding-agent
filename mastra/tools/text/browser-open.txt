@@ -1,0 +1,9 @@
+Open a real browser session and navigate to a URL.
+
+Use this when the task requires rendered JavaScript, interactive UI state, login-aware pages, screenshots, or browser-driven verification.
+
+Important behavior:
+- Reuse `sessionId` / `session_id` to continue working inside the same browser tab.
+- If no session id is provided, this tool creates a new browser session.
+- Prefer this over `webfetch` when the page depends on client-side rendering or user interaction.
+- Keep sessions alive across multiple browser steps instead of opening a brand new browser for each action.

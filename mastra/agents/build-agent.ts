@@ -2,11 +2,19 @@ import { Agent } from '@mastra/core/agent';
 import type { RequestContext } from '@mastra/core/request-context';
 import type { InputProcessorOrWorkflow } from '@mastra/core/processors';
 import { SkillSearchProcessor, TokenLimiterProcessor } from '@mastra/core/processors';
+import { getContextBudgetConfig } from '@/lib/context-window';
 import { buildAgentMemory } from '../memory';
 import {
   applyPatchTool,
   batchTool,
   bashTool,
+  browserClickTool,
+  browserCloseTool,
+  browserListSessionsTool,
+  browserOpenTool,
+  browserSnapshotTool,
+  browserTypeTool,
+  browserWaitTool,
   codeSearchTool,
   editTool,
   execCommandTool,
@@ -36,6 +44,13 @@ const staticTools = {
   apply_patch: applyPatchTool,
   batch: batchTool,
   bash: bashTool,
+  browser_click: browserClickTool,
+  browser_close: browserCloseTool,
+  browser_list_sessions: browserListSessionsTool,
+  browser_open: browserOpenTool,
+  browser_snapshot: browserSnapshotTool,
+  browser_type: browserTypeTool,
+  browser_wait: browserWaitTool,
   codesearch: codeSearchTool,
   edit: editTool,
   exec_command: execCommandTool,
@@ -68,13 +83,9 @@ const resolveModel = ({ requestContext }: { requestContext: RequestContext }) =>
   }
   return modelEnv;
 };
-const CONTEXT_WINDOW_TOKENS = 300000;
-const CONTEXT_USAGE_RATIO = 0.6;
-const CONTEXT_LIMIT_TOKENS = Math.floor(CONTEXT_WINDOW_TOKENS * CONTEXT_USAGE_RATIO);
-const tokenLimiterProcessor = new TokenLimiterProcessor(CONTEXT_LIMIT_TOKENS);
 const continuationProcessor = new ContinuationProcessor();
 
-const buildInstructions = ({ requestContext }: { requestContext: RequestContext }) => {
+export const buildAgentInstructions = ({ requestContext }: { requestContext: RequestContext }) => {
   const model = resolveModel({ requestContext });
   const baseInstructions = selectBuildInstructions(model);
   const workspaceRoot = resolveWorkspaceRootFromRequest(requestContext);
@@ -102,6 +113,8 @@ const buildInstructions = ({ requestContext }: { requestContext: RequestContext 
 - Avoid re-reading the same file with the same intent unless the file changed, the first read was incomplete, or you need a different range for verification.
 - Use bash for validation or project commands.
 - Use \`exec_command\` as the default protocol for long-running or interactive commands.
+- Use \`webfetch\` or \`websearch\` for static web content lookup, and use the \`browser_*\` tools when a page requires real rendering, interaction, screenshots, or client-side state.
+- When using browser automation, keep reusing the same \`sessionId\` / \`session_id\` across steps instead of opening a brand new browser for each action.
 - For \`exec_command\`, prefer Codex-style arguments: \`cmd\`, \`workdir\`, and optional \`yield_time_ms\`.
 - Treat the returned \`session_id\` / \`sessionId\` from \`exec_command\` as the canonical follow-up session handle.
 - Use \`write_stdin\` with empty \`chars\` to poll more output, or non-empty \`chars\` to send input.
@@ -181,19 +194,26 @@ Operate on the local project using the available file, search, edit, and command
     runtimeDirectives.push(enabledSkillsInstructions);
   }
 
+  const compactionSummary = getRequestContextString(requestContext, 'compactionSummary');
+  if (compactionSummary) {
+    runtimeDirectives.push(`Compacted thread summary:
+${compactionSummary}`.trim());
+  }
+
   return `${baseInstructions}\n\n${runtimeDirectives.join('\n\n')}`;
 };
 
 export const buildAgent = new Agent({
   id: 'build-agent',
   name: 'Build Agent',
-  instructions: buildInstructions,
+  instructions: buildAgentInstructions,
   model: ({ requestContext }) => resolveModel({ requestContext }),
   memory: buildAgentMemory,
   inputProcessors: ({ requestContext }) => {
     const workspace = getWorkspaceForRequest(requestContext);
+    const model = resolveModel({ requestContext });
     const processors: InputProcessorOrWorkflow[] = [
-      tokenLimiterProcessor,
+      new TokenLimiterProcessor(getContextBudgetConfig(model).usableLimitTokens),
       continuationProcessor,
     ];
     processors.push(

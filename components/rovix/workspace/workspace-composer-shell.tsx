@@ -1,6 +1,7 @@
 "use client";
 
 import type { ReactNode } from "react";
+import type { ThreadContextWindowState } from "@/lib/context-window";
 import { PromptInputProvider } from "@/components/ai-elements/prompt-input";
 import { Plan } from "@/components/tool-ui/plan";
 import { Button } from "@/components/ui/button";
@@ -10,6 +11,7 @@ import { cn } from "@/lib/utils";
 type WorkspaceComposerShellProps = {
   chatColumnClassName: string;
   activePlan: React.ComponentProps<typeof Plan> | null;
+  contextWindow?: ThreadContextWindowState | null;
   queuedSubmissionPreview: {
     text?: string;
     files?: Array<{ filename?: string | null } | null>;
@@ -24,6 +26,7 @@ type WorkspaceComposerShellProps = {
 export function WorkspaceComposerShell({
   chatColumnClassName,
   activePlan,
+  contextWindow,
   queuedSubmissionPreview,
   queuedSubmissionSummary,
   guideBanner,
@@ -100,6 +103,37 @@ export function WorkspaceComposerShell({
           ) : null}
 
           {children}
+
+          {contextWindow ? (
+            <div className="flex w-full items-center justify-between border-t border-border/35 px-5 py-2 text-[11px] text-muted-foreground/80">
+              <div className="flex min-w-0 items-center gap-2">
+                <span className="shrink-0">当前上下文</span>
+                <span className="font-mono text-foreground/84">
+                  {new Intl.NumberFormat("en-US", {
+                    notation: "compact",
+                  }).format(
+                    contextWindow.actualPromptTokens ??
+                      contextWindow.estimatedPromptTokens,
+                  )}
+                  {" / "}
+                  {new Intl.NumberFormat("en-US", {
+                    notation: "compact",
+                  }).format(contextWindow.limitTokens)}
+                </span>
+                <span className="shrink-0 rounded-full border border-border/55 px-1.5 py-0.5 text-[10px] uppercase tracking-[0.06em]">
+                  {Math.round(contextWindow.percentage * 100)}%
+                </span>
+              </div>
+              <div className="flex shrink-0 items-center gap-2">
+                <span>{contextWindow.source === "actual" ? "实测" : "估算"}</span>
+                {contextWindow.summaryActive ? (
+                  <span className="rounded-full border border-amber-300/40 bg-amber-500/[0.08] px-1.5 py-0.5 text-[10px] text-amber-700 dark:border-amber-500/25 dark:text-amber-300">
+                    compact
+                  </span>
+                ) : null}
+              </div>
+            </div>
+          ) : null}
         </div>
       </div>
     </PromptInputProvider>

@@ -20,6 +20,7 @@ export const EMPTY_AVATAR_DIRECTIVE: AvatarDirective = {
     glowColor: "rgba(94, 151, 255, 0.28)",
   },
   source: "heuristic",
+  sourceDetail: "default",
 };
 
 type AvatarShellStore = {

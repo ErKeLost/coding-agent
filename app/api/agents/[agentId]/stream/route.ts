@@ -4,6 +4,8 @@ import { RequestContext } from "@mastra/core/request-context";
 import { redactStreamChunk } from "@mastra/server/server-adapter";
 import { mastra } from "@/mastra";
 import { getModelTuning } from "@/lib/model-tuning";
+import { extractCurrentInputText } from "@/lib/continuation";
+import { getContextPressureStatus } from "@/lib/context-window";
 import {
   upsertThreadSession,
 } from "@/lib/server/thread-session-store";
@@ -15,6 +17,8 @@ import {
   currentTurnIncludesImageInput,
   normalizeAgentMessageInput,
 } from "@/lib/server/agent-input";
+import { prepareThreadContextWindow } from "@/lib/server/context-compaction";
+import { buildAgentInstructions } from "@/mastra/agents/build-agent";
 
 export const runtime = "nodejs";
 const BUILD_AGENT_ID = "build-agent";
@@ -84,6 +88,11 @@ type StreamEvent =
       usage: LanguageModelUsage;
       modelId?: string;
       costUSD?: number;
+    }
+  | {
+      type: "stream.event";
+      eventName: "context.updated";
+      contextWindow: unknown;
     }
   | {
       type: "stream.event";
@@ -220,6 +229,9 @@ const normalizeQwenPrompt = <TMessage extends SystemLikeMessage>(args: {
   };
 };
 
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  Boolean(value) && typeof value === "object" && !Array.isArray(value);
+
 const summarizeIncomingMessageInput = (input: unknown) => {
   if (!Array.isArray(input)) {
     return {
@@ -289,7 +301,7 @@ export async function POST(
   if (!messageInput) {
     return NextResponse.json({ error: "message is required" }, { status: 400 });
   }
-  const { requestContext, effectiveWorkspaceRoot } =
+  const { requestContext, effectiveWorkspaceRoot, threadSession } =
     await buildAgentRequestContext(payload);
   console.info("[workspace-debug] stream-route", {
     threadId: payload.threadId ?? null,
@@ -309,6 +321,22 @@ export async function POST(
   const agent = mastra.getAgentById(agentId);
   if (!agent) {
     return NextResponse.json({ error: `Agent not found: ${agentId}` }, { status: 404 });
+  }
+  const contextCompactionAgent = mastra.getAgentById("context-compaction-agent");
+  if (!contextCompactionAgent) {
+    return NextResponse.json({ error: "Context compaction agent not found" }, { status: 500 });
+  }
+  const currentInputText = extractCurrentInputText(messageInput);
+  const systemPromptText = buildAgentInstructions({ requestContext });
+  const preparedContext = await prepareThreadContextWindow({
+    agent: contextCompactionAgent,
+    requestContext,
+    threadSession,
+    incomingText: currentInputText,
+    systemPromptText,
+  });
+  if (preparedContext.compaction?.summary) {
+    requestContext.set("compactionSummary", preparedContext.compaction.summary);
   }
   const logger = mastra.getLogger();
   type AgentStreamInput = Parameters<typeof agent.stream>[0];
@@ -937,14 +965,15 @@ export async function POST(
   const startedToolMeta = new Map<string, { toolName?: string; args?: unknown }>();
   let lastSessionStateKey: string | undefined;
   let lastUsageKey: string | undefined;
+  let lastContextWindowKey: string | undefined;
   let latestPreviewUrl: string | undefined;
+  let latestContextWindow = preparedContext.contextWindow;
   let streamOutcome: "idle" | "streaming" | "done" | "error" = "idle";
   let streamTerminalErrorText: string | undefined;
   let activeAgentLabel: string | undefined = agent.name;
   const pendingAppliedSteers: string[] = [];
-  const memory =
-    payload.memory ??
-    (payload.threadId &&
+  const defaultMemory =
+    payload.threadId &&
     !currentTurnIncludesImageInput(
       typeof messageInput === "string" ? null : messageInput,
     )
@@ -952,7 +981,22 @@ export async function POST(
           thread: { id: payload.threadId },
           resource: "web",
         }
-      : undefined);
+      : undefined;
+  const memory =
+    isRecord(payload.memory)
+      ? {
+          ...payload.memory,
+          options: {
+            ...(isRecord(payload.memory.options) ? payload.memory.options : {}),
+            ...preparedContext.memoryOptions,
+          },
+        }
+      : defaultMemory
+        ? {
+            ...defaultMemory,
+            options: preparedContext.memoryOptions,
+          }
+        : undefined;
   const shouldNormalizeQwenPrompt = isQwenModel(payload.model);
 
   const startAgentStream = async (requestContextForAttempt: RequestContext) => {
@@ -1167,6 +1211,29 @@ export async function POST(
         costUSD,
       };
       enqueueJson(controller, usagePayload);
+      const nextContextWindow = {
+        ...preparedContext.contextWindow,
+        actualPromptTokens: usage.inputTokens ?? 0,
+        outputTokens: usage.outputTokens ?? 0,
+        totalTokens: usage.totalTokens ?? 0,
+        percentage: Math.min(
+          1,
+          (usage.inputTokens ?? 0) / preparedContext.contextWindow.limitTokens,
+        ),
+        status: getContextPressureStatus(usage.inputTokens ?? 0, payload.model),
+        source: "actual" as const,
+        updatedAt: Date.now(),
+      };
+      const contextWindowKey = JSON.stringify(nextContextWindow);
+      if (contextWindowKey !== lastContextWindowKey) {
+        lastContextWindowKey = contextWindowKey;
+        latestContextWindow = nextContextWindow;
+        enqueueJson(controller, {
+          type: "stream.event",
+          eventName: "context.updated",
+          contextWindow: nextContextWindow,
+        } satisfies StreamEvent);
+      }
     }
   };
 
@@ -1286,6 +1353,11 @@ export async function POST(
           model: payload.model ?? null,
           workspaceRoot: effectiveWorkspaceRoot ?? null,
         });
+        enqueueJson(controller, {
+          type: "stream.event",
+          eventName: "context.updated",
+          contextWindow: preparedContext.contextWindow,
+        } satisfies StreamEvent);
 
         if (payload.threadId) {
           await upsertThreadSession({
@@ -1371,6 +1443,16 @@ export async function POST(
             : emittedToolCompletions.size > 0 || latestPreviewUrl
               ? "done"
               : "idle";
+        if (payload.threadId) {
+          await upsertThreadSession({
+            threadId: payload.threadId,
+            state: {
+              contextWindow: latestContextWindow,
+            },
+          }).catch(() => {
+            // Ignore terminal context persistence failures.
+          });
+        }
         const endedEvent: StreamEvent = {
           type: "stream.event",
           eventName: "session.ended",

@@ -40,6 +40,7 @@ const EMPTY_DIRECTIVE: AvatarDirective = {
     glowColor: "rgba(94, 151, 255, 0.28)",
   },
   source: "heuristic",
+  sourceDetail: "default",
 };
 
 const toAvatarItem = (item: ChatItem): AvatarContextItem => {

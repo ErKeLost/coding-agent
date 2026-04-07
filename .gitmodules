@@ -13,3 +13,6 @@
 [submodule "opencode-learn"]
 	path = opencode-learn
 	url = https://github.com/sst/opencode.git
+[submodule "cloud-code"]
+	path = cloud-code
+	url = https://github.com/ErKeLost/cloud-code.git

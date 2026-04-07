@@ -29,6 +29,7 @@ export const DEFAULT_AVATAR_DIRECTIVE: AvatarDirective = {
     glowColor: "rgba(94, 151, 255, 0.28)",
   },
   source: "heuristic",
+  sourceDetail: "default",
 };
 
 export const normalizeAvatarModelName = (rawModel: string) =>
@@ -403,10 +404,15 @@ export const heuristicAvatarDirective = (
     latestAssistantContent: latestAssistant?.content,
     seed: seedBase,
   });
+  const shouldStayQuiet =
+    (phase === "waiting-tool" || phase === "watching-output") &&
+    !latestTool?.errorText &&
+    !latestAssistant?.content?.trim();
+  const quietBubble = shouldStayQuiet ? "" : bubble;
 
   if (phase === "error") {
     return {
-      bubble,
+      bubble: quietBubble,
       speak: strategy.prefersComfortFirst,
       action: "concern",
       emotion: "concerned",
@@ -422,12 +428,13 @@ export const heuristicAvatarDirective = (
         glowColor: "rgba(245, 158, 11, 0.33)",
       },
       source: "heuristic",
+      sourceDetail: "default",
     };
   }
 
   if (phase === "waiting-tool") {
     return {
-      bubble,
+      bubble: quietBubble,
       speak: false,
       action: "focus",
       emotion: "focused",
@@ -443,12 +450,13 @@ export const heuristicAvatarDirective = (
         glowColor: "rgba(96, 165, 250, 0.3)",
       },
       source: "heuristic",
+      sourceDetail: "default",
     };
   }
 
   if (phase === "watching-output") {
     return {
-      bubble,
+      bubble: quietBubble,
       speak: false,
       action: "thinking",
       emotion: "focused",
@@ -464,12 +472,13 @@ export const heuristicAvatarDirective = (
         glowColor: "rgba(96, 165, 250, 0.24)",
       },
       source: "heuristic",
+      sourceDetail: "default",
     };
   }
 
   if (phase === "near-solution") {
     return {
-      bubble,
+      bubble: quietBubble,
       speak: false,
       action: "nod",
       emotion: "warm",
@@ -485,12 +494,13 @@ export const heuristicAvatarDirective = (
         glowColor: "rgba(129, 140, 248, 0.24)",
       },
       source: "heuristic",
+      sourceDetail: "default",
     };
   }
 
   if (phase === "user-focus") {
     return {
-      bubble,
+      bubble: quietBubble,
       speak: false,
       action: "idle",
       emotion: "warm",
@@ -506,6 +516,7 @@ export const heuristicAvatarDirective = (
         glowColor: "rgba(167, 139, 250, 0.22)",
       },
       source: "heuristic",
+      sourceDetail: "default",
     };
   }
 
@@ -536,44 +547,59 @@ const summarizeItems = (items: AvatarContextItem[]) =>
     .join("\n");
 
 const parseDirectiveFromContent = (content: string): AvatarDirective | null => {
-  try {
-    const parsed = JSON.parse(content) as Partial<AvatarDirective>;
-    return {
-      bubble: typeof parsed.bubble === "string" ? clipText(parsed.bubble, 80) : "",
-      speak: parsed.speak === true,
-      action: sanitizeAction(parsed.action),
-      emotion: sanitizeEmotion(parsed.emotion),
-      lookAt: sanitizeLookAt(parsed.lookAt),
-      moveTo: sanitizeMoveTarget(parsed.moveTo),
-      locomotion: sanitizeLocomotion(parsed.locomotion),
-      priority: sanitizePriority(parsed.priority),
-      bubbleTheme: {
-        borderColor: sanitizeColor(
-          (parsed as { bubbleTheme?: { borderColor?: unknown } }).bubbleTheme
-            ?.borderColor,
-        ),
-        textColor: sanitizeColor(
-          (parsed as { bubbleTheme?: { textColor?: unknown } }).bubbleTheme
-            ?.textColor,
-        ),
-        backgroundFrom: sanitizeColor(
-          (parsed as { bubbleTheme?: { backgroundFrom?: unknown } }).bubbleTheme
-            ?.backgroundFrom,
-        ),
-        backgroundTo: sanitizeColor(
-          (parsed as { bubbleTheme?: { backgroundTo?: unknown } }).bubbleTheme
-            ?.backgroundTo,
-        ),
-        glowColor: sanitizeColor(
-          (parsed as { bubbleTheme?: { glowColor?: unknown } }).bubbleTheme
-            ?.glowColor,
-        ),
-      },
-      source: "llm",
-    };
-  } catch {
-    return null;
+  const normalized = content.trim();
+  const candidates = [
+    normalized,
+    normalized.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "").trim(),
+  ];
+  const objectMatch = normalized.match(/\{[\s\S]*\}/);
+  if (objectMatch?.[0]) {
+    candidates.push(objectMatch[0].trim());
   }
+
+  for (const candidate of candidates) {
+    if (!candidate) continue;
+  try {
+      const parsed = JSON.parse(candidate) as Partial<AvatarDirective>;
+      return {
+        bubble: typeof parsed.bubble === "string" ? clipText(parsed.bubble, 80) : "",
+        speak: parsed.speak === true,
+        action: sanitizeAction(parsed.action),
+        emotion: sanitizeEmotion(parsed.emotion),
+        lookAt: sanitizeLookAt(parsed.lookAt),
+        moveTo: sanitizeMoveTarget(parsed.moveTo),
+        locomotion: sanitizeLocomotion(parsed.locomotion),
+        priority: sanitizePriority(parsed.priority),
+        bubbleTheme: {
+          borderColor: sanitizeColor(
+            (parsed as { bubbleTheme?: { borderColor?: unknown } }).bubbleTheme
+              ?.borderColor,
+          ),
+          textColor: sanitizeColor(
+            (parsed as { bubbleTheme?: { textColor?: unknown } }).bubbleTheme
+              ?.textColor,
+          ),
+          backgroundFrom: sanitizeColor(
+            (parsed as { bubbleTheme?: { backgroundFrom?: unknown } }).bubbleTheme
+              ?.backgroundFrom,
+          ),
+          backgroundTo: sanitizeColor(
+            (parsed as { bubbleTheme?: { backgroundTo?: unknown } }).bubbleTheme
+              ?.backgroundTo,
+          ),
+          glowColor: sanitizeColor(
+            (parsed as { bubbleTheme?: { glowColor?: unknown } }).bubbleTheme
+              ?.glowColor,
+          ),
+        },
+        source: "llm",
+        sourceDetail: "openrouter",
+      };
+    } catch {
+      // Try the next extraction candidate.
+    }
+  }
+  return null;
 };
 
 export async function resolveAvatarDirective(
@@ -586,7 +612,10 @@ export async function resolveAvatarDirective(
   );
   console.log(apiKey ? `Using avatar model: ${model}` : "No API key for avatar director, using heuristic fallback.");
   if (!apiKey) {
-    return fallback;
+    return {
+      ...fallback,
+      sourceDetail: "no-api-key",
+    };
   }
 
   const systemPrompt = [
@@ -667,7 +696,7 @@ export async function resolveAvatarDirective(
       },
       body: JSON.stringify({
         model,
-        temperature: 0.72,
+        temperature: 0.45,
         messages: [
           { role: "system", content: systemPrompt },
           { role: "user", content: userPrompt },
@@ -676,7 +705,10 @@ export async function resolveAvatarDirective(
     });
 
     if (!response.ok) {
-      return fallback;
+      return {
+        ...fallback,
+        sourceDetail: "http-error",
+      };
     }
 
     const result = (await response.json()) as {
@@ -684,11 +716,20 @@ export async function resolveAvatarDirective(
     };
     const content = result.choices?.[0]?.message?.content?.trim();
     if (!content) {
-      return fallback;
+      return {
+        ...fallback,
+        sourceDetail: "empty-content",
+      };
     }
 
-    return parseDirectiveFromContent(content) ?? fallback;
+    return parseDirectiveFromContent(content) ?? {
+      ...fallback,
+      sourceDetail: "invalid-json",
+    };
   } catch {
-    return fallback;
+    return {
+      ...fallback,
+      sourceDetail: "exception",
+    };
   }
 }

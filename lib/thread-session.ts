@@ -1,3 +1,5 @@
+import type { ThreadContextWindowState } from "@/lib/context-window";
+
 export type ThreadRecord = {
   id: string;
   title: string;
@@ -34,6 +36,7 @@ export type ThreadSessionState = {
   items?: unknown[];
   plan?: SerializablePlan | null;
   previewLogs?: SerializablePreviewLog[];
+  contextWindow?: ThreadContextWindowState | null;
   extensions?: ThreadExtensionsState;
   execution?: {
     status: "idle" | "resumable";
