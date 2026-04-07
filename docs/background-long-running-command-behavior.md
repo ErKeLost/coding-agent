@@ -91,20 +91,20 @@ data: {"type":"stream.event","eventName":"tool.call.completed","toolCallId":"cal
 1. `bash` 返回“已启动后台进程”
 2. 另一个接口再去读日志
 
-### 2.3 UI 已经有读取后台日志的接口
+### 2.3 旧版 UI 曾经有读取后台日志的接口
 
-相关代码：
+旧版相关代码曾经包括：
 
-- [app/api/local-processes/route.ts](/Users/work/coding-agent/app/api/local-processes/route.ts)
-- [app/api/local-processes/[processId]/logs/route.ts](/Users/work/coding-agent/app/api/local-processes/%5BprocessId%5D/logs/route.ts)
-- [hooks/use-local-processes.ts](/Users/work/coding-agent/hooks/use-local-processes.ts)
+- `app/api/local-processes/route.ts`
+- `app/api/local-processes/[processId]/logs/route.ts`
+- `hooks/use-local-processes.ts`
 
-这说明当前产品其实已经支持：
+这说明这套产品历史上其实支持过：
 
 1. 列出本地运行中的后台进程
 2. 根据 `processId` 拉取最新日志
 
-这件事在历史上是问题。
+不过这条旧版 UI 链路目前已经移除，主路径已经转向 `exec_command`、`write_stdin`、`listLocalProcesses`、`readLocalProcessLogs` 这些直接供 agent 使用的工具。
 
 **当前最新实现里，这套能力已经重新暴露给 `build-agent` 了。**
 

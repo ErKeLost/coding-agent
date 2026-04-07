@@ -9,7 +9,6 @@ import { grepTool } from './grep.tool';
 import { listTool } from './list.tool';
 import { readTool } from './read.tool';
 import { skillTool } from './skill.tool';
-import { taskTool } from './task-delegate.tool';
 import { todoReadTool } from './todoread.tool';
 import { todoWriteTool } from './todowrite.tool';
 import { webFetchTool } from './webfetch.tool';
@@ -217,7 +216,6 @@ const toolsForBatch: Record<string, ToolDefinition> = {
   skill: skillTool,
   todowrite: todoWriteTool,
   todoread: todoReadTool,
-  task: taskTool,
 };
 
 const batchToolMap = new Map(Object.entries(toolsForBatch));

@@ -26,7 +26,6 @@ const TEXT_BY_NAME: Record<string, string> = {
   'codesearch.txt': readFileSync(new URL('./text/codesearch.txt', import.meta.url), 'utf8'),
   'list-local-processes.txt': readFileSync(new URL('./text/list-local-processes.txt', import.meta.url), 'utf8'),
   'stop-local-process.txt': readFileSync(new URL('./text/stop-local-process.txt', import.meta.url), 'utf8'),
-  'task.txt': readFileSync(new URL('./text/task.txt', import.meta.url), 'utf8'),
   'todoread.txt': readFileSync(new URL('./text/todoread.txt', import.meta.url), 'utf8'),
   'todowrite.txt': readFileSync(new URL('./text/todowrite.txt', import.meta.url), 'utf8'),
   'webfetch.txt': readFileSync(new URL('./text/webfetch.txt', import.meta.url), 'utf8'),

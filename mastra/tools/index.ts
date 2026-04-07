@@ -20,7 +20,6 @@ export { readLocalProcessLogsTool } from './read-local-process-logs.tool';
 export { questionTool } from './question.tool';
 export { skillTool } from './skill.tool';
 export { stopLocalProcessTool } from './stop-local-process.tool';
-export { taskTool } from './task-delegate.tool';
 export { todoReadTool } from './todoread.tool';
 export { todoWriteTool } from './todowrite.tool';
 export { webFetchTool } from './webfetch.tool';

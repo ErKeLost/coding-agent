@@ -26,7 +26,6 @@ import {
   readLocalProcessLogsTool,
   skillTool,
   stopLocalProcessTool,
-  taskTool,
   todoWriteTool,
   webFetchTool,
   webSearchTool,
@@ -62,7 +61,6 @@ const staticTools = {
   readLocalProcessLogs: readLocalProcessLogsTool,
   skill: skillTool,
   stopLocalProcess: stopLocalProcessTool,
-  task: taskTool,
   todowrite: todoWriteTool,
   webfetch: webFetchTool,
   websearch: webSearchTool,
@@ -125,7 +123,6 @@ export const buildAgentInstructions = ({ requestContext }: { requestContext: Req
 - Use \`listLocalProcesses\`, \`readLocalProcessLogs\`, and \`stopLocalProcess\` mainly for recovery, inspection, or compatibility with older background sessions.
 - Use glob to find files by pattern and grep/codesearch to locate code quickly.
 - Prefer apply_patch for deterministic code edits; use edit/write when patch is not the best fit.
-- Use task for explicit subagent delegation only when delegation materially helps.
 - Use batch to run independent tool calls in parallel.
 - Use question only when required details are missing and a safe assumption is risky.
 - Use todowrite for multi-step implementation work.`,
