@@ -3,6 +3,7 @@
 - Use this tool for ANY question or task related to programming
 - Returns comprehensive code examples, documentation, and API references
 - Optimized for finding specific programming patterns and solutions
+- Prefer local `grep` / `glob` / `read` when the answer is likely already inside the repository. Use `codesearch` when you need external code or documentation context.
 
 Usage notes:
   - Adjustable token count (1000-50000) for focused or comprehensive results

@@ -1,4 +1,4 @@
-import type { ThreadSession, ThreadSessionState } from "@/lib/thread-session";
+import type { ThreadSessionState } from "@/lib/thread-session";
 
 type ThreadLikeItem = {
   type?: unknown;
@@ -14,13 +14,6 @@ export type ExecutionStateSnapshot = {
   recentToolCount?: number;
   updatedAt?: number;
 };
-
-export type ContinuationContextSnapshot = ExecutionStateSnapshot & {
-  isContinuation: boolean;
-};
-
-const normalizeText = (value: string) =>
-  value.replace(/\s+/g, " ").trim().toLowerCase();
 
 const normalizeComparable = (value: string) =>
   value.replace(/[\s，。、“”"'`~!！?？,.]+/g, "").trim().toLowerCase();
@@ -110,21 +103,6 @@ const countRecentToolItems = (items: unknown[] | undefined) => {
     }).length;
 };
 
-const isLowInformationFollowup = (text?: string) => {
-  if (!text) return false;
-  const trimmed = text.trim();
-  if (!trimmed) return false;
-  if (trimmed.length > 32) return false;
-  if (trimmed.includes("\n") || trimmed.includes("```")) return false;
-  if (/[?？]/.test(trimmed)) return false;
-
-  const normalized = normalizeText(trimmed);
-  const wordCount = normalized.split(/\s+/).filter(Boolean).length;
-  if (wordCount > 6) return false;
-
-  return true;
-};
-
 export const inferExecutionState = (
   state: ThreadSessionState,
   currentInputText?: string
@@ -144,17 +122,5 @@ export const inferExecutionState = (
     pendingPlanStep: pendingPlan?.step,
     recentToolCount,
     updatedAt: Date.now(),
-  };
-};
-
-export const inferContinuationContext = (
-  session: ThreadSession | null,
-  currentInputText?: string
-): ContinuationContextSnapshot => {
-  const execution = inferExecutionState(session?.state ?? {}, currentInputText);
-  return {
-    ...execution,
-    isContinuation:
-      execution.status === "resumable" && isLowInformationFollowup(currentInputText),
   };
 };

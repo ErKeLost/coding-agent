@@ -26,7 +26,11 @@ export type ContextPressureStatus =
 export type ContextCompactionStrategy = "none" | "compact" | "critical";
 
 export type ThreadCompactionState = {
-  summary: string;
+  historicalFacts: string[];
+  relevantFiles: string[];
+  validationResults: string[];
+  openRisks: string[];
+  renderedSummary: string;
   sourceHash: string;
   sourceItemCount: number;
   preservedRecentMessages: number;
@@ -310,7 +314,7 @@ export function buildContextWindowState(
   args: BuildContextWindowStateArgs,
 ): ThreadContextWindowState {
   const budget = getContextBudgetConfig(args.modelId);
-  const summaryText = args.compaction?.summary ?? "";
+  const summaryText = args.compaction?.renderedSummary ?? "";
   const summaryActive = Boolean(summaryText.trim());
   const preservedRecentMessages =
     args.preservedRecentMessages ??

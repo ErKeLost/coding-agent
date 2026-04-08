@@ -8,6 +8,7 @@ import {
 } from './sandbox-helpers';
 import {
   DEFAULT_READ_LIMIT,
+  MIN_READ_LIMIT,
   formatLineNumberedOutput,
   getWorkspaceFromToolContext,
   normalizeWorkspacePath,
@@ -30,7 +31,7 @@ export const readTool = createTool({
   outputSchema: HowOneResultSchema,
   execute: async (inputData, context) => {
     const { requestContext, workspaceRoot } = getWorkspaceFromToolContext(context, 'read');
-    const filePath = resolveWorkspaceFsPath(inputData.filePath);
+    resolveWorkspaceFsPath(inputData.filePath);
     const { relativePath } = normalizeWorkspacePath(inputData.filePath);
 
     const attachment = await readPreviewAttachment(workspaceRoot, inputData.filePath);
@@ -75,7 +76,19 @@ export const readTool = createTool({
 
     const offset = typeof inputData.offset === 'number' ? inputData.offset : 0;
     const limit = typeof inputData.limit === 'number' ? inputData.limit : DEFAULT_READ_LIMIT;
-    const { output, preview, totalLines, startLine, endLine } = formatLineNumberedOutput(
+    const {
+      output,
+      preview,
+      totalLines,
+      startLine,
+      endLine,
+      requestedLimit,
+      effectiveLimit,
+      hasMore,
+      nextOffset,
+      cutByByteCap,
+      wasLimitClamped,
+    } = formatLineNumberedOutput(
       raw,
       offset,
       limit,
@@ -91,6 +104,13 @@ export const readTool = createTool({
         totalLines,
         startLine,
         endLine,
+        requestedLimit,
+        effectiveLimit,
+        hasMore,
+        nextOffset,
+        cutByByteCap,
+        wasLimitClamped,
+        minimumLimit: MIN_READ_LIMIT,
       },
     };
   },

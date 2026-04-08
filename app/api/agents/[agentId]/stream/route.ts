@@ -13,15 +13,18 @@ import {
   buildAgentRequestContext,
 } from "@/lib/server/agent-request-context";
 import { consumeThreadSteers } from "@/lib/server/steer-queue";
+import { renderTurnModeFeedback, resolveTurnModeState } from "@/lib/server/turn-mode";
 import {
   currentTurnIncludesImageInput,
   normalizeAgentMessageInput,
 } from "@/lib/server/agent-input";
 import { prepareThreadContextWindow } from "@/lib/server/context-compaction";
 import { buildAgentInstructions } from "@/mastra/agents/build-agent";
+import { MULTI_AGENT_TEST_ID } from "@/mastra/agents/multi-agent-test";
 
 export const runtime = "nodejs";
 const BUILD_AGENT_ID = "build-agent";
+const SUPPORTED_AGENT_IDS = new Set([BUILD_AGENT_ID, MULTI_AGENT_TEST_ID]);
 
 type StreamEvent =
   | {
@@ -315,7 +318,7 @@ export async function POST(
   const tuning = getModelTuning(payload.model);
 
   const { agentId } = await params;
-  if (agentId !== BUILD_AGENT_ID) {
+  if (!SUPPORTED_AGENT_IDS.has(agentId)) {
     return NextResponse.json({ error: `Agent not found: ${agentId}` }, { status: 404 });
   }
   const agent = mastra.getAgentById(agentId);
@@ -327,7 +330,8 @@ export async function POST(
     return NextResponse.json({ error: "Context compaction agent not found" }, { status: 500 });
   }
   const currentInputText = extractCurrentInputText(messageInput);
-  const systemPromptText = buildAgentInstructions({ requestContext });
+  const systemPromptText =
+    agentId === BUILD_AGENT_ID ? buildAgentInstructions({ requestContext }) : undefined;
   const preparedContext = await prepareThreadContextWindow({
     agent: contextCompactionAgent,
     requestContext,
@@ -335,8 +339,8 @@ export async function POST(
     incomingText: currentInputText,
     systemPromptText,
   });
-  if (preparedContext.compaction?.summary) {
-    requestContext.set("compactionSummary", preparedContext.compaction.summary);
+  if (preparedContext.compaction?.renderedSummary) {
+    requestContext.set("compactionSummary", preparedContext.compaction.renderedSummary);
   }
   const logger = mastra.getLogger();
   type AgentStreamInput = Parameters<typeof agent.stream>[0];
@@ -1016,9 +1020,14 @@ export async function POST(
 
         const steerText = pendingSteers.map((entry) => entry.text).join("\n\n");
         pendingAppliedSteers.push(...pendingSteers.map((entry) => entry.text));
+        const steerRequestContext = cloneRequestContext(requestContext);
+        steerRequestContext.set("turnMode", "steer_active_turn");
 
         return {
-          feedback: `User steer for the current task:\n${steerText}`,
+          feedback: renderTurnModeFeedback(
+            resolveTurnModeState(steerRequestContext),
+            `User steer for the current task:\n${steerText}`,
+          ),
         };
       },
     });
@@ -1247,10 +1256,6 @@ export async function POST(
       "threadId",
       "resourceId",
       "workspaceRoot",
-      "continuationMode",
-      "continuationLastUserGoal",
-      "continuationPlanTitle",
-      "continuationPlanStep",
     ];
     for (const key of keys) {
       const value = sourceWithGet.get?.(key);

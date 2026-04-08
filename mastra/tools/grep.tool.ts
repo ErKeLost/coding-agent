@@ -27,18 +27,22 @@ export const grepTool = createTool({
     if (inputData.include?.trim()) {
       args.push('--glob', inputData.include.trim());
     }
+    const limit = inputData.limit ?? DEFAULT_LIMIT;
+    args.push('--max-count', String(limit));
     args.push(inputData.pattern);
     args.push('.');
 
-    const result = await runRg(args, basePath, context.abortSignal);
+    const result = await runRg(args, basePath, {
+      abortSignal: context.abortSignal,
+      maxOutputLines: limit,
+    });
     if (result.code === 0 || result.code === 1) {
-      const limit = inputData.limit ?? DEFAULT_LIMIT;
       const lines = result.stdout
         .split(/\r?\n/)
         .map(line => line.trimEnd())
         .filter(Boolean);
-      const truncated = lines.length > limit;
-      const shown = truncated ? lines.slice(0, limit) : lines;
+      const truncated = result.truncated ?? false;
+      const shown = lines;
       return {
         title: 'grep',
         output: shown.length > 0 ? shown.join('\n') : 'No matches found',
@@ -65,4 +69,3 @@ export const grepTool = createTool({
     };
   },
 });
-

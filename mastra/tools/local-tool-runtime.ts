@@ -7,7 +7,12 @@ type RequestContextLike = RequestContext | { get?: (key: string) => unknown };
 type ToolRuntimeContext = unknown;
 
 export const DEFAULT_READ_LIMIT = 2_000;
+export const MIN_READ_LIMIT = 200;
 export const DEFAULT_TIMEOUT_MS = 120_000;
+export const MAX_READ_LINE_LENGTH = 2_000;
+export const MAX_READ_LINE_SUFFIX = `... (line truncated to ${MAX_READ_LINE_LENGTH} chars)`;
+export const MAX_READ_OUTPUT_BYTES = 50 * 1024;
+export const MAX_READ_OUTPUT_LABEL = `${MAX_READ_OUTPUT_BYTES / 1024} KB`;
 
 export function getRequestContextFromToolContext(
   context: ToolRuntimeContext | undefined,
@@ -100,13 +105,48 @@ export function resolveWorkspaceDiskPath(workspaceRoot: string, inputPath: strin
 export function formatLineNumberedOutput(raw: string, offset = 0, limit = DEFAULT_READ_LIMIT) {
   const lines = raw.split(/\r?\n/);
   const start = Math.max(0, offset);
-  const end = Math.min(lines.length, start + Math.max(1, limit));
-  const slice = lines.slice(start, end);
-  const width = String(Math.max(end, 1)).length;
+  const requestedLimit = Math.max(1, limit);
+  const effectiveLimit = Math.max(MIN_READ_LIMIT, requestedLimit);
+  const targetEnd = Math.min(lines.length, start + effectiveLimit);
+  const width = String(Math.max(targetEnd, 1)).length;
+  const slice: string[] = [];
+  let bytes = 0;
+  let cutByByteCap = false;
 
-  const output = slice
-    .map((line, index) => `${String(start + index + 1).padStart(width, ' ')}\t${line}`)
-    .join('\n');
+  for (let index = start; index < targetEnd; index += 1) {
+    const text = lines[index] ?? '';
+    const line =
+      text.length > MAX_READ_LINE_LENGTH
+        ? `${text.slice(0, MAX_READ_LINE_LENGTH)}${MAX_READ_LINE_SUFFIX}`
+        : text;
+    const rendered = `${String(index + 1).padStart(width, ' ')}\t${line}`;
+    const size = Buffer.byteLength(rendered, 'utf8') + (slice.length > 0 ? 1 : 0);
+    if (slice.length > 0 && bytes + size > MAX_READ_OUTPUT_BYTES) {
+      cutByByteCap = true;
+      break;
+    }
+
+    slice.push(rendered);
+    bytes += size;
+  }
+
+  const consumedLines = slice.length;
+  const end = consumedLines > 0 ? start + consumedLines : Math.min(lines.length, start);
+  const hasMore = end < lines.length;
+  const nextOffset = hasMore ? end : null;
+
+  const footer = cutByByteCap
+    ? `(Output capped at ${MAX_READ_OUTPUT_LABEL}. Showing lines ${start + 1}-${Math.max(
+        end,
+        start + 1,
+      )}. Continue with offset=${nextOffset ?? end}.)`
+    : hasMore
+      ? `(Showing lines ${start + 1}-${end} of ${lines.length}. Continue with offset=${
+          nextOffset ?? end
+        }.)`
+      : `(End of file - total ${lines.length} lines)`;
+
+  const output = [...slice, '', footer].join('\n');
 
   const preview = slice.slice(0, 20).join('\n');
 
@@ -116,6 +156,12 @@ export function formatLineNumberedOutput(raw: string, offset = 0, limit = DEFAUL
     totalLines: lines.length,
     startLine: start + 1,
     endLine: end,
+    requestedLimit,
+    effectiveLimit,
+    hasMore,
+    nextOffset,
+    cutByByteCap,
+    wasLimitClamped: requestedLimit < MIN_READ_LIMIT,
   };
 }
 

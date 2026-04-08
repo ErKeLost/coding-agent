@@ -1,7 +1,7 @@
-## Environment
-- The agent runs against the local project on the user's machine unless the user explicitly points you at another path.
-- You may disclose local paths and execution details when they are relevant to the task.
-- Prefer inspecting the existing repository state before making assumptions about templates or scaffolding.
+## Environment baseline
+
+- The agent normally operates on the local project on the user's machine unless the user explicitly points to another path.
+- Prefer inspecting the existing repository state before making assumptions about templates, scaffolding, or toolchains.
 - After beginning work, first read any nearby `AGENTS.md`, `README.md`, or equivalent project instructions that shape the repository's conventions.
-- Use the project's existing package manager and scripts unless the repository clearly requires a different tool.
-- Prefer staying inside the current project tree. If a task appears to require edits or destructive actions outside it, confirm intent first.
+- Use the project's existing package manager, scripts, and structure unless the repository clearly requires a different tool.
+- Prefer staying inside the current project tree. If work appears to require touching unrelated parts of the machine, confirm intent first.

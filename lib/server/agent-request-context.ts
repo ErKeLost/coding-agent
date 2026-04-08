@@ -15,13 +15,18 @@ import {
   setActiveWorkspaceRoot,
 } from "@/mastra/workspace/thread-workspace-root";
 import { getThreadSession, upsertThreadSession } from "@/lib/server/thread-session-store";
-import { extractCurrentInputText, inferContinuationContext } from "@/lib/continuation";
+import { extractCurrentInputText } from "@/lib/continuation";
 import type { ThreadSession } from "@/lib/thread-session";
 import {
   currentTurnIncludesImageInput,
   deriveAgentInputMode,
   normalizeAgentMessageInput,
 } from "@/lib/server/agent-input";
+import {
+  loadWorkspaceInstructionFiles,
+  renderWorkspaceInstructionFiles,
+} from "@/lib/server/instruction-files";
+import { resolveTurnModeState } from "@/lib/server/turn-mode";
 
 type AgentRequestPayload = {
   threadId?: string;
@@ -94,6 +99,16 @@ export async function buildAgentRequestContext(
   }
 
   if (effectiveWorkspaceRoot) {
+    const instructionFiles = await loadWorkspaceInstructionFiles(effectiveWorkspaceRoot);
+    const repositoryInstructions = renderWorkspaceInstructionFiles(instructionFiles);
+    if (repositoryInstructions) {
+      requestContext.set("repositoryInstructions", repositoryInstructions);
+      requestContext.set(
+        "repositoryInstructionPaths",
+        JSON.stringify(instructionFiles.map((file) => file.filepath)),
+      );
+    }
+
     const discovery = await discoverSkills({
       workspaceRoot: effectiveWorkspaceRoot,
     });
@@ -143,7 +158,6 @@ export async function buildAgentRequestContext(
     }
   }
 
-  const currentMessageText = extractCurrentInputText(normalizedMessages ?? payload.message);
   const hasCurrentTurnImageInput = currentTurnIncludesImageInput(normalizedMessages);
   if (hasCurrentTurnImageInput) {
     requestContext.set("currentTurnIncludesImages", "1");
@@ -153,22 +167,13 @@ export async function buildAgentRequestContext(
   if (inputMode === "image-analysis") {
     requestContext.set("imageAnalysisFreshAttachment", "1");
   }
-  const continuationContext =
-    inputMode === "image-analysis"
-      ? { isContinuation: false } as const
-      : inferContinuationContext(threadSession, currentMessageText);
-  if (continuationContext.isContinuation) {
-    requestContext.set("continuationMode", "resume");
-    if (continuationContext.lastUserGoal) {
-      requestContext.set("continuationLastUserGoal", continuationContext.lastUserGoal);
-    }
-    if (continuationContext.pendingPlanTitle) {
-      requestContext.set("continuationPlanTitle", continuationContext.pendingPlanTitle);
-    }
-    if (continuationContext.pendingPlanStep) {
-      requestContext.set("continuationPlanStep", continuationContext.pendingPlanStep);
-    }
-  }
+  const turnModeState = resolveTurnModeState(requestContext);
+  requestContext.set("turnMode", turnModeState.mode);
+  requestContext.set("turnModeSource", turnModeState.source);
+  requestContext.set("turnModePriority", String(turnModeState.priority));
+  requestContext.set("turnAllowsExecution", turnModeState.allowsExecution ? "1" : "0");
+  requestContext.set("turnAllowsMutation", turnModeState.allowsMutation ? "1" : "0");
+  requestContext.set("turnModeReason", turnModeState.reason);
 
   return {
     requestContext,

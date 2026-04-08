@@ -2,6 +2,8 @@ Write input to a managed local process session and optionally wait for new outpu
 
 Use this for interactive long-running commands that are still attached to the current app session.
 
+This is the normal follow-up tool after `exec_command` returns a running session.
+
 Helpful for:
 - sending input to an interactive CLI
 - polling for more output by sending an empty string

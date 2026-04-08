@@ -2,6 +2,8 @@ Read the latest output from a managed local background process started earlier b
 
 Use this after a command was started with `run_in_background: true` and returned a `processId`.
 
+This is mainly a compatibility and recovery tool for older background-process flows. Prefer `exec_command` + `write_stdin` for new long-running sessions.
+
 Helpful for:
 - checking whether a dev server finished booting
 - finding the actual local URL or port

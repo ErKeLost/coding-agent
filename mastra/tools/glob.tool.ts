@@ -1,10 +1,13 @@
 import { createTool } from '@mastra/core/tools';
+import { promises as fs } from 'node:fs';
+import path from 'node:path';
 import { z } from 'zod';
 import { HowOneResultSchema, loadText } from './sandbox-helpers';
 import { getWorkspaceFromToolContext, resolveWorkspaceDiskPath } from './local-tool-runtime';
-import { runRg } from './rg-runner';
+import { runRgFiles } from './rg-runner';
 
 const GLOB_DESCRIPTION = loadText('glob.txt');
+const DEFAULT_LIMIT = 100;
 
 export const globTool = createTool({
   id: 'glob',
@@ -20,22 +23,49 @@ export const globTool = createTool({
       ? resolveWorkspaceDiskPath(workspaceRoot, inputData.path)
       : workspaceRoot;
 
-    const args = ['--files', '--glob', inputData.pattern];
-    const result = await runRg(args, basePath, context.abortSignal);
+    const args = ['--files', '--hidden', '--glob', '!.git/*', '--glob', inputData.pattern];
+    const result = await runRgFiles(args, basePath, {
+      abortSignal: context.abortSignal,
+      maxResults: DEFAULT_LIMIT,
+    });
 
     if (result.code === 0 || result.code === 1) {
-      const rows = result.stdout
-        .split(/\r?\n/)
-        .map(line => line.trim())
-        .filter(Boolean);
+      const rows = await Promise.all(
+        result.files.map(async (relativePath) => {
+          const absolutePath = path.resolve(basePath, relativePath);
+          let mtimeMs = 0;
+          try {
+            const stat = await fs.stat(absolutePath);
+            mtimeMs = stat.mtimeMs;
+          } catch {
+            mtimeMs = 0;
+          }
+          return {
+            relativePath,
+            mtimeMs,
+          };
+        }),
+      );
+
+      rows.sort((left, right) => right.mtimeMs - left.mtimeMs);
+      const outputRows = rows.map((row) => row.relativePath);
+      const truncated = result.truncated ?? false;
+      const output =
+        outputRows.length > 0
+          ? outputRows.join('\n') +
+            (truncated
+              ? `\n\n(Results are truncated: showing first ${DEFAULT_LIMIT} results. Consider using a more specific path or pattern.)`
+              : '')
+          : 'No files found';
+
       return {
         title: 'glob',
-        output: rows.length > 0 ? rows.join('\n') : 'No files found',
+        output,
         metadata: {
           pattern: inputData.pattern,
           path: inputData.path ?? '.',
-          count: rows.length,
-          truncated: false,
+          count: outputRows.length,
+          truncated,
         },
       };
     }
@@ -52,4 +82,3 @@ export const globTool = createTool({
     };
   },
 });
-

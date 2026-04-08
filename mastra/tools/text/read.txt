@@ -3,8 +3,10 @@ Reads a file from the sandbox filesystem. If the User provides a path to a file 
 Usage:
 - Paths are resolved under the current workspace root. Relative paths resolve from workspace root; legacy `/workspace/...` paths are also accepted.
 - By default, it reads up to 2000 lines starting from the beginning of the file
-- You can optionally specify a line offset and limit (especially handy for long files), but it's recommended to read the whole file by not providing these parameters
+- You can optionally specify a line offset and limit for long files, but avoid tiny windows. If you pass a very small limit, the tool may automatically expand it to a larger chunk so the same file does not get re-read dozens of times.
+- Prefer reading a substantial chunk at once, then continue with the returned next offset if needed.
 - Any lines longer than 2000 characters will be truncated
+- Very large outputs may be capped around 50 KB; when that happens the tool will tell you which offset to continue from.
 - Results are returned using cat -n format, with line numbers starting at 1
 - You have the capability to call multiple tools in a single response. It is always better to speculatively read multiple files as a batch that are potentially useful.
 - If you read a file that exists but has empty contents you will receive a system reminder warning in place of file contents.

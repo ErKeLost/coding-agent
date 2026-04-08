@@ -2,6 +2,8 @@ List managed local background processes tracked by the workspace runtime.
 
 Use this to inspect which long-running commands are still active, failed, or stopped.
 
+This is mainly for recovery, inspection, and compatibility with older background-process flows, not the primary path for starting new long-running commands.
+
 Helpful for:
 - finding a recent `processId`
 - checking whether a dev server is still running
