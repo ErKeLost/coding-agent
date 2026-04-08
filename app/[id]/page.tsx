@@ -176,10 +176,10 @@ const isPlanRecord = (
 
 const models = [
   {
-    id: "openrouter/qwen/qwen3.6-plus:free",
-    name: "Qwen 3.6 Plus (Free)",
-    chef: "Qwen",
-    chefSlug: "qwen",
+    id: "openrouter/openai/gpt-5.4",
+    name: "GPT-5.4",
+    chef: "OpenAI",
+    chefSlug: "openai",
     providers: ["openrouter"],
   },
   {

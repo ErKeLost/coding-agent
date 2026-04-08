@@ -60,6 +60,9 @@ export type ContextBudgetConfig = {
 
 export type ThreadContextWindowState = {
   modelId?: string;
+  executionPhase?: string;
+  executionPhaseSource?: string;
+  executionPhaseReason?: string;
   budgetProfile: ContextBudgetConfig["profile"];
   rawWindowTokens: number;
   limitTokens: number;

@@ -109,6 +109,26 @@ export function WorkspaceHeaderBar({
                 </div>
               </ContextContentHeader>
               <ContextContentBody className="space-y-2.5 text-[11px]">
+                {contextWindow.executionPhase ? (
+                  <div className="rounded-[12px] border border-border/45 bg-background/50 px-3 py-2">
+                    <div className="flex items-center justify-between gap-3">
+                      <span className="text-muted-foreground/78">当前阶段</span>
+                      <span className="rounded-full border border-border/55 px-2 py-0.5 text-[10px] uppercase tracking-[0.06em] text-foreground/84">
+                        {contextWindow.executionPhase}
+                      </span>
+                    </div>
+                    {contextWindow.executionPhaseSource ? (
+                      <div className="mt-1 text-[10px] text-muted-foreground/72">
+                        来源：{contextWindow.executionPhaseSource}
+                      </div>
+                    ) : null}
+                    {contextWindow.executionPhaseReason ? (
+                      <div className="mt-1 leading-4 text-muted-foreground/78">
+                        {contextWindow.executionPhaseReason}
+                      </div>
+                    ) : null}
+                  </div>
+                ) : null}
                 <div className="flex items-center justify-between">
                   <span className="text-muted-foreground/78">最近消息</span>
                   <span>{new Intl.NumberFormat("en-US", { notation: "compact" }).format(contextWindow.recentMessagesTokens)}</span>

@@ -75,7 +75,7 @@ const itemStatusTone = (status?: string) => {
 
 export default function MultiAgentTestPage() {
   const [prompt, setPrompt] = useState(PRESET_PROMPTS[0]);
-  const [model, setModel] = useState("openrouter/openai/gpt-5.4-mini");
+  const [model, setModel] = useState("openrouter/openai/gpt-5.4");
   const [workspaceRoot, setWorkspaceRoot] = useState("/Users/work/coding-agent");
   const [, setThreadId] = useState("multi-agent-pending");
   const [status, setStatus] = useState<"submitted" | "streaming" | "ready" | "error">("ready");

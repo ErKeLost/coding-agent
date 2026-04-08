@@ -9,7 +9,7 @@ import {
   webSearchTool,
 } from "../tools";
 
-const modelEnv = process.env.MODEL ?? "openrouter/qwen/qwen3.6-plus:free";
+const modelEnv = process.env.MODEL ?? "openrouter/openai/gpt-5.4";
 
 const getRequestContextString = (requestContext: RequestContext, key: string) => {
   const value = (requestContext as { get?: (name: string) => unknown }).get?.(key);

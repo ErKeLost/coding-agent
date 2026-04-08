@@ -123,6 +123,11 @@ export function WorkspaceComposerShell({
                 <span className="shrink-0 rounded-full border border-border/55 px-1.5 py-0.5 text-[10px] uppercase tracking-[0.06em]">
                   {Math.round(contextWindow.percentage * 100)}%
                 </span>
+                {contextWindow.executionPhase ? (
+                  <span className="shrink-0 rounded-full border border-border/55 px-1.5 py-0.5 text-[10px] uppercase tracking-[0.06em] text-foreground/84">
+                    {contextWindow.executionPhase}
+                  </span>
+                ) : null}
               </div>
               <div className="flex shrink-0 items-center gap-2">
                 <span>{contextWindow.source === "actual" ? "实测" : "估算"}</span>

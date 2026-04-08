@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import type { LanguageModelUsage } from "ai";
 import { RequestContext } from "@mastra/core/request-context";
 import { redactStreamChunk } from "@mastra/server/server-adapter";
+import { inspect } from "node:util";
 import { mastra } from "@/mastra";
 import { getModelTuning } from "@/lib/model-tuning";
 import { extractCurrentInputText } from "@/lib/continuation";
@@ -157,6 +158,114 @@ const isQwenModel = (modelId?: string) => {
   const normalized = modelId?.trim().toLowerCase();
   if (!normalized) return false;
   return normalized.includes("qwen");
+};
+
+const serializeStreamError = (error: unknown, depth = 0): unknown => {
+  if (depth > 4) return "[max-depth]";
+  if (error instanceof Error) {
+    const typed = error as Error & {
+      cause?: unknown;
+      statusCode?: number;
+      responseBody?: unknown;
+      finishReason?: string;
+    };
+    return {
+      name: typed.name,
+      message: typed.message,
+      stack: typed.stack,
+      cause: typed.cause ? serializeStreamError(typed.cause, depth + 1) : undefined,
+      statusCode: typed.statusCode,
+      finishReason: typed.finishReason,
+      responseBody: typed.responseBody,
+      ownProperties: Object.fromEntries(
+        Object.entries(typed).map(([key, value]) => [key, serializeStreamError(value, depth + 1)]),
+      ),
+      inspected: inspect(typed, { depth: 6, breakLength: 120 }),
+    };
+  }
+  if (Array.isArray(error)) {
+    return error.map((value) => serializeStreamError(value, depth + 1));
+  }
+  if (error && typeof error === "object") {
+    return {
+      ...Object.fromEntries(
+        Object.entries(error as Record<string, unknown>).map(([key, value]) => [
+          key,
+          serializeStreamError(value, depth + 1),
+        ]),
+      ),
+      inspected: inspect(error, { depth: 6, breakLength: 120 }),
+    };
+  }
+  return error;
+};
+
+const truncateErrorText = (value: string, maxLength = 360) => {
+  const trimmed = value.trim();
+  if (!trimmed) return "";
+  return trimmed.length > maxLength
+    ? `${trimmed.slice(0, maxLength - 1)}…`
+    : trimmed;
+};
+
+const extractUserVisibleErrorDetail = (error: unknown): string | null => {
+  if (!error || typeof error !== "object") {
+    return typeof error === "string" && error.trim() ? truncateErrorText(error) : null;
+  }
+
+  const record = error as {
+    message?: unknown;
+    statusCode?: unknown;
+    finishReason?: unknown;
+    responseBody?: unknown;
+    data?: unknown;
+    cause?: unknown;
+  };
+
+  const dataErrorMessage =
+    record.data &&
+    typeof record.data === "object" &&
+    "error" in record.data &&
+    record.data.error &&
+    typeof record.data.error === "object" &&
+    "message" in record.data.error &&
+    typeof record.data.error.message === "string"
+      ? record.data.error.message
+      : null;
+
+  let responseBodyMessage: string | null = null;
+  if (typeof record.responseBody === "string" && record.responseBody.trim()) {
+    try {
+      const parsed = JSON.parse(record.responseBody) as {
+        error?: { message?: unknown };
+      };
+      if (typeof parsed?.error?.message === "string" && parsed.error.message.trim()) {
+        responseBodyMessage = parsed.error.message;
+      }
+    } catch {
+      responseBodyMessage = truncateErrorText(record.responseBody);
+    }
+  }
+
+  const parts = [
+    typeof record.statusCode === "number" ? `status ${record.statusCode}` : null,
+    typeof record.finishReason === "string" && record.finishReason.trim()
+      ? `finishReason ${record.finishReason}`
+      : null,
+    typeof record.message === "string" && record.message.trim() ? record.message : null,
+    dataErrorMessage,
+    responseBodyMessage,
+  ].filter((value, index, array): value is string => Boolean(value) && array.indexOf(value) === index);
+
+  if (parts.length > 0) {
+    return truncateErrorText(parts.join(" | "));
+  }
+
+  if (record.cause) {
+    return extractUserVisibleErrorDetail(record.cause);
+  }
+
+  return null;
 };
 
 const normalizeSystemMessageContent = (value: unknown) => {
@@ -339,6 +448,18 @@ export async function POST(
     incomingText: currentInputText,
     systemPromptText,
   });
+  preparedContext.contextWindow.executionPhase =
+    typeof requestContext.get("executionPhase") === "string"
+      ? String(requestContext.get("executionPhase"))
+      : undefined;
+  preparedContext.contextWindow.executionPhaseSource =
+    typeof requestContext.get("executionPhaseSource") === "string"
+      ? String(requestContext.get("executionPhaseSource"))
+      : undefined;
+  preparedContext.contextWindow.executionPhaseReason =
+    typeof requestContext.get("executionPhaseReason") === "string"
+      ? String(requestContext.get("executionPhaseReason"))
+      : undefined;
   if (preparedContext.compaction?.renderedSummary) {
     requestContext.set("compactionSummary", preparedContext.compaction.renderedSummary);
   }
@@ -1402,10 +1523,18 @@ export async function POST(
           error instanceof Error && error.name ? error.name : undefined;
         const errorMessage =
           error instanceof Error && error.message ? error.message : undefined;
+        const serializedError = serializeStreamError(error);
+        const errorSummary =
+          error && typeof error === "object"
+            ? inspect(error, { depth: 3, breakLength: 120 })
+            : String(error);
+        const userVisibleErrorDetail = extractUserVisibleErrorDetail(error);
         streamTerminalErrorText =
           errorName === "ResponseAborted"
-            ? "Tool execution was interrupted because the model response was aborted (tripwire)."
-            : errorMessage || errorName || "Stream error";
+            ? `Tool execution was interrupted because the model response was aborted (tripwire).${
+                userVisibleErrorDetail ? ` ${userVisibleErrorDetail}` : ""
+              }`
+            : userVisibleErrorDetail || errorMessage || errorName || "Stream error";
         logger?.error("Mastra stream failed", {
           routeAgentId: agentId,
           threadId: payload.threadId ?? null,
@@ -1413,6 +1542,10 @@ export async function POST(
           workspaceRoot: effectiveWorkspaceRoot ?? null,
           error: errorMessage ?? "Stream error",
           errorName: errorName ?? null,
+          errorSummary,
+          serializedError,
+          userVisibleErrorDetail,
+          requestAborted: req.signal.aborted,
         });
         const errorPayload = {
           type: "stream.event",

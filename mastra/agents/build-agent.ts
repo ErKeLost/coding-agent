@@ -7,32 +7,24 @@ import { getContextBudgetConfig } from '@/lib/context-window';
 import { buildAgentMemory } from '../memory';
 import { renderTurnModePolicy, resolveTurnModeState } from '@/lib/server/turn-mode';
 import {
+  renderExecutionPhasePolicy,
+  resolveExecutionPhaseState,
+} from '@/lib/server/execution-phase';
+import {
   applyPatchTool,
-  batchTool,
   bashTool,
-  browserClickTool,
-  browserCloseTool,
-  browserListSessionsTool,
-  browserOpenTool,
-  browserSnapshotTool,
-  browserTypeTool,
-  browserWaitTool,
-  codeSearchTool,
-  editTool,
   execCommandTool,
-  globTool,
-  grepTool,
+  listTool,
   listLocalProcessesTool,
-  questionTool,
   readTool,
   readLocalProcessLogsTool,
   skillTool,
   stopLocalProcessTool,
+  todoReadTool,
   todoWriteTool,
   webFetchTool,
   webSearchTool,
   writeStdinTool,
-  writeTool,
 } from '../tools';
 import { selectBuildInstructions } from './prompts/build-prompts';
 import {
@@ -42,34 +34,22 @@ import {
 
 const staticTools = {
   apply_patch: applyPatchTool,
-  batch: batchTool,
   bash: bashTool,
-  browser_click: browserClickTool,
-  browser_close: browserCloseTool,
-  browser_list_sessions: browserListSessionsTool,
-  browser_open: browserOpenTool,
-  browser_snapshot: browserSnapshotTool,
-  browser_type: browserTypeTool,
-  browser_wait: browserWaitTool,
-  codesearch: codeSearchTool,
-  edit: editTool,
   exec_command: execCommandTool,
-  glob: globTool,
-  grep: grepTool,
+  list: listTool,
   listLocalProcesses: listLocalProcessesTool,
-  question: questionTool,
   read: readTool,
   readLocalProcessLogs: readLocalProcessLogsTool,
   skill: skillTool,
   stopLocalProcess: stopLocalProcessTool,
+  todoread: todoReadTool,
   todowrite: todoWriteTool,
   webfetch: webFetchTool,
   websearch: webSearchTool,
   write_stdin: writeStdinTool,
-  write: writeTool,
 };
 
-const modelEnv = process.env.MODEL ?? 'openrouter/qwen/qwen3.6-plus:free';
+const modelEnv = process.env.MODEL ?? 'openrouter/openai/gpt-5.4';
 function getRequestContextString(requestContext: RequestContext, key: string) {
   const value = (requestContext as { get: (name: string) => unknown }).get(key);
   return typeof value === 'string' && value.trim() ? value.trim() : undefined;
@@ -104,20 +84,25 @@ export const buildAgentInstructions = ({ requestContext }: { requestContext: Req
   const baseInstructions = selectBuildInstructions(model);
   const guideText = getRequestContextString(requestContext, 'guideText');
   const turnModeState = resolveTurnModeState(requestContext);
+  const executionPhaseState = resolveExecutionPhaseState({
+    requestContext,
+    turnModeState,
+  });
 
   const runtimeDirectives = [
     formatEnvironmentDirectives(requestContext, model),
     renderTurnModePolicy({ state: turnModeState, guideText }),
+    renderExecutionPhasePolicy(executionPhaseState),
     `Execution principles:
 - For coding work, prefer concrete tool actions before explanatory prose.
-- Start by reading or locating the relevant files with read/glob/grep when context is incomplete.
-- Use write/edit only after you understand the target files.
+- When context is incomplete, prefer the smallest high-information action that can identify the target files or structure.
+- If the relevant file is already known, read it directly instead of exploring first.
+- Use \`list\` for quick directory structure inspection when that is the cheapest way to orient yourself.
+- Prefer \`apply_patch\` as the default editing path for focused code changes.
 - Avoid re-reading the same file with the same intent unless the file changed, the first read was incomplete, or you need a different range for verification.
 - Use \`webfetch\` or \`websearch\` for static web content lookup, and use the \`browser_*\` tools when a page requires real rendering, interaction, screenshots, or client-side state.
 - When using browser automation, keep reusing the same \`sessionId\` / \`session_id\` across steps instead of opening a brand new browser for each action.
-- Prefer apply_patch for deterministic code edits; use edit/write when patch is not the best fit.
-- Use batch to run independent tool calls in parallel.
-- Use question only when required details are missing and a safe assumption is risky.
+- Prefer shell search primitives such as \`rg\` / \`rg --files\` via \`bash\` when you need content or file search.
 - Use todowrite for multi-step implementation work.`,
     `Process execution policy:
 - Use \`exec_command\` as the default tool for long-running or interactive commands.

@@ -7,9 +7,6 @@ import {
   loadText,
 } from './sandbox-helpers';
 import {
-  DEFAULT_READ_LIMIT,
-  MIN_READ_LIMIT,
-  formatLineNumberedOutput,
   getWorkspaceFromToolContext,
   normalizeWorkspacePath,
   readPreviewAttachment,
@@ -25,8 +22,6 @@ export const readTool = createTool({
   inputSchema: z.object({
     sandboxId: z.string().min(1).optional(),
     filePath: z.string().min(1),
-    offset: z.coerce.number().optional(),
-    limit: z.coerce.number().optional(),
   }),
   outputSchema: HowOneResultSchema,
   execute: async (inputData, context) => {
@@ -73,44 +68,16 @@ export const readTool = createTool({
 
     const diskPath = resolveWorkspaceDiskPath(workspaceRoot, inputData.filePath);
     const raw = await fs.readFile(diskPath, 'utf8');
-
-    const offset = typeof inputData.offset === 'number' ? inputData.offset : 0;
-    const limit = typeof inputData.limit === 'number' ? inputData.limit : DEFAULT_READ_LIMIT;
-    const {
-      output,
-      preview,
-      totalLines,
-      startLine,
-      endLine,
-      requestedLimit,
-      effectiveLimit,
-      hasMore,
-      nextOffset,
-      cutByByteCap,
-      wasLimitClamped,
-    } = formatLineNumberedOutput(
-      raw,
-      offset,
-      limit,
-    );
+    const totalLines = raw === '' ? 0 : raw.split(/\r?\n/).length;
 
     return {
       title: relativePath,
-      output: output || '[file is empty]',
+      output: raw || '[file is empty]',
       metadata: {
-        preview: preview || '[file is empty]',
+        preview: raw || '[file is empty]',
         filePath: relativePath,
         relativePath,
         totalLines,
-        startLine,
-        endLine,
-        requestedLimit,
-        effectiveLimit,
-        hasMore,
-        nextOffset,
-        cutByByteCap,
-        wasLimitClamped,
-        minimumLimit: MIN_READ_LIMIT,
       },
     };
   },

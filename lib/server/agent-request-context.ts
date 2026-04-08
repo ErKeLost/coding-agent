@@ -27,6 +27,7 @@ import {
   renderWorkspaceInstructionFiles,
 } from "@/lib/server/instruction-files";
 import { resolveTurnModeState } from "@/lib/server/turn-mode";
+import { resolveExecutionPhaseState } from "@/lib/server/execution-phase";
 
 type AgentRequestPayload = {
   threadId?: string;
@@ -132,6 +133,7 @@ export async function buildAgentRequestContext(
 
     const currentInputText = extractCurrentInputText(normalizedMessages ?? payload.message);
     if (currentInputText) {
+      requestContext.set("currentInputText", currentInputText);
       const mentionedSkillMetadata = selectSkillsByMentionText(
         discovery.skills,
         currentInputText,
@@ -174,6 +176,17 @@ export async function buildAgentRequestContext(
   requestContext.set("turnAllowsExecution", turnModeState.allowsExecution ? "1" : "0");
   requestContext.set("turnAllowsMutation", turnModeState.allowsMutation ? "1" : "0");
   requestContext.set("turnModeReason", turnModeState.reason);
+  const executionPhaseState = resolveExecutionPhaseState({
+    requestContext,
+    turnModeState,
+  });
+  requestContext.set("executionPhase", executionPhaseState.phase);
+  requestContext.set("executionPhaseSource", executionPhaseState.source);
+  requestContext.set(
+    "executionPhasePriority",
+    String(executionPhaseState.priority),
+  );
+  requestContext.set("executionPhaseReason", executionPhaseState.reason);
 
   return {
     requestContext,
